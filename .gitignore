@@ -1,0 +1,42 @@
+# Local instructions and agent settings
+AGENTS.md
+AGENTS.override.md
+.agents/
+.codex/
+
+# Credentials and local environment settings
+.env
+.env.*
+!.env.example
+.aws/
+
+# Python environments, caches, and build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local documents, model weights, and generated run artifacts
+/data/raw/
+/data/processed/
+/models/
+/runs/
+/artifacts/
+/logs/
+/.local/
+/.cache/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo

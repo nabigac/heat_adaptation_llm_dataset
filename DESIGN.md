@@ -30,7 +30,7 @@ The comparison will use two configurations:
 - **Extractor (E):** An agent reads a plan, produces structured records with supporting passages, and flags issues.
 - **Extractor + verifier (E+V):** A second agent, using a different model, reviews the same extraction against the source. It checks flagged issues, examines all extracted records, and looks for omissions.
 
-Both configurations will start with the same saved extractor output. Models, prompts, tools, processing rules, and evaluation procedures will be fixed before the comparison.
+Both configurations will start with the same saved extractor output. Models, hosting arrangements, prompts, tools, processing rules, and evaluation procedures will be fixed before the comparison. Local and hosted execution will be explored during development; they are not additional experimental configurations.
 
 Experts will prepare the initial reference without seeing model outputs. The comparison will assess model outputs before expert correction. Findings will describe the tested workflow and model pairing; the study will not separately establish the effects of MCP or open-weight models relative to alternative technologies.
 
@@ -75,13 +75,13 @@ During expansion, experts will review referred issues and check an agreed sample
 
 ## 5. Proposed system
 
-A Python application is proposed to coordinate document processing, model calls, tools, saved outputs, and analysis.
+A Python application running on the development computer is proposed to coordinate document processing, model calls, tools, saved outputs, and analysis. Development will begin with local models served through Ollama, followed by exploration of Hugging Face hosted model APIs.
 
 | Component | Role |
 | --- | --- |
 | Document preparation | Produce readable text while retaining PDF page boundaries. |
 | Pipeline controller | Run stages in order, enforce limits, validate outputs, and save results and measurements. |
-| Model adapter | Translate requests and responses between the controller and the selected model runtime. |
+| Model adapter | Translate requests and responses between the controller and either the local Ollama API or a Hugging Face hosted API. |
 | MCP client and server | Connect the controller to document-reading and checking tools. |
 | Extractor and verifier | Use source text and tools to produce or check structured records. |
 | Expert assessment and analysis | Store expert judgments and calculate measures from saved outputs. |
@@ -92,13 +92,36 @@ MCP provides the interface to tools. The application remains responsible for mod
 
 A local MCP server connected through standard input/output, called **stdio**, is proposed for the first implementation. This allows the controller to start the server as a local process. See the [Python SDK transport documentation](https://py.sdk.modelcontextprotocol.io/client/transports/).
 
-### Models and source context
+### Local models first
 
-The extractor and verifier will be selected on the available hardware during development. Selection will consider memory requirements, document capacity, tool use, structured-output reliability, and runtime.
+The first development runs will use Ollama on an Apple M5 Pro MacBook with 64 GB of unified memory. The controller, MCP server, documents, and outputs will remain on the same computer. The application will call Ollama's local API.
 
-The model runtime is not yet selected. Ollama is a candidate with a documented [tool-calling interface](https://docs.ollama.com/capabilities/tool-calling); compatibility must be checked with the actual models.
+The initial candidates are:
 
-Record the model version, runtime version, generation settings, context limit, hardware, and weight precision. If quantization is used, record its format; quantization reduces the numerical precision of model weights to lower memory requirements.
+| Role | Model | Ollama tag | Reason for consideration |
+| --- | --- | --- | --- |
+| Extractor | Qwen3.5 27B | `qwen3.5:27b` | Instruction-following and tool-use capabilities relevant to reading plans and populating structured records. |
+| Verifier | Gemma 4 31B | `gemma4:31b` | Reasoning and function-calling capabilities from a different model family, relevant to checking records against source evidence. |
+
+These are provisional choices, not models validated for heat adaptation extraction or verification. Their documented capabilities motivate testing; using different families does not guarantee independent errors. See the [Qwen model card](https://huggingface.co/Qwen/Qwen3.5-27B) and [Gemma model overview](https://ai.google.dev/gemma/docs/core).
+
+Test memory use, document capacity, tool calling, structured JSON output, extraction quality, and runtime on the development plans. For the verifier, also check whether it detects omissions and corrects errors without introducing new ones. Either candidate or its role may change based on these results. Models can be loaded in sequence rather than held in memory together. Model weights and document context must fit alongside the operating system and other applications. Record the actual quantization and model digest used; a model tag alone does not identify a fixed version.
+
+Ollama supports [tool calling](https://docs.ollama.com/capabilities/tool-calling) and [schema-constrained structured output](https://docs.ollama.com/capabilities/structured-outputs) for local execution. Test both capabilities with the selected models and extraction schema. A correctly structured response still requires checks for source support and completeness. If quantization is used, record its format; quantization reduces the numerical precision of model weights to lower memory requirements.
+
+### Later exploration of hosted APIs
+
+After establishing the local workflow, explore models available through [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index). The controller and MCP tools will remain local; the model adapter will send requests to the hosted API. When the model requests a tool, the controller will execute it locally and return the result in the next API call. Plan text and tool results included in requests will therefore be sent to the provider.
+
+The hosted model pair may differ from the initial local candidates, depending on availability, capabilities, cost, and development results. Availability of model weights on Hugging Face does not establish availability through a hosted provider. Model and serving changes will be recorded before selecting the final comparison setup.
+
+Test the selected model/provider combination for document limits, tool calling, schema-constrained output, token reporting, and request failures. Select an explicit provider rather than relying on automatic routing. Hosted APIs do not require renting or managing a GPU server.
+
+Record the model identifier, provider, supported generation settings, context limit, and available deployment details. Exact weight revision, serving runtime, hardware, or quantization may not be exposed by a hosted provider; record these as unknown and state the resulting reproducibility limits.
+
+Choose the serving approach for each model before the ten-plan comparison and keep it fixed during those runs. The extraction structure, issue history, and evaluation rules will remain the same across adapters. If a later hosting change requires new comparison runs, preserve and identify the earlier runs separately.
+
+### Source context
 
 Plans will be supplied directly, without a separate document-collection search system. Each agent will receive instructions, the data specification, and page-marked plan text when it fits within the model's context capacity.
 
@@ -473,11 +496,29 @@ A run represents one extractor, verifier, or reprocessing stage. Its attempts an
 | `attempts` | List of attempt objects | All attempts, including failed ones. |
 | `error` | String or null | Final failure explanation. |
 
-The model object contains `name`, `revision`, `runtime`, `runtime_version`, `quantization` (string or null), `context_limit` (positive integer), `generation_settings` (object), `runtime_options` (object), and `hardware` (string). Name, revision, runtime, and runtime version are strings. Generation settings contain `temperature` (nonnegative number), `top_p` (number greater than 0 and at most 1), `seed` (integer or null), and `max_output_tokens` (positive integer); runtime-specific settings are recorded under `runtime_options`. The versions object contains `code_commit`, `code_dirty` (Boolean), `prompt_version`, `tools_version`, and `preparation_version`; unavailable non-applicable versions are null.
+The model object contains the following fields. Unknown or unavailable deployment details use null rather than inferred values.
+
+| Model field | Type | Description |
+| --- | --- | --- |
+| `name` | String | Exact model identifier requested. |
+| `revision` | String or null | Weight revision or digest, when available. |
+| `execution_mode` | Enum | `local` or `hosted_api`. |
+| `api_service` | String or null | API service, such as `hugging_face`; null for local Ollama. |
+| `provider` | String or null | Selected hosting backend; null for local execution. |
+| `endpoint` | String | API base URL, without credentials or secret query parameters. |
+| `runtime` | String or null | `ollama` locally; hosted serving runtime if disclosed. |
+| `runtime_version` | String or null | Serving software version, when available. |
+| `quantization` | String or null | Weight precision/quantization format, when available. |
+| `context_limit` | Positive integer or null | Configured or provider-documented context capacity. |
+| `generation_settings` | Object | Requested and supported generation settings. |
+| `runtime_options` | Object | Other recorded serving settings; empty if unavailable. |
+| `hardware` | String or null | Local chip and memory, or disclosed hosted hardware. |
+
+Generation settings contain `temperature` (nonnegative number or null), `top_p` (number greater than 0 and at most 1, or null), `seed` (integer or null), and `max_output_tokens` (positive integer). Use null for settings that are unsupported or cannot be controlled. Record only settings actually applied; do not assume a provider honored an unsupported parameter. The versions object contains `code_commit`, `code_dirty` (Boolean), `prompt_version`, `tools_version`, `preparation_version`, and `model_client_version` (the API client software/version). Unavailable non-applicable versions are null.
 
 Each attempt contains `attempt_id`, `started_at`, `ended_at`, `status` (`succeeded` or `failed`), `error` (string or null), `model_calls` (list), and `tool_trace_path` (string or null). Each model-call object contains `call_id`, `input_tokens`, `output_tokens`, and `response_path`. Token counts are nonnegative integers or null when unavailable; the response path is a string or null for a request that returned no response.
 
-Run duration includes model loading, model calls, tools, validation, automatic repairs, and retry waits within that stage. Source preparation and human review are excluded from extraction/verification runtime and recorded separately when performed. Token totals sum every model call in every attempt; if any required count is unavailable, the corresponding total is null rather than treating the missing count as zero.
+Run duration includes model loading initiated within the stage, model calls, tools, validation, automatic repairs, and retry waits. For hosted APIs, it also includes network and provider waiting time; it is elapsed workflow time, not GPU computation time. Record whether a local model was already loaded under `runtime_options`. Hosted startup or server-compute time that is not exposed remains unknown. Source preparation and human review are excluded from extraction/verification runtime and recorded separately when performed. Token totals sum every model call in every attempt; if any required count is unavailable, the corresponding total is null rather than treating the missing count as zero.
 
 ### 6.7 Configuration result
 
@@ -662,7 +703,7 @@ Retain initial and final expert references, all matching decisions, evidence for
 
 Development records will describe the problem encountered, change made, reason, observed result, and remaining questions. These records will support the study's account of useful tools, model limitations, and expert intervention.
 
-Before comparison, fix and version the schemas, prompts, models/settings, tools, document-processing strategy, retry limits, and evaluation rules. Later changes must identify affected runs and preserve earlier outputs.
+Before comparison, fix and version the schemas, prompts, models/settings, serving approach and provider, tools, document-processing strategy, retry limits, and evaluation rules. Later changes must identify affected runs and preserve earlier outputs.
 
 Checks will cover page numbering, required fields, IDs and links, issue transitions, preservation of earlier outputs, metric calculations, and failure handling. Factual accuracy and semantic evidence support will require expert assessment.
 
@@ -681,11 +722,12 @@ Source files, software/model versions, settings, and processing history will be 
 
 Code, configuration without secrets, and project documents will be tracked in Git. Local instructions, credentials, model weights, raw/prepared sources, and generated run artifacts are excluded. Research artifacts will require a backup plan and a defined release location.
 
-Implementation will proceed through document preparation, extraction, verification and issue history, expert assessment, and analysis. Development on two plans will establish the workflow before the ten-plan comparison. Expansion will follow analysis and selection of a configuration.
+Implementation will begin with document preparation and local Ollama extraction, followed by verification, issue history, expert assessment, and analysis. Hugging Face hosted API calls will be explored after the local workflow is established. Development on two plans will establish the models and serving approach before the ten-plan comparison. Expansion will follow analysis and selection of a configuration.
 
 ## 11. Open implementation decisions
 
-- Hardware, model pair, runtime, and software versions.
+- Final local model pair following tests of the provisional Qwen3.5 27B extractor and Gemma 4 31B verifier; quantization, context settings, and Ollama version.
+- Hugging Face model/provider options and the serving approach selected for comparison.
 - Whole-document or page-batched processing and record merging.
 - Review of the proposed JSON contract, issue grouping/type rules, and expert assessment format.
 - Retry limits, runtime-specific token reporting, and assessment procedures for incomplete outputs.

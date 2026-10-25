@@ -2,9 +2,11 @@
 
 **Study design and technical implementation — draft**
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 
-This document describes the study workflow, proposed system components, data records, and evaluation measures. The JSON records and metric calculations below define the proposed data contract. Models, software packages, and the remaining study procedures will be selected during development.
+This document describes the study workflow, system components, JSON records, and evaluation calculations. It is a design for implementation, not an implemented system. Model choices are provisional, and remaining decisions are listed in Section 11.
+
+Read Sections 1–4 for the study and processing workflow, Section 5 for the system, Section 6 for field definitions, Section 7 for issue-handling rules, and Section 8 for measures. Sections 9–11 cover reproducibility, file locations, and open decisions.
 
 ## 1. Purpose
 
@@ -30,7 +32,7 @@ The comparison will use two configurations:
 - **Extractor (E):** An agent reads a plan, produces structured records with supporting passages, and flags issues.
 - **Extractor + verifier (E+V):** A second agent, using a different model, reviews the same extraction against the source. It checks flagged issues, examines all extracted records, and looks for omissions.
 
-Both configurations will start with the same saved extractor output. Models, hosting arrangements, prompts, tools, processing rules, and evaluation procedures will be fixed before the comparison. Local and hosted execution will be explored during development; they are not additional experimental configurations.
+Both configurations will start with the same saved extractor output. Local and hosted execution will be explored during development; they are not additional experimental configurations. Section 9 sets out what must be fixed before comparison.
 
 Experts will prepare the initial reference without seeing model outputs. The comparison will assess model outputs before expert correction. Findings will describe the tested workflow and model pairing; the study will not separately establish the effects of MCP or open-weight models relative to alternative technologies.
 
@@ -42,7 +44,7 @@ Eligible documents are final government or public-agency plans that:
 - Focus on heat adaptation or contain a dedicated heat section with at least one heat-specific action.
 - Have a readable full document and stable PDF page numbers.
 
-Each document version will have a unique plan ID. The extraction will contain plan metadata and five lists:
+Each registered plan will have document metadata, such as its title and jurisdiction, and five content lists:
 
 | List | Content |
 | --- | --- |
@@ -52,9 +54,7 @@ Each document version will have a unique plan ID. The extraction will contain pl
 | Benefits and impacts | Expected or reported outcomes, including adverse impacts. |
 | Costs and resources | Financial costs and other resource requirements. |
 
-Section 6 defines the extraction fields and coding rules, based on the project proposal. Each record will include exact supporting passages and PDF page numbers. The first PDF page is page 1, regardless of printed labels. Links between records require source support.
-
-Unavailable details will use `null`, empty lists, or the specified missing-information category. Routine missing details will not automatically create issues. An empty answer category will be flagged for checking before absence is confirmed.
+Section 6 defines the fields, missing-value rules, and source evidence required for these lists. Section 7 defines when information requires review.
 
 ## 4. Processing workflow
 
@@ -67,30 +67,76 @@ Unavailable details will use `null`, empty lists, or the specified missing-infor
 | Assess with experts | Match records to the reference, check correctness and evidence, and assess additional records and issue handling. | Expert assessments, reference revisions, and post-review measures. |
 | Curate and expand | Correct supported errors, exclude unresolved material, and apply the selected workflow to additional plans. | Curated dataset, review coverage, and processing history. |
 
-The extractor output will be saved once and reused for both configurations. Later corrections will create new versions rather than overwrite the outputs being evaluated. Record IDs will remain stable through correction; added records will receive new IDs. Removed or merged records will remain traceable.
-
-If text preparation fails, the source will be reprocessed where possible. A reading failure must not be recorded as evidence that information is absent. Changes to prepared text must be versioned and applied consistently to both configurations.
+Source preparation must be checked before extraction. A reading failure must not be treated as evidence that information is absent. Both comparison branches must use the same prepared source. Section 6.1 defines how saved versions and IDs are preserved.
 
 During expansion, experts will review referred issues and check an agreed sample of unflagged outputs. The dataset will retain which records were reviewed and how.
 
+### 4.1 Register documents
+
+Store original PDFs under `data/raw/` and register each document version in `data/registry/plans.json`. The registry is the list of known plans, not a record of completed processing. Its fields are defined in Section 6.10.
+
+Registration consists of:
+
+1. Assign a plan ID and record the title, official source URL, access date, PDF path, and study set.
+2. Calculate the PDF checksum, a fingerprint of its contents. Check for an existing entry with the same checksum before adding a duplicate.
+3. Record whether the document meets the inclusion criteria and whether it is enabled for processing.
+4. Prepare its page text and save a source record. Add that record's path to the registry entry.
+
+A revised published document receives a new plan ID linked to its predecessor. Reprocessing the same PDF creates a new source ID under the existing plan ID. Copying or renaming a PDF does not create a new document version. A changed checksum must be investigated before processing; it must not silently replace a registered source.
+
+### 4.2 Select, skip, and rerun work
+
+A batch request selects a study set or explicit plan IDs, the required configuration, and an execution profile. An execution profile is a saved set of model, prompt, tool, software, and processing settings. Section 6.11 defines profiles and the record of each batch request.
+
+Before starting a batch, the controller will:
+
+1. Select registered, eligible, enabled plans. Merely adding a PDF to a folder does not schedule it.
+2. Verify that the PDF and prepared text match their saved checksums. Prepare missing sources; block changed, missing, or failed sources until addressed.
+3. Find an extraction matching the requested source and extractor profile. Reuse a successful run if its saved output and review are present and valid; otherwise apply the scheduling rules below.
+4. For E+V, use that same extraction as input to the selected verifier profile. Reuse a matching completed verifier run or schedule verification.
+5. Report the plans to run, reuse, skip, or check before execution.
+
+Successful processing means the stage finished and its output passed structural validation. It does not mean an expert has confirmed accuracy or that all issues were resolved.
+
+| Situation | Controller action |
+| --- | --- |
+| Matching successful run with valid outputs | Reuse its IDs and saved measurements; do not call the model again. |
+| Completed run with missing or invalid saved outputs | Block reuse and report the problem; retain the earlier run if a replacement is requested. |
+| No matching run | Schedule the required stage. |
+| Changed source, profile, or verifier input | Create a new run; retain the previous one. |
+| Failed run | Show the failure. Retry only when the batch explicitly requests failed work. |
+| Matching run still active | Do not start a duplicate. |
+| Interrupted or uncertain run state | Confirm that the process has stopped before recording failure and scheduling a new run. Partial output is not a completed result. |
+| Explicit request for a repeat run | Create a new run even if a matching success exists. |
+
+Each new stage execution has a new run ID. Attempts within a run follow its retry limits. A later batch retry creates a new run and links the earlier failed run as its retry predecessor. The verifier's parent remains its input extractor run, so retry and input relationships must use separate fields.
+
+If several successful repeat runs match, select the intended run ID explicitly rather than choosing the latest file. A repeat is a new observation; reusing an output is not. Comparison batches must record which extractor run supplies both E and E+V. When repeating both configurations, extract once and share that new output between them.
+
+### 4.3 Processing summary
+
+Derive a status table from the registry, source records, and run results for the requested profiles. Show plan ID, title, study set, preparation state, extraction state, verification state, and next action. Label work as not run, running, failed, complete, or blocked as appropriate.
+
+This table is a view of the records, not a second source of truth. A plan may be complete for one profile and not run for another. The first implementation will use JSON files and one batch runner; a database or distributed job queue is not required.
+
 ## 5. Proposed system
 
-A Python application running on the development computer is proposed to coordinate document processing, model calls, tools, saved outputs, and analysis. Development will begin with local models served through Ollama, followed by exploration of Hugging Face hosted model APIs.
+A Python application will coordinate document preparation, model requests, tools, output storage, and analysis on the development computer. The application will first use Ollama locally, then explore Hugging Face hosted APIs.
 
 | Component | Role |
 | --- | --- |
 | Document preparation | Produce readable text while retaining PDF page boundaries. |
-| Pipeline controller | Run stages in order, enforce limits, validate outputs, and save results and measurements. |
-| Model adapter | Translate requests and responses between the controller and either the local Ollama API or a Hugging Face hosted API. |
+| Pipeline controller | Select work from the registry, run stages in order, enforce limits, check output structure, and save results and measurements. |
+| Model adapter | Convert the controller's requests into the format expected by Ollama or the hosted API, and return responses in a common format. |
 | MCP client and server | Connect the controller to document-reading and checking tools. |
 | Extractor and verifier | Use source text and tools to produce or check structured records. |
 | Expert assessment and analysis | Store expert judgments and calculate measures from saved outputs. |
 
-An agent will operate in a bounded loop: receive instructions and source text, request tools, inspect their results, and submit a structured answer. The controller will execute permitted tool requests and return results to the model.
+An agent is a model working through a limited sequence of requests: read instructions and source text, request tools, inspect results, and submit an answer. The controller executes tool requests and returns the results; the model does not run the tools directly.
 
 MCP provides the interface to tools. The application remains responsible for model calls, document context, stage order, and output storage. See the [MCP architecture documentation](https://modelcontextprotocol.io/docs/2026-07-28/learn/architecture).
 
-A local MCP server connected through standard input/output, called **stdio**, is proposed for the first implementation. This allows the controller to start the server as a local process. See the [Python SDK transport documentation](https://py.sdk.modelcontextprotocol.io/client/transports/).
+The controller will start the MCP server as a local process and exchange messages through standard input/output, called **stdio**. See the [Python SDK transport documentation](https://py.sdk.modelcontextprotocol.io/client/transports/).
 
 ### Local models first
 
@@ -105,27 +151,25 @@ The initial candidates are:
 
 These are provisional choices, not models validated for heat adaptation extraction or verification. Their documented capabilities motivate testing; using different families does not guarantee independent errors. See the [Qwen model card](https://huggingface.co/Qwen/Qwen3.5-27B) and [Gemma model overview](https://ai.google.dev/gemma/docs/core).
 
-Test memory use, document capacity, tool calling, structured JSON output, extraction quality, and runtime on the development plans. For the verifier, also check whether it detects omissions and corrects errors without introducing new ones. Either candidate or its role may change based on these results. Models can be loaded in sequence rather than held in memory together. Model weights and document context must fit alongside the operating system and other applications. Record the actual quantization and model digest used; a model tag alone does not identify a fixed version.
+On the development plans, test memory use, document capacity, tool calls, JSON structure, extraction quality, and runtime. Check whether the verifier detects omissions and corrects errors without adding new ones. Either model or its role may change. Load models in sequence to leave memory for document context, the operating system, and other applications.
 
-Ollama supports [tool calling](https://docs.ollama.com/capabilities/tool-calling) and [schema-constrained structured output](https://docs.ollama.com/capabilities/structured-outputs) for local execution. Test both capabilities with the selected models and extraction schema. A correctly structured response still requires checks for source support and completeness. If quantization is used, record its format; quantization reduces the numerical precision of model weights to lower memory requirements.
+Ollama supports [tool calling](https://docs.ollama.com/capabilities/tool-calling) and [schema-constrained output](https://docs.ollama.com/capabilities/structured-outputs), which restricts responses to a specified JSON structure. Test both with the selected models. Quantization reduces the numerical precision of model weights to lower memory use; its format is recorded in the run settings.
 
 ### Later exploration of hosted APIs
 
-After establishing the local workflow, explore models available through [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index). The controller and MCP tools will remain local; the model adapter will send requests to the hosted API. When the model requests a tool, the controller will execute it locally and return the result in the next API call. Plan text and tool results included in requests will therefore be sent to the provider.
+After establishing the local workflow, explore [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index). The controller and MCP tools stay local while the model adapter sends requests to the provider. These requests include the plan text and tool results needed by the hosted model.
 
-The hosted model pair may differ from the initial local candidates, depending on availability, capabilities, cost, and development results. Availability of model weights on Hugging Face does not establish availability through a hosted provider. Model and serving changes will be recorded before selecting the final comparison setup.
+The hosted pair may differ from the local candidates because of availability, capabilities, cost, or development results. Model weights on Hugging Face are not necessarily available through a hosted provider.
 
 Test the selected model/provider combination for document limits, tool calling, schema-constrained output, token reporting, and request failures. Select an explicit provider rather than relying on automatic routing. Hosted APIs do not require renting or managing a GPU server.
 
-Record the model identifier, provider, supported generation settings, context limit, and available deployment details. Exact weight revision, serving runtime, hardware, or quantization may not be exposed by a hosted provider; record these as unknown and state the resulting reproducibility limits.
-
-Choose the serving approach for each model before the ten-plan comparison and keep it fixed during those runs. The extraction structure, issue history, and evaluation rules will remain the same across adapters. If a later hosting change requires new comparison runs, preserve and identify the earlier runs separately.
+Both adapters will use the same extraction, review, and assessment formats. Section 6.6 specifies deployment information to record; unavailable hosted details remain unknown. Serving choices and later changes follow the comparison rules in Section 9.
 
 ### Source context
 
 Plans will be supplied directly, without a separate document-collection search system. Each agent will receive instructions, the data specification, and page-marked plan text when it fits within the model's context capacity.
 
-Longer plans will require a documented page-batching procedure: processing groups of pages, tracking coverage, and combining repeated records. The procedure must retain information across page boundaries and must not silently truncate the document. The approach will be selected before the comparison.
+For longer plans, define page batching: process groups of pages, track which pages were covered, and combine repeated records. Preserve information across page boundaries and do not silently truncate a plan. Store these rules in the versioned context strategy.
 
 ### Initial MCP tools
 
@@ -142,7 +186,7 @@ Tools will access the registered source and candidate records, not expert refere
 
 ## 6. JSON specification
 
-The proposed implementation will use separate JSON files for source information, extracted content, review history, execution, and expert assessment. The examples below are documentation, not implemented schemas.
+Use separate JSON files for collection, sources, extracted content, review history, execution, and expert assessment. A **schema** defines the required fields, types, and allowed values. In the tables below, an **enum** means a fixed list of allowed values, and **null** means no value is available. A **snapshot** is a saved version of an extraction or review. The examples describe the proposed format; no data files or validation schemas have been implemented.
 
 ### 6.1 Common rules and file links
 
@@ -150,15 +194,15 @@ The proposed implementation will use separate JSON files for source information,
 - Lists use `[]` when empty. Enumerated missing-information values take precedence over `null`.
 - Content records describe distinct items; do not create empty placeholder records to populate a category.
 - IDs, versions, dates supplied by collection, and workflow fields must have valid values.
-- Dates use `YYYY-MM-DD`; timestamps use UTC in `YYYY-MM-DDTHH:MM:SSZ` form. Durations use seconds.
+- Dates use `YYYY-MM-DD`; timestamps use UTC in `YYYY-MM-DDTHH:MM:SSZ` form. Durations use seconds. File paths are relative to the project root.
 - `schema_version` is initially `1` for the proposed implementation. Change it when the field structure or coding rules change.
 - A document version has one `plan_id`. A saved extraction version has one `snapshot_id`; a stage execution has one `run_id`.
-- Goal, action, and other content IDs are unique within a snapshot and remain stable through corrections to that extraction. Independent expert and model extractions may reuse local IDs; correspondence must be established by expert matching, not ID equality.
+- Goal, action, and other content IDs are unique within a snapshot and remain stable through corrections. Added records receive new IDs; removed or merged records remain traceable in earlier snapshots. Independent expert and model extractions may reuse local IDs; expert matching establishes correspondence, not ID equality.
 - Record references outside an extraction include its `snapshot_id`. Links within an extraction refer to IDs in that same snapshot. Page lists contain unique page numbers within source bounds.
 - The controller supplies file links and execution identifiers. Agents populate content and propose issues; they do not set their own runtime measurements or expert judgments.
 - Reject unexpected fields and invalid enum values. Invalid output enters the recorded repair/failure procedure.
 
-Proposed files for each plan are a source record, immutable extraction snapshots, review snapshots, stage-run files, configuration-result files, references, and assessments. Each review snapshot describes exactly one extraction snapshot. New stages create new files.
+Each review snapshot describes one extraction snapshot. Save later extractions, reviews, and expert corrections as new versions; do not overwrite outputs being evaluated. Run and batch records may be updated while active, then retained when finished. Section 10 gives the file layout.
 
 ### 6.2 Source record
 
@@ -171,14 +215,15 @@ Proposed files for each plan are a source record, immutable extraction snapshots
 | `source_url` | String | Official document or download-page URL. |
 | `date_accessed` | Date | Date supplied by collection. |
 | `pdf_path` | String | Project-relative path to the original PDF. |
-| `document_sha256` | String | The document's 64-character hexadecimal checksum. |
+| `document_sha256` | String | The PDF's 64-character hexadecimal SHA-256 checksum, copied from registration. |
+| `prepared_text_sha256` | String or null | Fingerprint of page numbers and prepared text in PDF order; null if no complete text was produced. |
 | `preparation_version` | String | Version of the text preparation procedure. |
 | `page_count` | Positive integer | Number of PDF pages. |
 | `preparation_status` | Enum | `ready` or `failed`. Only ready sources enter extraction. |
 | `pages` | List of page objects | One item per PDF page. |
 | `problem` | String or null | Preparation problem, if any. |
 
-Each page object contains `page_number` (positive integer), `text_path` (string or null), `readable` (Boolean), and `problem` (string or null). The page list must cover pages 1 through `page_count` exactly once. Prepared text retains page boundaries and substantive wording.
+Each page object contains `page_number` (positive integer), `text_path` (string or null), `readable` (Boolean), and `problem` (string or null). Cover pages 1 through `page_count` exactly once. Calculate the prepared-text checksum from the ordered page numbers and text, using the serialization rule in Section 6.11. Preserve original page text and document any normalization used for matching quotations.
 
 ### 6.3 Extraction snapshot
 
@@ -227,9 +272,9 @@ Every content record has an `evidence` list. Each evidence object contains:
 | Field | Type | Description |
 | --- | --- | --- |
 | `quote` | String | An exact, continuous source passage. |
-| `page_numbers` | Nonempty list of positive integers | PDF pages containing that passage. |
+| `page_numbers` | Nonempty list of positive integers | PDF pages containing that passage. Count the first PDF page as 1, regardless of printed labels. |
 
-Separate passages have separate objects. A continuous passage crossing a page boundary may list several pages. Quotes preserve substantive wording, numbers, units, and qualifications. A record with no usable evidence is flagged for checking and cannot enter the accepted dataset without support.
+Use separate objects for separate passages. A continuous passage may cross pages. Preserve substantive wording, numbers, units, and qualifications. Record links require source support. Flag records without usable evidence; they cannot enter the accepted dataset without support.
 
 **Goal records: `plan_goals`**
 
@@ -407,7 +452,7 @@ A concern contains `concern_id` (stable string), `field` (field path relative to
 
 An event contains `event_id`, `occurred_at`, `actor`, `run_id`, `from_status`, `to_status`, `change_type`, `note`, and `evidence`. IDs and notes are strings; `run_id` is null for manual expert actions; `from_status` is null on creation. Actors are `extractor`, `verifier`, `pipeline`, or `expert`. Status values follow the issue enum. Change types are `created`, `routed`, `corrected`, `confirmed_absent`, `reprocessed`, or `reopened`. Evidence uses the quotation-page structure and may be empty for routing events.
 
-**Draft grouping rules:** one issue per existing record; one per empty category; one per source problem. A suspected omitted item receives a provisional target key, retained if a new record is added. Distinct omitted items receive distinct keys. The draft assigns one primary issue category so type percentages do not overlap. These extensions to the agreed record-level rule require review before comparison.
+Section 7 defines grouping, routing, and resolution rules. The fields here retain each concern and status change so those rules can be applied without losing history.
 
 Issue categories retain the proposal's values:
 
@@ -473,7 +518,7 @@ This review example corresponds to the fictional action above. Its two concerns 
 }
 ```
 
-The extraction's `review_id` points to its initial review; a configuration result identifies the final pre-expert review used for that branch. Both reviews must name the same extraction snapshot. The common extractor snapshot is the comparison baseline. Its issues enter `pending_verification` for E+V; E receives a separate review snapshot routing content issues to `pending_expert_review`. The extracted content is identical. Retryable source/process issues enter `pending_reprocessing` in either branch. A partial correction keeps the issue open. `resolved` requires all concerns addressed or source-supported confirmation that no correction is needed. Verification never changes expert-review coverage.
+The extraction's `review_id` identifies its initial review. The configuration result identifies the final pre-expert review for that branch, which may be a later review of the same extraction. Both review records must point to that extraction snapshot.
 
 ### 6.6 Stage-run record
 
@@ -483,8 +528,12 @@ A run represents one extractor, verifier, or reprocessing stage. Its attempts an
 | --- | --- | --- |
 | `schema_version` | Integer | Format version. |
 | `run_id`, `plan_id`, `source_id` | Strings | Execution and source identifiers. |
+| `batch_id` | String | Batch that first scheduled this run. Reuse does not change it. |
+| `profile_id`, `profile_sha256` | Strings | Execution profile and its settings fingerprint. |
+| `run_key` | String | Fingerprint used to find equivalent completed work; defined in Section 6.11. |
+| `retry_of_run_id` | String or null | Earlier failed run retried by a new execution; null otherwise. |
 | `stage` | Enum | `extractor`, `verifier`, or `reprocessing`. |
-| `parent_run_id` | String or null | Extractor run for a verifier; retried stage for reprocessing. |
+| `parent_run_id` | String or null | Input extractor run for a verifier, or the stage requiring reprocessing. Separate from retry history. |
 | `input_snapshot_id` | String or null | Input extraction; null for the first extraction. |
 | `output_snapshot_id` | String or null | Output extraction; null if none was produced. |
 | `status` | Enum | `running`, `succeeded`, or `failed`. |
@@ -496,12 +545,12 @@ A run represents one extractor, verifier, or reprocessing stage. Its attempts an
 | `attempts` | List of attempt objects | All attempts, including failed ones. |
 | `error` | String or null | Final failure explanation. |
 
-The model object contains the following fields. Unknown or unavailable deployment details use null rather than inferred values.
+The model object contains the following fields. Use null for deployment details that are not known.
 
 | Model field | Type | Description |
 | --- | --- | --- |
 | `name` | String | Exact model identifier requested. |
-| `revision` | String or null | Weight revision or digest, when available. |
+| `revision` | String or null | Exact weight revision or digest (model-file fingerprint). Required for local reuse; null if a hosted provider does not disclose it. |
 | `execution_mode` | Enum | `local` or `hosted_api`. |
 | `api_service` | String or null | API service, such as `hugging_face`; null for local Ollama. |
 | `provider` | String or null | Selected hosting backend; null for local execution. |
@@ -514,11 +563,15 @@ The model object contains the following fields. Unknown or unavailable deploymen
 | `runtime_options` | Object | Other recorded serving settings; empty if unavailable. |
 | `hardware` | String or null | Local chip and memory, or disclosed hosted hardware. |
 
-Generation settings contain `temperature` (nonnegative number or null), `top_p` (number greater than 0 and at most 1, or null), `seed` (integer or null), and `max_output_tokens` (positive integer). Use null for settings that are unsupported or cannot be controlled. Record only settings actually applied; do not assume a provider honored an unsupported parameter. The versions object contains `code_commit`, `code_dirty` (Boolean), `prompt_version`, `tools_version`, `preparation_version`, and `model_client_version` (the API client software/version). Unavailable non-applicable versions are null.
+Generation settings are `temperature` (nonnegative number or null), `top_p` (number greater than 0 and at most 1, or null), `seed` (integer or null), and `max_output_tokens` (positive integer). Temperature and top-p control sampling; a seed initializes random sampling where supported. Use null for settings that cannot be controlled. Do not assume a provider applied an unsupported parameter.
 
-Each attempt contains `attempt_id`, `started_at`, `ended_at`, `status` (`succeeded` or `failed`), `error` (string or null), `model_calls` (list), and `tool_trace_path` (string or null). Each model-call object contains `call_id`, `input_tokens`, `output_tokens`, and `response_path`. Token counts are nonnegative integers or null when unavailable; the response path is a string or null for a request that returned no response.
+The versions object contains `code_commit` (Git commit identifier), `code_dirty` (Boolean indicating uncommitted changes), `prompt_version`, `tools_version`, `preparation_version`, and `model_client_version` (API client software/version). Non-applicable values are null.
 
-Run duration includes model loading initiated within the stage, model calls, tools, validation, automatic repairs, and retry waits. For hosted APIs, it also includes network and provider waiting time; it is elapsed workflow time, not GPU computation time. Record whether a local model was already loaded under `runtime_options`. Hosted startup or server-compute time that is not exposed remains unknown. Source preparation and human review are excluded from extraction/verification runtime and recorded separately when performed. Token totals sum every model call in every attempt; if any required count is unavailable, the corresponding total is null rather than treating the missing count as zero.
+Each attempt contains `attempt_id`, `started_at`, `ended_at`, `status` (`succeeded` or `failed`), `error` (string or null), `model_calls` (list), and `tool_trace_path` (string or null). The tool trace records requested tools, arguments, returned results, and errors. Each model call contains `call_id`, `input_tokens`, `output_tokens`, and `response_path`. Token counts are nonnegative integers or null if unavailable; the response path is null if no response was returned.
+
+Run duration includes model loading initiated within the stage, model calls, tools, validation, repairs, and retry waits. Hosted calls also include network and provider waiting time: this is elapsed workflow time, not GPU computation time. Record `model_loaded_at_start` (Boolean or null) under the run's `runtime_options`. Undisclosed hosted startup/compute time remains unknown. Exclude source preparation and human review from these stage totals.
+
+Token totals include every call in every attempt. If a required token count or stage duration is unavailable, its total is null rather than treating the missing value as zero. Interrupted runs retain available traces and usage; do not infer actual processing time from the time of later recovery.
 
 ### 6.7 Configuration result
 
@@ -528,6 +581,7 @@ This record links the shared extractor run to E or E+V. It prevents extraction c
 | --- | --- | --- |
 | `schema_version` | Integer | Format version. |
 | `result_id`, `plan_id`, `source_id` | Strings | Result and source identifiers. |
+| `batch_id` | String | Batch that first created this result. Later batches may reference it without changing it. |
 | `configuration` | Enum | `extractor_only` or `extractor_verifier`. |
 | `extractor_run_id` | String | The same extractor run in both configurations. |
 | `verifier_run_id` | String or null | Verifier run for E+V; null for E. |
@@ -536,13 +590,13 @@ This record links the shared extractor run to E or E+V. It prevents extraction c
 | `status` | Enum | `running`, `succeeded`, or `failed`. |
 | `error` | String or null | Configuration failure explanation. |
 
-Runtime and tokens use the distinct linked stage-run IDs. Work performed within a stage's attempts is not also charged as a separate stage. Shared source preparation is outside these configuration totals. E+V fails if its required verifier stage fails; it must not silently fall back to E and be reported as verified.
+Use distinct linked run IDs for totals: E includes extraction and separately linked processing; E+V includes that same extraction plus verification and separately linked processing. Do not count work inside attempts again as separate runs. Source preparation is excluded. E+V fails if verification fails; a successful E result remains available but is not a verified result.
 
 ### 6.8 Expert reference and assessment
 
 The expert reference uses the same extraction-content structure, with `extraction_method: expert` and `run_id: null`. A reference-set record contains `reference_set_id`, `plan_id`, `initial_snapshot_id`, `final_snapshot_id` (string or null until adjudication is complete), `expert_ids` (list of strings), and `revisions` (list of objects with `record_ids`, `reason`, and `evidence`). It also has `schema_version`.
 
-The initial reference is saved before experts see model outputs. A shared final reference incorporates supported additions and corrections found during assessment. Both configurations use the same final reference.
+Save the initial reference before experts see model outputs. Experts first match each output to this reference to identify additions. Confirm supported additions and other corrections, save a shared final reference, and score both configurations against it. Additional-record measures continue to use the initial reference.
 
 | Assessment field | Type | Description |
 | --- | --- | --- |
@@ -581,7 +635,7 @@ Quotation support is assessed for all substantive claim fields assigned to that 
 
 A genuine issue identifies at least one real error, uncertainty, source problem, or processing problem requiring attention. Expert-discovered concerns not described by any pre-review flag are grouped once per affected target under `unflagged_problems`. A record may have a valid flagged concern and a different missed concern, contributing once to each measure.
 
-Only complete assessments enter final quality calculations. An `undetermined` additional record or pending quotation/issue judgment must be resolved or reported as unassessed, not assigned zero. A rate with required judgments still pending is null; any assessed subtotal is labeled with its coverage rather than presented as the complete rate. There must be one final-reference score for every reference record and one check for every supplied quotation and page reference. Failed runs without an output remain in operational results; quality is reported as not assessed, with the number of assessed and failed plans stated.
+Complete assessment requires one score per final-reference record and checks for every supplied quotation, page reference, and issue. Resolve pending judgments or report them as unassessed. Rates with required judgments pending are null; label any partial subtotal with its review coverage. Never assign pending judgments zero. Failed runs without output remain in operational results, with quality not assessed and the numbers of assessed and failed plans reported.
 
 ### 6.9 Calculated metric record
 
@@ -609,35 +663,126 @@ Analysis writes one object per metric and grouping. These are derived outputs, n
 
 For percentages, `value = numerator / denominator × 100`. A mean across plans uses the sum of valid per-plan percentages as numerator and the number of those plans as denominator; it does not multiply by 100 again. Retain the per-plan records supplying that mean. A failed run produces a complete failure-count observation, but unavailable quality measures have incomplete status rather than being silently scored zero.
 
+### 6.10 Document registry
+
+`data/registry/plans.json` contains `schema_version` (integer) and `plans` (list of entries). Every entry contains the fields below.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `plan_id` | String | Unique document-version ID. |
+| `plan_title` | String | Title recorded during collection. |
+| `study_set` | Enum | `development`, `comparison`, or `expansion`. |
+| `pdf_path` | String | Project-relative original PDF path. |
+| `document_sha256` | String | PDF checksum recorded at registration. |
+| `source_url` | String | Official source URL. |
+| `date_accessed` | Date | Collection date. |
+| `eligibility` | Enum | `pending`, `eligible`, or `excluded`. |
+| `eligibility_note` | String or null | Reason for exclusion or an unresolved eligibility question. |
+| `enabled` | Boolean | Whether the plan may be selected for a batch. Eligibility must also be `eligible`. |
+| `supersedes_plan_id` | String or null | Previous published version, if applicable. |
+| `source_record_paths` | List of strings | Paths to saved preparation records, including failed and earlier versions. |
+
+The registry can be updated as collection and preparation proceed. Source and run records preserve the metadata used at execution time; registry edits do not rewrite them. Changes to study-set assignments must be recorded, and development plans cannot later enter the comparison set.
+
+The following fictional entry illustrates registration. The checksum is a placeholder; real registration computes it from the PDF. The referenced files have not been created.
+
+```json
+{
+  "schema_version": 1,
+  "plans": [{
+    "plan_id": "plan_0001",
+    "plan_title": "Example City Heat Action Plan",
+    "study_set": "development",
+    "pdf_path": "data/raw/plan_0001.pdf",
+    "document_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "source_url": "https://example.org/heat-plan.pdf",
+    "date_accessed": "2026-10-25",
+    "eligibility": "eligible",
+    "eligibility_note": null,
+    "enabled": true,
+    "supersedes_plan_id": null,
+    "source_record_paths": ["data/processed/plan_0001/source_0001.json"]
+  }]
+}
+```
+
+There is no `processed` Boolean in the registry. Completion depends on the requested source, settings, and stage, as described in Section 4.2.
+
+### 6.11 Execution profiles and batch records
+
+Store profiles under `configs/execution/`. A profile describes a single stage. Changing its settings creates a new version rather than altering a profile already used in a run.
+
+| Profile field | Type | Description |
+| --- | --- | --- |
+| `schema_version` | Integer | Profile format version. |
+| `profile_id` | String | Human-readable versioned identifier. |
+| `stage` | Enum | `extractor`, `verifier`, or `reprocessing`. |
+| `extraction_schema_version` | Integer | Extraction format and coding-rule version. |
+| `preparation_version` | String | Required source-preparation procedure. |
+| `context_strategy_version` | String | Whole-document or page-batching rules, including merging. |
+| `prompt_sha256` | String | Fingerprint of the complete prompt/template files. |
+| `tools_sha256` | String | Fingerprint of tool definitions and implementation. |
+| `code_sha256` | String | Fingerprint of the processing code, including uncommitted changes if used. |
+| `model` | Object or null | Resolved model settings from Section 6.6; null for model-free reprocessing. |
+| `software_versions` | Object | Names and versions of the runtime, client, and relevant processing libraries. |
+| `execution_policy` | Object | Retry and tool-call limits from Section 6.6. |
+| `timing_policy_version` | String | Rules for loading models and measuring stages. |
+| `profile_sha256` | String | Fingerprint of all other profile fields. |
+
+Calculate fingerprints with SHA-256, using sorted JSON object keys and consistent UTF-8 serialization for structured inputs. Profiles contain no credentials. Resolve local model tags to their actual digest before calculating the profile fingerprint. Per-run observations, such as whether the model happened to be loaded already, belong in the run record rather than the profile.
+
+A stage's `run_key` is the fingerprint of its stage, plan ID, source ID, prepared-text checksum, profile fingerprint, and input snapshot ID. The input snapshot is null for initial extraction. Verifier keys therefore change whenever their exact extractor input changes. A matching key identifies reusable work; run IDs still distinguish deliberate repeats.
+
+Reuse only results whose referenced files exist and pass validation, whose source checksums match, and whose recorded profile matches the request. A matching key does not prove an undisclosed hosted deployment is unchanged. When its revision cannot be identified, reuse hosted results only within the same declared comparison batch; start a new batch/profile for a new assessment period.
+
+Store each batch under `runs/batches/<batch_id>.json`.
+
+| Batch field | Type | Description |
+| --- | --- | --- |
+| `schema_version` | Integer | Batch format version. |
+| `batch_id` | String | Unique batch identifier. |
+| `created_at` | Timestamp | Time the request was recorded. |
+| `study_set` | Enum or null | Requested study set; null for an explicit selection across sets during development. Formal comparison batches use `comparison`. |
+| `requested_plan_ids` | List of strings | Fixed list resolved from the request, rather than a changing folder scan. |
+| `configurations` | Nonempty list | `extractor_only`, `extractor_verifier`, or both. |
+| `extractor_profile_id` | String | Selected extractor profile. |
+| `verifier_profile_id` | String or null | Required when E+V is requested. |
+| `retry_failed`, `force_rerun` | Booleans | Explicit requests to retry failures or repeat successful work. |
+| `entries` | List | Decisions and result links for each requested plan/configuration. |
+
+Each entry contains `plan_id`, `configuration`, `source_id` (string or null), `decision` (`run`, `reuse`, `skip`, or `blocked`), `reason` (string or null), and `result_id` (string or null until a result is linked). IDs and configuration values use the definitions above. Entries do not duplicate run statuses; the processing summary reads the linked source and result records.
+
+The initial batch file records selection decisions before model calls. Link result IDs as work is scheduled and retain that file afterward. Reused results keep their original measurements and are not presented as newly measured runtime. Each result must identify one fixed source and the selected stage runs.
+
 ## 7. Issue handling
 
 ### Unit and history
 
-Multiple problems within one extracted record will count as one issue. For example, an action with an incorrect status and deadline has one issue describing both problems. Further concerns about that record will be added to the same issue.
+Count one issue per affected extraction record, even if it has several problems. An action with a wrong status and deadline has one issue containing two concerns. Add further concerns about that record to the same issue.
 
-Each issue will identify:
+The draft extends grouping as follows: one issue per empty category and one per source problem. A suspected omitted item receives a provisional target key that stays unchanged if a record is added. Distinct omitted items have distinct keys. These extensions require review before comparison.
 
-- Its stable ID and affected record, plan, or answer category.
-- The problem type and affected fields.
-- The stage at which it was first detected.
-- Its status and changes in status.
-- The actor responsible for each change and the supporting explanation.
-
-Partial fixes will be recorded while the issue remains open. A closed issue may be reopened, with its earlier resolution retained. Section 6.5 proposes grouping rules for source problems, empty categories, and omitted records.
+A partial correction leaves the issue open. Reopen a closed issue if a new concern is identified, retaining its earlier resolution. Section 6.5 defines the fields and ordered history events that preserve this information.
 
 ### Categories and status
 
-The proposal's issue categories will be retained initially: no records found, unclear meaning, conflicting evidence, source issue, and extraction-process issue. A bundled issue may concern several problem types. The draft uses one primary type per issue for non-overlapping type percentages, while preserving every concern.
+Use one primary issue category for non-overlapping type percentages while retaining every concern. Category definitions and allowed status values are in Section 6.5.
 
-Statuses will distinguish pending verification, pending reprocessing, pending expert review, and resolved. Resolutions will identify whether they came from the verifier, pipeline, or expert. Verification does not count as expert review.
+Route the common extractor issues according to the configuration:
 
-The verifier may resolve an issue through a supported correction or by confirming that a category is not reported after checking the relevant readable source. Confirmation of absence is not necessarily an error correction.
+- In E+V, content issues enter `pending_verification`.
+- In E, content issues enter `pending_expert_review`.
+- Retryable source or processing problems enter `pending_reprocessing` in either branch.
 
-Initial extractor issues and newly raised verifier issues will remain distinguishable. A verifier-reported resolution and the expert's judgment of that resolution will be stored separately.
+Resolve an issue only when all concerns are addressed or source checking establishes that no correction is needed. Routine missing details and unspecified scope alone do not create issues. An entirely empty category must be checked before absence is confirmed.
+
+The verifier may correct a record or confirm that a category is not reported after checking the relevant readable source. A justified confirmation of absence is a supported resolution, not necessarily an error correction. Verification does not change expert-review coverage.
+
+Keep initial extractor issues separate from issues newly raised during verification. Save the verifier's resolution explanation and the expert's later judgment separately.
 
 ## 8. Evaluation measures
 
-The table defines the measures per plan and configuration. Proportions are multiplied by 100 for reporting as percentages. Every measure retains its numerator and denominator; zero denominators produce `null`, displayed as not applicable. Counts may be zero.
+Calculate the following measures per plan and configuration. The calculated record and rules for percentages, missing judgments, and zero denominators are in Sections 6.8–6.9. Counts may be zero.
 
 ### 8.1 Before expert review
 
@@ -655,11 +800,11 @@ The table defines the measures per plan and configuration. Proportions are multi
 | Expert review workload | Issues referred for expert review (`expert_referrals`) | Count final issues with `status = pending_expert_review`, including newly raised issues. | E or E+V pre-review snapshot. |
 | Expert review workload | Referred issue count and proportion by type (`referrals_by_type`, `referral_type_percent`) | Count referred issues of type k; percentage = that count ÷ all referred issues × 100. | The referred-issue subset. |
 
-The baseline is the shared extractor review before branch-specific routing. An issue partly corrected but still open is not resolved. Reprocessing closures are attributed to the pipeline, not the verifier. If an issue was closed and later reopened, its final pre-review state determines its classification. History retains the intermediate changes. Verifier-contribution measures apply only to E+V; report them as not applicable for E.
+The baseline is the shared extractor review before branch-specific routing. Count final pre-review states, not intermediate closures: a reopened issue is still open, and pipeline resolutions are not verifier resolutions. Verifier-contribution measures apply only to E+V; report them as not applicable for E.
 
 The resolved and referred percentages need not sum to 100%: issues may remain in reprocessing or another pending state. New verifier issues are excluded from the initial-issue denominator.
 
-E includes extraction and any separately linked processing runs. E+V includes that same extraction plus verification and any separately linked processing runs. The shared extraction is included once per configuration total. Runtime excludes human review and source preparation; stage boundaries are defined in Section 6.6.
+Sections 6.6–6.7 define timing boundaries and how linked runs contribute to configuration totals.
 
 ### 8.2 After expert review
 
@@ -675,11 +820,9 @@ E includes extraction and any separately linked processing runs. E+V includes th
 | Issue handling | Unflagged problem count (`unflagged_problems`) | Count distinct affected target groups with at least one expert-confirmed problem absent from recorded concerns. | `unflagged_problems`. |
 | Verifier contribution | Expert-supported verifier resolutions (`supported_verifier_resolutions`, `unsupported_verifier_resolutions`, `verifier_resolution_support_percent`) | Count supported and unsupported verifier closures. Proposed percentage: supported closures ÷ all assessed verifier closures × 100. | Issue history and `verifier_resolution_supported`. |
 
-The final verifier-resolution percentage is a proposed operational definition of the agreed expert check and requires review. Its denominator contains issues whose final pre-review status is `resolved` with `resolved_by = verifier`, including initial and newly raised issues. Earlier closures that were reopened are excluded. A justified confirmation of absence is a supported resolution, but not necessarily an error correction. Evidence and record-quality changes provide the separate assessment of the verifier's effect on outputs.
+The verifier-resolution percentage is proposed and requires review. Its denominator is issues finally marked `resolved` with `resolved_by = verifier`, including initial and newly raised issues; reopened issues are excluded. Interpret it alongside extraction and evidence scores, using the resolution rules in Section 7.
 
-Experts first compare outputs to the initial reference to identify additions. Supported additions and other corrections produce one shared final reference. Both E and E+V are then scored against that version; additional-record counts remain tied to the initial version.
-
-Quotation and page rates concern supplied evidence. Their assessment rows must cover every supplied quotation use and page reference; unassessed judgments cannot be omitted silently to improve a rate. Unsupported additional records do not lower reference-based extraction scores, so their count and support rate are reported alongside those scores.
+Section 6.8 defines reference revisions, semantic matching, additional-item grouping, and quotation/page checks. The rows above use those units consistently. Unsupported additional records do not lower reference-based extraction scores, so report their count and support rate alongside those scores.
 
 ### 8.3 Scoring rubric and reporting
 
@@ -689,7 +832,7 @@ Quotation and page rates concern supplied evidence. Their assessment rows must c
 | 0.5 | Some substantive information is correct, but at least one required part is incorrect or missing. |
 | 0 | No substantive information is correct, or the reference record was omitted entirely. |
 
-Different wording is acceptable when meaning is equivalent. An action identified correctly but assigned the wrong implementation status receives 0.5. Correctly recording that information is unavailable does not reduce the score. Evidence correctness is measured separately from content correctness.
+Different wording is acceptable when meaning is equivalent. A correctly identified action with the wrong implementation status receives 0.5. Correctly recording unavailable information does not reduce the score. Content and evidence correctness are assessed separately.
 
 The extraction-quality denominator is the total number of content records across the five final-reference lists. Plan metadata, individual target pairs, evidence objects, and issue concerns are not separate records in this denominator.
 
@@ -697,39 +840,58 @@ For ten reference records with six fully correct, two partial, and two omitted, 
 
 Calculate scores per plan and content category using the same definitions. Keep the two configurations paired by plan. The proposed overall summary is the mean of valid per-plan percentages, with the number of contributing plans shown; pooled counts may be reported separately and labeled. A plan/category with a zero denominator is excluded from that mean and reported as not applicable. This aggregation rule requires confirmation before comparison.
 
-Retain initial and final expert references, all matching decisions, evidence for additional items, and expert explanations for partial scores. The second-expert checking procedure and disagreement resolution remain to be established on the development set.
+Establish the second-expert checking procedure and disagreement resolution on the development set. Retain its decisions in the reference and assessment records.
 
 ## 9. Development records and reproducibility
 
 Development records will describe the problem encountered, change made, reason, observed result, and remaining questions. These records will support the study's account of useful tools, model limitations, and expert intervention.
 
-Before comparison, fix and version the schemas, prompts, models/settings, serving approach and provider, tools, document-processing strategy, retry limits, and evaluation rules. Later changes must identify affected runs and preserve earlier outputs.
+Before comparison, fix and version the schemas, prompts, models/settings, serving approach/provider, tools, document-processing strategy, retry limits, and evaluation rules. Store executable stage settings in the profiles defined in Section 6.11. If any change requires new comparison runs, label them separately and preserve the earlier results.
 
 Checks will cover page numbering, required fields, IDs and links, issue transitions, preservation of earlier outputs, metric calculations, and failure handling. Factual accuracy and semantic evidence support will require expert assessment.
 
-Source files, software/model versions, settings, and processing history will be retained so the workflow can be repeated and inspected. Exact model outputs may still vary.
+Retain source files, profiles, software/model versions, and processing history so the workflow can be repeated and inspected. Exact model outputs may still vary under the same settings.
 
 ## 10. Implementation and repository structure
 
 | Location | Purpose |
 | --- | --- |
 | `src/` | Document preparation, controller, model adapter, MCP tools, and analysis. |
-| `schemas/`, `prompts/`, `configs/` | Versioned data specifications, instructions, and settings. |
+| `schemas/`, `prompts/`, `configs/` | Versioned data specifications, instructions, settings, and execution profiles. |
+| `data/registry/plans.json` | Registered document versions and links to preparation records; tracked in Git. |
 | `tests/` | Checks of processing, validation, issue history, and calculations. |
 | `data/raw/`, `data/processed/` | Source PDFs and prepared page text. |
-| `models/`, `runs/`, `artifacts/`, `logs/` | Local weights, processing outputs, assessments, and diagnostics. |
+| `models/`, `runs/`, `artifacts/`, `logs/` | Local weights, stage runs, batch records, extraction/review snapshots, assessments, metrics, and diagnostics. |
 | `data/release/`, `reports/` | Selected dataset releases and study summaries. |
 
-Code, configuration without secrets, and project documents will be tracked in Git. Local instructions, credentials, model weights, raw/prepared sources, and generated run artifacts are excluded. Research artifacts will require a backup plan and a defined release location.
+Track code, configuration without secrets, registry metadata, and project documents in Git. Exclude local instructions, credentials, model weights, raw/prepared sources, and generated runs. Keep backups of excluded research files and choose a release location.
 
-Implementation will begin with document preparation and local Ollama extraction, followed by verification, issue history, expert assessment, and analysis. Hugging Face hosted API calls will be explored after the local workflow is established. Development on two plans will establish the models and serving approach before the ten-plan comparison. Expansion will follow analysis and selection of a configuration.
+An example layout for one plan is shown below. These paths are proposed; no processing files or folders have been created.
+
+```text
+data/registry/plans.json
+data/raw/plan_0001.pdf
+data/processed/plan_0001/source_0001.json
+data/processed/plan_0001/page_0001.txt
+configs/execution/local_extractor_v1.json
+runs/batches/batch_0001.json
+runs/plan_0001/stages/run_extract_0001.json
+runs/plan_0001/snapshots/snapshot_extract_0001.json
+runs/plan_0001/reviews/review_extract_0001.json
+runs/plan_0001/results/result_e_0001.json
+runs/plan_0001/references/reference_set_0001.json
+runs/plan_0001/assessments/assessment_0001.json
+runs/plan_0001/metrics/metrics_0001.json
+```
+
+Implementation order is registration and preparation, local extraction, verification and issue history, expert assessment, and analysis. The hosting-development sequence is in Section 5; study-set roles are in Section 2. Expand after analyzing the comparison and selecting a workflow.
 
 ## 11. Open implementation decisions
 
 - Final local model pair following tests of the provisional Qwen3.5 27B extractor and Gemma 4 31B verifier; quantization, context settings, and Ollama version.
 - Hugging Face model/provider options and the serving approach selected for comparison.
 - Whole-document or page-batched processing and record merging.
-- Review of the proposed JSON contract, issue grouping/type rules, and expert assessment format.
+- Review of the proposed JSON fields, registry/profile/batch records, issue grouping/type rules, and expert assessment format.
 - Retry limits, runtime-specific token reporting, and assessment procedures for incomplete outputs.
 - Expert matching examples, claim-to-quotation assignment, proposed aggregation, and second-expert procedures.
 - Expansion review coverage, release format, document redistribution permissions, and artifact storage.

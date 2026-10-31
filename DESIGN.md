@@ -141,20 +141,31 @@ Start with tools for reading page text, rendering page images, OCR, and locating
 
 ### Workflow
 
-The CLI selects and starts each stage. Arrows show processing order. Experts fill the initial reference from the original PDF with model outputs hidden. All stages use `validation.py` and `storage.py`; model final responses also use `repair.py`. Notebooks call `metrics.py` for analysis. Appendix G describes the modules.
+The CLI selects and starts each stage. Numbers show processing order; solid arrows show inputs and saved outputs. Dashed arrows show shared model and MCP tool support. Reference preparation starts only after E and E+V are saved, and uses the original PDF with model outputs hidden.
 
 ```mermaid
 flowchart TD
-    cli["CLI: cli.py"] --> prepare["1. Add and prepare: documents.py"]
-    prepare --> extract["2. Extract: agents.py"]
-    extract --> verify["3. Verify: agents.py"]
-    verify --> reference["4. Independent reference: expert_files.py and experts"]
-    reference --> assessment["5. Assess outputs: expert_files.py and experts"]
-    assessment --> measures["6. Calculate measures: metrics.py"]
-    measures --> notebooks["Analysis notebooks: tables and figures"]
-    modelTools["models.py and document_tools.py"] --> extract
-    modelTools --> verify
+    cli["CLI selects stages"] -->|"Starts"| prepare["1. Add and prepare"]
+    pdf["Original PDF"] --> prepare
+    prepare -->|"Prepared text"| extract["2. Extract"]
+    prepare -->|"Same prepared text"| verify["3. Verify"]
+    extract --> eOutput["Saved E output"]
+    eOutput -->|"Content and issues"| verify
+    verify --> evOutput["Saved E+V output"]
+    pdf -->|"PDF only"| reference["4. Prepare independent reference"]
+    reference -->|"Initial reference"| assessment["5. Match and review additions"]
+    eOutput --> assessment
+    evOutput --> assessment
+    assessment --> finalReference["Shared final reference"]
+    finalReference --> scoring["Score both saved outputs"]
+    scoring --> analysis["6. Measures and notebook analysis"]
+    sharedSupport["Model calls and MCP tools"] -.-> extract
+    sharedSupport -.-> verify
 ```
+
+Step 5 matches both saved outputs to the initial reference, reviews additions and corrections, and scores both against one shared final reference. Appendix G maps these stages to Python modules: shared validation and storage, model response repair, and measures used by notebooks.
+
+Until the initial reference is saved, comparison run feedback shows status, error categories, and report paths, keeping extracted claims, issues, response snippets, and repair details hidden. Reference authors must not inspect the saved model files. If troubleshooting requires viewing them, experts who have not seen those outputs must prepare the reference. Development permits open inspection.
 
 ### Models and profiles
 
@@ -235,13 +246,13 @@ Python calculates these from saved run files.
 | Operational performance | Successful processing runtime | E: successful extractor duration. E+V: that same duration plus successful verifier duration. Exclude failed attempts, time between attempts, initial preparation, and human review. |
 | Operational performance | Tokens used | Sum input and output tokens across all model calls within the selected successful stages. Report input, output, and total separately. |
 | Operational performance | Failed executions | Count distinct failed extractor and verifier run IDs in the comparison work, including retries. Report by stage; shared extraction failures count once. |
-| Evidence quality | Records with supporting quotations | Number of output records with at least one quotation listed. |
+| Evidence quality | Records with quotations | Number of output records with at least one quotation listed. |
 | Verifier and review outcomes | Initially open issues | Count open issues in the shared extractor output. |
 | Verifier and review outcomes | Initial issues marked resolved | Count initially open issues marked resolved by the verifier. |
 | Verifier and review outcomes | Issues remaining for expert review | Count all open issues in each output. |
 | Verifier and review outcomes | New verifier issues | Count issue IDs in the verifier output absent from the extractor output, including new issues the verifier resolves. |
 
-Python counts records with supporting quotations across the five output lists, once per record when at least one nonempty quotation is listed. This counts quotation presence without judging validity. Records without quotations do not count.
+Python counts records with quotations across the five output lists, once per record when at least one nonempty quotation is listed. This counts quotation presence without judging validity. Records without quotations do not count.
 
 Measure each stage from start to finish, including loading initiated within the stage, model requests, agent requested tools, validation, and permitted format repairs. Hosted duration includes network and provider waits. Record whether a model was already loaded. Include model calls made by OCR tools in token counts. Missing required duration or usage data makes the relevant total null.
 
@@ -362,7 +373,7 @@ The environment records `model_revision`, `runtime`, `runtime_version`, `quantiz
 
 A tool log is an ordered list with `tool` (name), `arguments` (object), `result` (object or null), `elapsed_seconds` (number or null), and `error` (string or null). Results identify original page numbers and saved file paths where relevant. Save actual image/OCR settings and generated files with the run. Large responses can be linked by path.
 
-Agents return one object containing `content` and `review`. The verifier returns the complete revised content and issue list. Python supplies run metadata and measurements, checks IDs and links, and saves the combined file. Python generates or normalizes local record and issue IDs while preserving references. Expert files use the same content structure without simulated model runs.
+Agents return one object containing `content` and `review`. The verifier returns the complete revised content and issue list. Python supplies run metadata and measurements, checks IDs and links, and saves the combined file. ID normalization may consistently rename valid local IDs and their existing links; it must preserve continuing record and issue IDs across verification. It cannot guess missing targets, create relationships, or repair broken references; those remain validation errors under Appendix F. Expert files use the same content structure without simulated model runs.
 
 ### B. Extracted content
 
@@ -481,7 +492,7 @@ Apply only these repairs, in the listed order:
 
 Preserve the raw response. Save any repaired candidate separately as `responses/repaired_final.txt`, then repeat all format and reference checks. A run succeeds only if the final candidate passes every check. Otherwise, save the available files and fail the run. A repaired response that passes is part of the successful run; initial format errors are reported but do not count as a separate failed execution. Expert assessment still determines correctness.
 
-When final-response validation is attempted, save `validation_report.json` in the run folder with `raw_response_path`, `repaired_response_path` (null if unchanged), `initial_errors` and `remaining_errors` (lists of errors), `repairs` (list), and `valid` (Boolean). Each error has `category`, `location` (string or null), and `message`. Each repair has `rule`, `location`, `before`, and `after`, recorded as strings. Paths and other text fields are strings. The CLI shows the repairs, remaining errors, and report path. On failure, the run's `error` field summarizes the remaining problem.
+When final-response validation is attempted, save `validation_report.json` in the run folder with `raw_response_path`, `repaired_response_path` (null if unchanged), `initial_errors` and `remaining_errors` (lists of errors), `repairs` (list), and `valid` (Boolean). Each error has `category`, `location` (string or null), and `message`. Each repair has `rule`, `location`, `before`, and `after`, recorded as strings. Paths and other text fields are strings. The CLI shows the repairs, remaining errors, and report path, subject to Section 4's restrictions on comparison feedback before reference preparation is complete. On failure, the run's `error` field summarizes the remaining problem.
 
 ### G. Planned Python modules
 

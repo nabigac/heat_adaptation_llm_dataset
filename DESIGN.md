@@ -60,13 +60,15 @@ Every content record includes quotations and PDF page references. Preserve what 
 
 ## 3. Processing one document
 
+These six steps also label the workflow diagram in Section 4 and the module responsibilities in Appendix G.
+
 | Step | What happens | What is saved |
 | --- | --- | --- |
 | 1. Add and prepare | Import the eligible PDF and collection details. Python prepares text by PDF page and records problems. | Registry entry, original PDF, page text, and preparation notes. |
 | 2. Extract | Select an extractor profile. Supply the whole prepared document. The agent reads, uses tools when needed, and returns content and issues. | One extractor run file, model responses, and tool activity. |
 | 3. Verify | Select the saved extractor run and a verifier profile. The verifier receives its content and issue list, plus the source. | One verifier run file with revised content and issues. |
 | 4. Prepare the reference | After E and E+V, Python generates a blank reference template for comparison plans. Experts fill it from the original PDF without viewing model outputs, then validate and save it. | Independent initial expert reference. |
-| 5. Assess | Python generates assessment templates. Experts match records, judge accuracy and evidence, and check claimed resolutions. | Completed assessments and a shared final reference. |
+| 5. Assess | Python generates assessment templates. Experts match records, review additions and reference corrections, then score both outputs against one shared final reference. Check evidence and claimed resolutions. | Completed assessments and a shared final reference. |
 | 6. Analyze | Python calculates measures; notebooks compare E and E+V and summarize practical observations. | Analysis tables and figures. |
 
 ### Add the PDF and source details
@@ -133,7 +135,7 @@ Open issues remain for expert review. Source recovery happens within the agent's
 | LLM agents | Interpret source text, request tools, and return extracted content and proposed issues. |
 | Experts | Prepare references, assess outputs, decide correctness, and explain practical lessons. |
 
-An agent is a model used in a loop: read instructions, request a tool if needed, inspect the result, and submit an answer. Python runs the loop and executes tool requests. MCP provides a standard connection to the document tools. Start the MCP server locally and connect through the Python process's standard input and output.
+An agent is a model used in a loop: read instructions, request a tool if needed, inspect the result, and submit an answer. `agents.py` manages this loop and uses `models.py` for model requests. It also acts as the MCP client, starting the local server in `document_tools.py` and exchanging tool requests and results through standard input and output. MCP provides the connection; the tools are Python functions in that server.
 
 Both agents have access to the same PDF, prepared text, and tool capabilities. For comparison plans, expert references and assessments are created after agent processing. They stay outside agent access, including during any later reruns. Treat document text as source evidence, not instructions to the agent.
 
@@ -141,7 +143,7 @@ Start with tools for reading page text, rendering page images, OCR, and locating
 
 ### Workflow
 
-The CLI selects and starts each stage. Numbers show processing order; solid arrows show inputs and saved outputs. Dashed arrows show shared model and MCP tool support. Reference preparation starts only after E and E+V are saved, and uses the original PDF with model outputs hidden.
+The CLI selects and starts each step. The six numbered labels match Section 3; solid arrows show inputs and saved outputs. Dashed arrows show shared model and MCP tool support. Reference preparation starts only after E and E+V are saved, and uses the original PDF with model outputs hidden.
 
 ```mermaid
 flowchart TD
@@ -152,18 +154,21 @@ flowchart TD
     extract --> eOutput["Saved E output"]
     eOutput -->|"Content and issues"| verify
     verify --> evOutput["Saved E+V output"]
-    pdf -->|"PDF only"| reference["4. Prepare independent reference"]
-    reference -->|"Initial reference"| assessment["5. Match and review additions"]
-    eOutput --> assessment
-    evOutput --> assessment
-    assessment --> finalReference["Shared final reference"]
-    finalReference --> scoring["Score both saved outputs"]
-    scoring --> analysis["6. Measures and notebook analysis"]
+    pdf -->|"PDF only"| reference["4. Prepare the reference"]
+    reference -->|"Initial reference"| matchRecords
+    eOutput --> matchRecords
+    evOutput --> matchRecords
+    subgraph assess["5. Assess"]
+        matchRecords["Match records and review additions"] --> finalReference["Shared final reference"]
+        finalReference --> scoring["Score and complete checks"]
+    end
+    scoring --> analysis["6. Analyze"]
     sharedSupport["Model calls and MCP tools"] -.-> extract
     sharedSupport -.-> verify
+    style assess fill:#F5F5F5,stroke:#B3B3B3
 ```
 
-Step 5 matches both saved outputs to the initial reference, reviews additions and corrections, and scores both against one shared final reference. Appendix G maps these stages to Python modules: shared validation and storage, model response repair, and measures used by notebooks.
+Assess (step 5) includes matching, reference revisions, scoring, evidence checks, and resolution checks. Analyze (step 6) calculates measures and uses notebooks to compare E and E+V and produce tables and figures. Appendix G maps the six steps to Python modules.
 
 Until the initial reference is saved, comparison run feedback shows status, error categories, and report paths, keeping extracted claims, issues, response snippets, and repair details hidden. Reference authors must not inspect the saved model files. If troubleshooting requires viewing them, experts who have not seen those outputs must prepare the reference. Development permits open inspection.
 
@@ -201,37 +206,81 @@ When verification removes or splits a record, the verifier must update all affec
 
 Retain baseline issue IDs. If an issue's record is removed, set `related_record_id` to null and name the removed record in the description. If an issue affects several resulting records, link it to one and name the others in the description.
 
-A proposed layout is:
+A proposed project layout is below. Existing project documents appear alongside planned code, settings, and examples of generated files.
 
 ```text
-data/registry/plans.json                           # Registered documents and collection details.
-data/raw/plan_0001.pdf                              # Original PDF.
-data/processed/plan_0001/preparation_01/source.json  # Source metadata and preparation status.
-data/processed/plan_0001/preparation_01/pages.json   # Page text and preparation problems.
-configs/profiles.json                              # Named model, prompt, and tool settings.
-runs/plan_0001/run_extract_0001/output.json          # Extractor records, issues, settings, and measurements.
-runs/plan_0001/run_extract_0001/responses/           # Raw model responses.
-runs/plan_0001/run_extract_0001/tool_log.json        # Tool requests, results, durations, and errors.
-runs/plan_0001/run_extract_0001/validation_report.json # Final-response checks, repairs, and remaining errors.
-runs/plan_0001/run_verify_0001/output.json           # Verifier records, issues, settings, and measurements.
-runs/plan_0001/reference_initial.json               # Expert reference prepared after E and E+V, without viewing outputs.
-runs/plan_0001/reference_final.json                 # Shared revised reference and reasons for changes.
-runs/plan_0001/assessment_e.json                    # Expert judgments of the extractor output.
-runs/plan_0001/assessment_ev.json                   # Expert judgments of the verified output.
+heat_adaptation_llm_dataset/
+├── README.md                         # Project overview and document links.
+├── DESIGN.md                         # Study design and implementation specification.
+├── CHANGELOG.md                      # Decisions, changes, and lessons learned.
+├── AGENTS.md                         # Local agent instructions; ignored by Git.
+├── .gitignore                        # Files excluded from Git.
+├── pyproject.toml                    # Python dependencies and CLI setup.
+├── .env                              # Optional API credentials; ignored by Git.
+├── src/                              # Shared Python modules.
+│   ├── cli.py                       # Terminal commands and step selection.
+│   ├── documents.py                 # PDF registration and page preparation.
+│   ├── agents.py                    # Agent loops and MCP client.
+│   ├── models.py                    # Ollama and hosted model API calls.
+│   ├── document_tools.py            # MCP server: text, images, OCR, quotations.
+│   ├── validation.py                # JSON, link, and assessment coverage checks.
+│   ├── repair.py                    # Permitted JSON format repairs.
+│   ├── expert_files.py              # Expert templates and completed file imports.
+│   ├── metrics.py                   # Measure calculations and exports.
+│   └── storage.py                   # IDs, file saving, and status.
+├── configs/
+│   └── profiles.json                # Named model, prompt, and tool settings.
+├── prompts/                         # Agent prompts and shared coding instructions.
+├── schemas/                         # JSON field and type rules.
+├── notebooks/                       # Output inspection and research analysis.
+├── tests/                           # Validation, repair, link, and calculation checks.
+├── data/
+│   ├── registry/plans.json          # Registered documents and collection details.
+│   ├── raw/plan_0001.pdf             # Original PDF.
+│   └── processed/plan_0001/preparation_01/
+│       ├── source.json              # Source metadata and preparation status.
+│       └── pages.json               # Page text and preparation problems.
+└── runs/                            # Generated research files; ignored by Git.
+    ├── plan_0001/
+    │   ├── run_extract_0001/
+    │   │   ├── output.json          # Extractor content, issues, settings, measurements.
+    │   │   ├── responses/           # Raw responses and any repaired final response.
+    │   │   ├── artifacts/           # Requested page images and OCR text.
+    │   │   ├── tool_log.json        # Tool requests, results, durations, and errors.
+    │   │   └── validation_report.json # Checks, repairs, and remaining errors.
+    │   ├── run_verify_0001/
+    │   │   ├── output.json          # Verifier content, issues, settings, measurements.
+    │   │   ├── responses/           # Verifier model responses and permitted repairs.
+    │   │   ├── artifacts/           # Verifier requested images and OCR text.
+    │   │   ├── tool_log.json        # Verifier tool activity.
+    │   │   └── validation_report.json # Verifier checks and repair report.
+    │   ├── drafts/                  # Editable reference and assessment templates.
+    │   ├── reference_initial.json   # Independent expert reference before viewing outputs.
+    │   ├── reference_final.json     # Shared revised reference and revision reasons.
+    │   ├── assessment_e.json        # Expert judgments of the extractor output.
+    │   └── assessment_ev.json       # Expert judgments of the verified output.
+    └── analysis/                    # Calculated comparison tables and figures.
 ```
+
+The CLI calls the modules for the selected step. Profiles select prompts and model/tool settings; validation uses the schemas. Notebooks call `metrics.py` to read saved runs and assessments and write comparison results under `runs/analysis/`. Appendix G gives the full module responsibilities.
+
+Ollama runs as a local service and manages downloaded model weights outside this project. The MCP server runs locally from `src/document_tools.py`; a hosted model API changes the model connection, while document tools and saved files remain local.
 
 Preparation folders and run folders preserve their inputs. They do not need separate source, snapshot, review, batch, or result IDs. Assessment drafts use separate working files; retain earlier completed assessments if revised.
 
-Keep modules in `src/`, notebooks in `notebooks/`, and specifications, prompts, and settings in `schemas/`, `prompts/`, and `configs/`. Track these, registry metadata, and project documents in Git. Keep `AGENTS.md` local. Exclude credentials, PDFs, prepared text, model weights, and generated runs; back up excluded research files. Release packaging is a later decision.
+Track code, tests, dependency settings, schemas, prompts, profiles, registry metadata, and project documents in Git. Keep `AGENTS.md` local. Exclude credentials, PDFs, prepared text, model weights, and generated runs; back up excluded research files. Release packaging is a later decision.
 
 ## 5. Expert assessment and measures
 
-### Complete the reference and assessments
+Prepare the reference (step 4) creates the independent reference. Assess (step 5) supplies expert judgments. Analyze (step 6) calculates and reports the measures below; runtime, tokens, and other run data are recorded during Extract and Verify.
 
-1. After E and E+V have run, Python generates a blank initial reference template for a comparison plan with collection metadata and empty content lists. Do not prefill it from agent records or issues. Experts fill it from the original PDF without viewing model outputs, then validate and save it.
-2. Only after the initial reference is saved, Python generates one assessment template for E and one for E+V. It fills known run links, quotations, page references, and relevant issues. Experts can now view the outputs and supply semantic matches and judgments.
-3. Match outputs against the initial reference to identify additional items. Review additions and reference corrections, then save one shared final reference. Preserve the initial reference and explain each revision.
-4. Score both outputs against that final reference. An item counts as additional only relative to the initial reference. Complete evidence and resolution checks, validate the files, and calculate measures.
+### Prepare the reference and assess
+
+**Prepare the reference (step 4).** After E and E+V have run, Python generates a blank initial reference template for a comparison plan with collection metadata and empty content lists. Do not prefill it from agent records or issues. Experts fill it from the original PDF without viewing model outputs, then validate and save it.
+
+**Assess (step 5).** Only after the initial reference is saved, Python generates one assessment template for E and one for E+V. It fills known run links, quotations, page references, and relevant issues. Experts can now view the outputs and supply semantic matches and judgments.
+
+Match outputs against the initial reference to identify additional items. Review additions and reference corrections, then save one shared final reference. Preserve the initial reference and explain each revision. Score both outputs against that final reference. An item counts as additional only relative to the initial reference. Complete evidence and resolution checks, then validate and save the assessments for Analyze (step 6).
 
 Python checks format, links, and assessment coverage. Experts establish meaning, source support, and correctness. A supported addition is distinct source information missing from the initial reference. Group duplicate or split descriptions of the same addition once.
 
@@ -302,13 +351,14 @@ Deferred analyses are issue and referral percentages by type, a genuine issue ra
 
 ## 6. Implementation order and remaining decisions
 
-Build and test in this order:
+Build and test in the same six steps:
 
-1. Document registration and page preparation.
-2. One complete local extractor run with saved content, issues, settings, responses, and measurements.
-3. Verification of that exact output, with the same source and tool access.
-4. Blank reference and expert assessment templates, validation, and calculation of the agreed measures.
-5. Comparison notebooks and practical research reporting.
+1. **Add and prepare:** Document registration and page preparation.
+2. **Extract:** One complete local extractor run with saved content, issues, settings, responses, and measurements.
+3. **Verify:** Verification of that exact output, with the same source and tool access.
+4. **Prepare the reference:** Blank reference templates and validation, keeping model outputs hidden from reference authors.
+5. **Assess:** Assessment templates, record matching, reference revisions, scoring, and evidence and resolution checks.
+6. **Analyze:** Calculation of the agreed measures, comparison notebooks, and practical research reporting.
 
 Use the two development plans as an open, iterative process. Start with a straightforward PDF, then try a plan with more difficult tables, layout, or scanned pages where available. Compare prepared text and page numbers with the original PDF. Inspect model outputs and tool results openly, adjust preparation, prompts, models, or tools, and repeat runs with new IDs as needed.
 
@@ -496,22 +546,22 @@ When final-response validation is attempted, save `validation_report.json` in th
 
 ### G. Planned Python modules
 
-A module is a Python file containing related functions. These proposed files belong in `src/`; they have not been implemented. Stage numbers refer to section 3.
+A module is a Python file containing related functions. These proposed files belong in `src/`; they have not been implemented. Step numbers refer to the same six steps in Section 3 and the Section 4 diagram.
 
-| Module | Stage | Responsibility |
+| Module | Step | Responsibility |
 | --- | --- | --- |
 | `cli.py` | 1 to 6 | Handle commands, select documents, profiles, and input files, and show status, errors, and repairs. Call the shared modules. |
 | `documents.py` | 1 | Register PDFs and collection details, check duplicate checksums, prepare page text, and record preparation problems. |
-| `agents.py` | 2 and 3 | Load the selected profile and prompts. Run extraction or verification, check context and tool limits, request tools, and validate and save the final output. |
+| `agents.py` | 2 and 3 | Load the selected profile and prompts. Run extraction or verification, check context and tool limits, start the local MCP server and act as its client, and validate and save the final output. |
 | `models.py` | 2 and 3 | Connect to Ollama or a hosted provider. Send model requests, images, and tool messages; return raw responses and usage measurements. |
-| `document_tools.py` | 2 and 3 | Expose the local MCP tools for page text, images, OCR, and quotation lookup. Restrict access to the selected source and permitted run artifacts. |
+| `document_tools.py` | 2 and 3 | Define the document tool functions and expose them through the local MCP server. Restrict access to the selected source and permitted run artifacts. |
 | `validation.py` | Shared | Check JSON syntax, required fields, types, IDs, links, page ranges, and assessment coverage. Classify errors; for model final responses, call `repair.py` and validate again. |
 | `repair.py` | 2 and 3 | Apply only the format repairs in Appendix F. Return the repaired text and details of each change for the validation report. |
-| `expert_files.py` | 4 and 5 | Generate blank references and assessment templates in the agreed order, and import completed expert files. Experts supply matches and judgments. |
-| `metrics.py` | 6 | Calculate the agreed measures from selected run and assessment files, and export analysis tables. |
+| `expert_files.py` | 4 and 5 | Generate blank reference templates for Prepare the reference, then assessment templates for Assess; import completed expert files. Experts supply matches and judgments. |
+| `metrics.py` | 6 | Calculate the agreed measures from selected run and assessment files, and export tables under `runs/analysis/`. Notebooks save figures there too. |
 | `storage.py` | Shared | Allocate IDs, preserve inputs and completed files, and save runs, raw responses, logs, reports, and status. |
 
-Notebooks in `notebooks/` use `metrics.py` to compare E and E+V and produce tables and figures. Keep calculation rules in the module so the CLI and notebooks use the same functions.
+During Analyze (step 6), notebooks in `notebooks/` use `metrics.py` to compare E and E+V and produce tables and figures. Keep calculation rules in the module so the CLI and notebooks use the same functions.
 
 ### H. Compact run example
 

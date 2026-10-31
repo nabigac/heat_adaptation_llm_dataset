@@ -48,13 +48,13 @@ The software accepts prescreened documents without asking for eligibility confir
 
 Each output contains plan metadata and five content lists:
 
-| List | What is extracted |
-| --- | --- |
-| Goals | Stated goals, targets, and deadlines. |
-| Actions | Heat adaptation actions and implementation status. |
-| Monitoring and evaluation | What is monitored or evaluated, how, and by whom. |
-| Benefits and impacts | Expected or reported outcomes, including adverse impacts. |
-| Costs and resources | Financial costs and other resource requirements. |
+| List | What is extracted | Extraction question |
+| --- | --- | --- |
+| Goals | Stated goals, targets, and deadlines. | 1. What heat adaptation goals does the plan state, including any specific targets or deadlines? |
+| Actions | Heat adaptation actions and implementation status. | 2. What actions does the plan propose or report taking to reduce heat-related risks? |
+| Monitoring and evaluation | What is monitored or evaluated, how, and by whom. | 3. What monitoring or evaluation does the plan describe? |
+| Benefits and impacts | Expected or reported outcomes, including adverse impacts. | 4. What benefits or impacts does the plan expect or report? |
+| Costs and resources | Financial costs and other resource requirements. | 5. What costs or resource requirements does the plan report or estimate for its heat adaptation actions? |
 
 Every content record includes quotations and PDF page references. Preserve what the source states, including qualifications, quantities, populations, and timing. Do not infer a goal solely from an action or interpret monitoring activity as proof of reduced heat risk. Appendix B defines the fields; Appendix E gives shared coding instructions for agents and experts.
 

@@ -4,7 +4,7 @@
 
 **Last updated:** 2026-10-31
 
-This study will build and evaluate a workflow that pairs open weight large language models (LLMs) with a heat adaptation expert to extract data from government plans. The main contribution is practical knowledge about building the workflow, model limitations, useful tools, and where expert intervention is needed. The dataset is also an important output and may support future fine-tuning.
+This study will build and evaluate a workflow that pairs open weight large language models (LLMs) with heat adaptation experts to extract data from government plans. The main contribution is practical knowledge about building the workflow, model limitations, useful tools, and where expert intervention is needed. The dataset is also an important output and may support future fine-tuning.
 
 Sections 1 to 6 explain the study and processing steps. The appendix defines the JSON fields and gives an example for implementation. This document describes proposed software; it does not mean the software has been built or tested.
 
@@ -12,7 +12,7 @@ Sections 1 to 6 explain the study and processing steps. The appendix defines the
 
 The study asks:
 
-1. How can an expert and open weight LLM agents use Model Context Protocol (MCP) tools to build a structured extraction dataset?
+1. How can experts and open weight LLM agents use Model Context Protocol (MCP) tools to build a structured extraction dataset?
 2. How does adding a verifier change extraction quality, evidence quality, issues requiring review, and computational resources?
 
 | Study set | Size | Purpose |
@@ -28,7 +28,7 @@ Each comparison plan produces two outputs:
 
 Both configurations share one extractor run. Verification reviews the entire extraction, including unflagged records. The comparison evaluates the tested workflow and model pair; it cannot isolate the effects of MCP, model family, or open weights.
 
-The expert completes the initial reference before viewing model outputs and assesses both outputs before making corrections. One expert conducts the study, so no expert IDs or agreement measures between experts are required.
+Experts complete the initial reference before viewing model outputs. The experts who complete reference templates may differ from those who evaluate outputs. Assess both outputs before making corrections, and use the same extraction and scoring rules across participating experts. Expert IDs are not recorded.
 
 ### Which outputs count
 
@@ -40,7 +40,7 @@ Fix models, prompts, tools, document preparation, and scoring rules before compa
 
 ## 2. Plans, extracted content, and correctness
 
-The expert screens documents before import. Eligible documents are final government or public agency plans that are publicly available in English, were published or updated in 2010 or later, and address heat adaptation directly or through a dedicated heat section with at least one heat action. Prioritize recent versions. The original PDF must be readable by a person and have stable PDF page numbers, including readable scans.
+Experts screen documents before import. Eligible documents are final government or public agency plans that are publicly available in English, were published or updated in 2010 or later, and address heat adaptation directly or through a dedicated heat section with at least one heat action. Prioritize recent versions. The original PDF must be readable by a person and have stable PDF page numbers, including readable scans.
 
 The software accepts prescreened documents without asking for eligibility confirmation.
 
@@ -75,10 +75,10 @@ Count each reference item once. A split output may need several records to cover
 | Step | What happens | What is saved |
 | --- | --- | --- |
 | 1. Add and prepare | Import the eligible PDF and collection details. Python prepares text by PDF page and records problems. | Registry entry, original PDF, page text, and preparation notes. |
-| 2. Prepare the reference | For comparison plans, Python generates a blank JSON template. The expert completes and validates it before viewing outputs. | Initial expert reference. |
+| 2. Prepare the reference | For comparison plans, Python generates a blank JSON template. Experts complete and validate it before viewing outputs. | Initial expert reference. |
 | 3. Extract | Select an extractor profile. Supply the whole prepared document. The agent reads, uses tools when needed, and returns content and issues. | One extractor run file, model responses, and tool activity. |
 | 4. Verify | Select the saved extractor run and a verifier profile. The verifier receives its content and issue list, plus the source. | One verifier run file with revised content and issues. |
-| 5. Assess | Python generates assessment templates. The expert matches records, judges accuracy and evidence, and checks claimed resolutions. | Completed assessments and a shared final reference. |
+| 5. Assess | Python generates assessment templates. Experts match records, judge accuracy and evidence, and check claimed resolutions. | Completed assessments and a shared final reference. |
 | 6. Analyze | Python calculates measures; notebooks compare E and E+V and summarize practical observations. | Analysis tables and figures. |
 
 ### Add the PDF and source details
@@ -131,7 +131,7 @@ Completed files remain unchanged. Save expert corrections separately after asses
 | CLI | Select documents, profiles, and input runs; start work; edit collection details; import expert files; and show status. |
 | Notebooks | Inspect outputs and produce research analysis using the shared Python modules. |
 | LLM agents | Interpret source text, request tools, and return extracted content and proposed issues. |
-| Expert | Prepare references, assess outputs, decide correctness, and explain practical lessons. |
+| Experts | Prepare references, assess outputs, decide correctness, and explain practical lessons. |
 
 An agent is a model used in a loop: read instructions, request a tool if needed, inspect the result, and submit an answer. Python runs the loop and executes tool requests. MCP provides a standard connection to the document tools. Start the MCP server locally and connect through the Python process's standard input and output.
 
@@ -172,19 +172,19 @@ Record and issue IDs are local to a document's linked outputs. Expert reference 
 A proposed layout is:
 
 ```text
-data/registry/plans.json
-data/raw/plan_0001.pdf
-data/processed/plan_0001/preparation_01/source.json
-data/processed/plan_0001/preparation_01/pages.json
-configs/profiles.json
-runs/plan_0001/run_extract_0001/output.json
-runs/plan_0001/run_extract_0001/responses/
-runs/plan_0001/run_extract_0001/tool_log.json
-runs/plan_0001/run_verify_0001/output.json
-runs/plan_0001/reference_initial.json
-runs/plan_0001/reference_final.json
-runs/plan_0001/assessment_e.json
-runs/plan_0001/assessment_ev.json
+data/registry/plans.json                           # Registered documents and collection details.
+data/raw/plan_0001.pdf                              # Original PDF.
+data/processed/plan_0001/preparation_01/source.json  # Source metadata and preparation status.
+data/processed/plan_0001/preparation_01/pages.json   # Page text and preparation problems.
+configs/profiles.json                              # Named model, prompt, and tool settings.
+runs/plan_0001/run_extract_0001/output.json          # Extractor records, issues, settings, and measurements.
+runs/plan_0001/run_extract_0001/responses/           # Raw model responses.
+runs/plan_0001/run_extract_0001/tool_log.json        # Tool requests, results, durations, and errors.
+runs/plan_0001/run_verify_0001/output.json           # Verifier records, issues, settings, and measurements.
+runs/plan_0001/reference_initial.json               # Expert reference prepared before viewing outputs.
+runs/plan_0001/reference_final.json                 # Shared revised reference and reasons for changes.
+runs/plan_0001/assessment_e.json                    # Expert judgments of the extractor output.
+runs/plan_0001/assessment_ev.json                   # Expert judgments of the verified output.
 ```
 
 Preparation folders and run folders preserve their inputs. They do not need separate source, snapshot, review, batch, or result IDs. Assessment drafts use separate working files; retain earlier completed assessments if revised.
@@ -195,12 +195,12 @@ Keep modules in `src/`, notebooks in `notebooks/`, and specifications, prompts, 
 
 ### Complete the reference and assessments
 
-1. Python generates a blank initial reference template with known plan metadata and empty content lists. The expert fills it from the original PDF before viewing outputs, then validates and saves it.
-2. After processing, Python generates one assessment template for E and one for E+V. It fills known run links, quotations, page references, and relevant issues. The expert supplies semantic matches and judgments.
+1. Python generates a blank initial reference template with known plan metadata and empty content lists. Experts fill it from the original PDF before viewing outputs, then validate and save it.
+2. After processing, Python generates one assessment template for E and one for E+V. It fills known run links, quotations, page references, and relevant issues. Experts supply semantic matches and judgments.
 3. Match outputs against the initial reference to identify additional items. Review additions and reference corrections, then save one shared final reference. Preserve the initial reference and explain each revision.
 4. Score both outputs against that final reference. An item counts as additional only relative to the initial reference. Complete evidence and resolution checks, validate the files, and calculate measures.
 
-Python checks format, links, and assessment coverage. The expert establishes meaning, source support, and correctness. A supported addition is distinct source information missing from the initial reference. Group duplicate or split descriptions of the same addition once.
+Python checks format, links, and assessment coverage. Experts establish meaning, source support, and correctness. A supported addition is distinct source information missing from the initial reference. Group duplicate or split descriptions of the same addition once.
 
 Pending judgments remain null and are not scored zero. Complete review covers every final reference item, supplied quotation and page reference, and claimed initial issue resolution. Failed runs without usable output have no quality score.
 
@@ -232,7 +232,7 @@ For example, extraction taking 100 seconds, a failed verification taking 30 seco
 | Extraction quality | Supported additional record percentage | Additional items judged supported ÷ all additional items × 100. |
 | Evidence quality | Quotation support percentage | Supplied quotation uses judged to support their assigned claims ÷ all supplied quotation uses × 100. |
 | Evidence quality | Page reference correctness | Correct cited pages ÷ all cited pages assessed across quotation uses × 100. |
-| Verifier and review outcomes | Expert confirmed initial resolutions | Count initially open issues the verifier marked resolved whose resolution the expert judges justified. Report alongside the number claimed resolved. |
+| Verifier and review outcomes | Expert confirmed initial resolutions | Count initially open issues the verifier marked resolved whose resolution experts judge justified. Report alongside the number claimed resolved. |
 
 For ten reference records with six fully correct, two partial, and two omitted, partial credit accuracy is 70% and the fully correct rate is 60%. Both come from the same expert scores.
 
@@ -272,7 +272,7 @@ Remaining development choices are model suitability and quantization, full docum
 
 Retain short observations about model limitations, useful tools, failures, and necessary expert intervention. Record expectations separately from observed results. Use the existing change log when entries are requested. These observations support the practical contribution; a larger software tracking system is unnecessary.
 
-Interpret findings within ten comparison plans and one expert's judgments. Different outputs may share errors, and the expert reference can also require correction. Saving the initial reference and shared revisions makes those changes visible.
+Interpret findings within ten comparison plans and the participating experts' judgments. Different outputs may share errors, and the expert reference can also require correction. Saving the initial reference and shared revisions makes those changes visible.
 
 ## Appendix: JSON fields and example
 
@@ -409,13 +409,13 @@ An assessment contains `schema_version`, `plan_id`, `configuration` (`extractor_
 | `quotation_checks` | `record_id`, `evidence_index` (zero based list position), `claim_fields` (nonempty list of fields the quotation is used to support), `supports_claim` (Boolean or null), `page_checks` (list of `page_number` and `correct` Boolean or null), and `reason`. |
 | `resolution_checks` | `issue_id`, `justified` (Boolean or null), and `reason`. One row per initially open issue marked resolved by the verifier; empty for E. |
 
-IDs, descriptions, paths, and reasons are strings; plural ID fields are lists. Evidence follows Appendix B. The expert assigns matches and which claims each quotation is used to support. Python prefills known identifiers, evidence lists, and pending rows, but does not assign meaning or scores. Support is true only if all assigned claims are supported. Check each cited page independently.
+IDs, descriptions, paths, and reasons are strings; plural ID fields are lists. Evidence follows Appendix B. Experts assign matches and which claims each quotation is used to support. Python prefills known identifiers, evidence lists, and pending rows, but does not assign meaning or scores. Support is true only if all assigned claims are supported. Check each cited page independently.
 
 An omitted reference item has no output IDs and scores 0 once assessed. Undetermined support and null judgments are pending. Validate all required coverage before marking an assessment complete. Save revised completed assessments separately; analysis uses the explicitly selected assessment files.
 
 ### E. Compact run example
 
-This fictional extractor output has one action and one bundled issue. The quote says the action is planned and gives a quantity and deadline; the extraction wrongly says completed and omits those details. The expert would give that action partial credit. Empty lists illustrate structure, not a complete plan.
+This fictional extractor output has one action and one bundled issue. The quote says the action is planned and gives a quantity and deadline; the extraction wrongly says completed and omits those details. That action would receive partial credit. Empty lists illustrate structure, not a complete plan.
 
 The model revision, software versions, settings, timings, and tokens are illustrative placeholders. No referenced files have been created.
 

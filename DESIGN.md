@@ -30,7 +30,7 @@ Each comparison plan produces two outputs:
 
 Both configurations share one extractor run. Verification reviews the entire extraction, including unflagged records. The comparison evaluates the tested workflow and model pair; it cannot isolate the effects of MCP, model family, or open weights.
 
-For comparison plans, run and save E and E+V before experts create the initial reference. Experts fill the reference from the original PDF without viewing, copying, or using model outputs. Validate and save that reference before revealing outputs for assessment. Reference preparation is independent extraction; assessment is the later judgment of model outputs against that reference and the source. The experts who complete reference templates may differ from those who evaluate outputs. Assess both outputs before making corrections, and use the same extraction and scoring rules across participating experts. Expert IDs are not recorded.
+For comparison plans, both E and E+V must succeed and be saved before experts create the initial reference. Experts fill the reference from the original PDF without viewing, copying, or using model outputs. Validate and save that reference before revealing outputs for assessment. Reference preparation is independent extraction; assessment is the later judgment of model outputs against that reference and the source. The experts who complete reference templates may differ from those who evaluate outputs. Assess both outputs before making corrections, and use the same extraction and scoring rules across participating experts. Expert IDs are not recorded.
 
 ### Which outputs count
 
@@ -67,7 +67,7 @@ These six steps also label the workflow diagram in Section 4 and the module resp
 | 1. Add and prepare | Import the eligible PDF and collection details. Python prepares text by PDF page and records problems. | Registry entry, original PDF, page text, and preparation notes. |
 | 2. Extract | Select an extractor profile. Supply the whole prepared document. The agent reads, uses tools when needed, and returns content and issues. | One extractor run file, model responses, and tool activity. |
 | 3. Verify | Select the saved extractor run and a verifier profile. The verifier receives its content and issue list, plus the source. | One verifier run file with revised content and issues. |
-| 4. Prepare the reference | After E and E+V, Python generates a blank reference template for comparison plans. Experts fill it from the original PDF without viewing model outputs, then validate and save it. | Independent initial expert reference. |
+| 4. Prepare the reference | Once both E and E+V succeed, Python generates a blank reference template for comparison plans. Experts fill it from the original PDF without viewing model outputs, then validate and save it. | Independent initial expert reference. |
 | 5. Assess | Python generates assessment templates. Experts match records, review additions and reference corrections, then score both outputs against one shared final reference. Check evidence and claimed resolutions. | Completed assessments and a shared final reference. |
 | 6. Analyze | Python calculates measures; notebooks compare E and E+V and summarize practical observations. | Analysis tables and figures. |
 
@@ -101,7 +101,7 @@ If it does not fit, stop and report the problem. Adjust the model or settings du
 
 ### Run, retry, and inspect status
 
-Process one document at a time initially. The CLI lists registered documents and their preparation, extraction, and verification status.
+Process one document at a time initially. The CLI lists registered documents and their preparation, extraction, and verification status. Flag failed stages with the plan ID, run ID, error category, saved run/report paths, and a manual retry action. Reference preparation stays blocked until both linked outputs succeed. These labels come from saved run records and do not need another tracking file.
 
 Select profiles explicitly. To verify or retry verification, select the exact successful extractor run. Verification uses the same prepared source path as that run. Completed work is read from its saved file; the software does not search automatically for equivalent runs.
 
@@ -109,7 +109,9 @@ Select profiles explicitly. To verify or retry verification, select the exact su
 
 A failed model request or unhandled error also ends that run. Recoverable source problems stay in the issue list. Stop on failure, retain available responses and measurements, and retry manually with a new run ID. There are no automatic retries or retry count settings.
 
-If verification fails, the successful E output remains available. Retry only verification using the same saved extraction. If a process is interrupted, confirm it has stopped before marking it failed; do not invent an elapsed duration from the later recovery time.
+Use configurable timeouts for model and MCP tool requests. Each timeout limits one complete request, including waiting for its result. A timeout or provider reported output truncation fails the run, even if the returned JSON can be parsed. Preserve any response, tool logs, and available measurements; report the reason and retry manually. Never complete missing content automatically.
+
+If verification fails, preserve the successful E output and retry only verification using that same extraction. Keep reference preparation and assessment blocked until verification succeeds. If a process is interrupted, confirm it has stopped before marking it failed; do not invent an elapsed duration from the later recovery time.
 
 Completed files remain unchanged. Save expert corrections separately after assessment. If inputs or settings change, start new work and label it appropriately. Missing or damaged saved inputs must be restored or recreated explicitly before use.
 
@@ -139,11 +141,11 @@ An agent is a model used in a loop: read instructions, request a tool if needed,
 
 Both agents have access to the same PDF, prepared text, and tool capabilities. For comparison plans, expert references and assessments are created after agent processing. They stay outside agent access, including during any later reruns. Treat document text as source evidence, not instructions to the agent.
 
-Start with tools for reading page text, rendering page images, OCR, and locating quotations with surrounding text. A quotation match checks wording, not whether it supports the claim. Python validates final JSON automatically. Save tool arguments, results or file paths, durations, and failures in an ordered log; separate tool or artifact IDs are unnecessary.
+Use one shared configuration to expose the same enabled MCP document tools to the extractor and verifier: page text, page images, OCR, and quotation lookup. Direct image input depends on tested model support; experts visually check OCR evidence during assessment. A quotation match checks wording, not whether it supports the claim. Python validates final JSON automatically. Save tool arguments, results or file paths, durations, and failures in an ordered log; separate tool or artifact IDs are unnecessary.
 
 ### Workflow
 
-The CLI selects and starts each step. The six numbered labels match Section 3; solid arrows show inputs and saved outputs. Dashed arrows show shared model and MCP tool support. Reference preparation starts only after E and E+V are saved, and uses the original PDF with model outputs hidden.
+The CLI selects and starts each step. The six numbered labels match Section 3; solid arrows show inputs and saved outputs. Dashed arrows show shared model and MCP tool support. Reference preparation starts only after E and E+V both succeed and are saved, and uses the original PDF with model outputs hidden.
 
 ```mermaid
 flowchart TD
@@ -165,7 +167,7 @@ flowchart TD
     scoring --> analysis["6. Analyze"]
     sharedSupport["Model calls and MCP tools"] -.-> extract
     sharedSupport -.-> verify
-    style assess fill:#F5F5F5,stroke:#B3B3B3
+    style assess fill:#F5F5F5,stroke:#B3B3B3,color:#000000
 ```
 
 Assess (step 5) includes matching, reference revisions, scoring, evidence checks, and resolution checks. Analyze (step 6) calculates measures and uses notebooks to compare E and E+V and produce tables and figures. Appendix G maps the six steps to Python modules.
@@ -181,13 +183,13 @@ Start locally with Ollama on the Apple M5 Pro MacBook with 64 GB of memory. The 
 | Extractor | Qwen3.5 27B | `qwen3.5:27b` |
 | Verifier | Gemma 4 31B | `gemma4:31b` |
 
-Test memory use, full document capacity, tool calls, structured JSON, and image/OCR support on the development plans. Load models sequentially. These candidates may change with observed performance or a move to hosted APIs. Different model families can still share errors.
+Test memory use, full document capacity, tool calls, structured JSON, and direct image input on the development plans. Test the shared OCR tool separately. Load models sequentially. These candidates may change with observed performance or a move to hosted APIs. Different model families can still share errors.
 
 Later, explore Hugging Face hosted APIs if needed. Keep the workflow and MCP tools local; send the required source text and tool results to the selected provider. Use the same output format. Hosting is a development choice, not another experimental configuration. Hosted availability and capabilities must be tested.
 
-Keep named extractor and verifier profiles in one editable `configs/profiles.json` file. Add a profile by copying an entry, giving it a new name, and changing its settings. Select names through the CLI. Python saves the complete settings and prompt text inside each run, so later profile edits cannot alter earlier results.
+Keep named extractor and verifier profiles in one editable `configs/profiles.json` file. Its shared `document_tools` object configures the MCP server once; the `profiles` list holds model settings. Add a profile by copying an entry, giving it a new name, and changing its settings. Select names through the CLI. Python saves the selected profile, shared tool settings, and prompt text inside each run, so later edits cannot alter earlier results.
 
-A profile specifies the model and endpoint, generation and context settings, prompt files, tool call limit, and image/OCR settings. Python adds detected model and software versions, hardware, and the Git commit. Appendix A defines these fields. At the tool call limit, request a final answer and leave unresolved issues open; output that remains invalid after permitted repairs still fails the run. This limit is separate from manual retries.
+A profile specifies the model and endpoint, generation and context settings, prompt files, model request timeout, tool call limit, and direct image input setting. The shared tool configuration specifies OCR, page rendering, and tool request timeout. Both comparison runs use the same shared settings. Python adds detected model and software versions, hardware, and the Git commit. Appendix A defines these fields. At the tool call limit, request a final answer and leave unresolved issues open; output that remains invalid after permitted repairs still fails the run. This limit is separate from manual retries.
 
 ### Files and identifiers
 
@@ -229,7 +231,7 @@ heat_adaptation_llm_dataset/
 │   ├── metrics.py                   # Measure calculations and exports.
 │   └── storage.py                   # IDs, file saving, and status.
 ├── configs/
-│   └── profiles.json                # Named model, prompt, and tool settings.
+│   └── profiles.json                # Model profiles and shared MCP tool settings.
 ├── prompts/                         # Agent prompts and shared coding instructions.
 ├── schemas/                         # JSON field and type rules.
 ├── notebooks/                       # Output inspection and research analysis.
@@ -262,7 +264,7 @@ heat_adaptation_llm_dataset/
     └── analysis/                    # Calculated comparison tables and figures.
 ```
 
-The CLI calls the modules for the selected step. Profiles select prompts and model/tool settings; validation uses the schemas. Notebooks call `metrics.py` to read saved runs and assessments and write comparison results under `runs/analysis/`. Appendix G gives the full module responsibilities.
+The CLI calls the modules for the selected step. Profiles select models and prompts; the shared `document_tools` configuration sets up the MCP server. Validation uses the schemas. Notebooks call `metrics.py` to read saved runs and assessments and write comparison results under `runs/analysis/`. Appendix G gives the full module responsibilities.
 
 Ollama runs as a local service and manages downloaded model weights outside this project. The MCP server runs locally from `src/document_tools.py`; a hosted model API changes the model connection, while document tools and saved files remain local.
 
@@ -276,7 +278,7 @@ Prepare the reference (step 4) creates the independent reference. Assess (step 5
 
 ### Prepare the reference and assess
 
-**Prepare the reference (step 4).** After E and E+V have run, Python generates a blank initial reference template for a comparison plan with collection metadata and empty content lists. Do not prefill it from agent records or issues. Experts fill it from the original PDF without viewing model outputs, then validate and save it.
+**Prepare the reference (step 4).** Require two saved successful outputs for the same plan and prepared source, with the verifier's `input_run_id` pointing to the selected extractor run. Check this before generating or accepting an initial reference. Python generates a blank template with collection metadata and empty content lists. Do not prefill it from agent records or issues. Experts fill it from the original PDF without viewing model outputs, then validate and save it.
 
 **Assess (step 5).** Only after the initial reference is saved, Python generates one assessment template for E and one for E+V. It fills known run links, quotations, page references, and relevant issues. Experts can now view the outputs and supply semantic matches and judgments.
 
@@ -284,7 +286,7 @@ Match outputs against the initial reference to identify additional items. Review
 
 Python checks format, links, and assessment coverage. Experts establish meaning, source support, and correctness. A supported addition is distinct source information missing from the initial reference. Group duplicate or split descriptions of the same addition once.
 
-Pending judgments remain null and are not scored zero. Complete review covers every final reference item, supplied quotation and page reference, and claimed initial issue resolution. Failed runs without usable output have no quality score.
+Pending judgments remain null and are not scored zero. Complete review covers every final reference item, supplied quotation and page reference, and claimed initial issue resolution. Failed attempts remain in operational reporting; quality assessment uses only the successful linked pair.
 
 ### Measures before expert assessment
 
@@ -305,7 +307,7 @@ Python counts records with quotations across the five output lists, once per rec
 
 Measure each stage from start to finish, including loading initiated within the stage, model requests, agent requested tools, validation, and permitted format repairs. Hosted duration includes network and provider waits. Record whether a model was already loaded. Include model calls made by OCR tools in token counts. Missing required duration or usage data makes the relevant total null.
 
-For example, extraction taking 100 seconds, a failed verification taking 30 seconds, and a successful verifier retry taking 60 seconds give E runtime of 100 seconds and E+V runtime of 160 seconds. Retain the failed attempt's measurements in its run file and count the failure. This runtime describes successful processing, not total effort including failures. A failed E+V process has no successful E+V runtime; its successful E output can still be reported.
+For example, extraction taking 100 seconds, a failed verification taking 30 seconds, and a successful verifier retry taking 60 seconds give E runtime of 100 seconds and E+V runtime of 160 seconds. Retain the failed attempt's measurements in its run file and count the failure. This runtime describes successful processing, not total effort including failures. While verification is failed, show its failure and the successful extraction's operational measurements; reference preparation and quality assessment wait for a successful pair.
 
 ### Correctness scoring
 
@@ -329,7 +331,7 @@ Count each reference item once. A split output may need several records to cover
 | Extraction quality | Fully correct record rate | Reference records scored 1 ÷ all final reference records × 100. |
 | Extraction quality | Additional record count | Number of distinct additional items compared with the initial reference. |
 | Extraction quality | Supported additional record percentage | Additional items judged supported ÷ all additional items × 100. |
-| Evidence quality | Valid quotation percentage | Supplied quotation uses judged to support their assigned claims ÷ all supplied quotation uses × 100. |
+| Evidence quality | Valid quotation percentage | Supplied quotation uses confirmed faithful to the original PDF and supporting their assigned claims ÷ all supplied quotation uses × 100. |
 | Evidence quality | Page reference correctness | Correct cited pages ÷ all cited pages assessed across quotation uses × 100. |
 | Verifier and review outcomes | Expert confirmed initial resolutions | Count initially open issues the verifier marked resolved whose resolution experts judge justified. Report alongside the number claimed resolved. |
 
@@ -337,7 +339,7 @@ For ten reference records with six fully correct, two partial, and two omitted, 
 
 The quality denominator counts records across the five reference lists. Metadata, evidence objects, individual targets, and issue descriptions are not separate records. Unsupported additional items do not lower a reference based score, so always report additional record count and support percentage alongside the record rates.
 
-Check each quotation against the claims it is used to support and each cited page separately. A repeated quotation in different records counts as separate uses. Missing evidence is an extraction problem; quotation percentages describe evidence actually supplied.
+Experts check each quotation's wording and numbers against the original PDF and judge whether it supports the assigned claims. This includes visually checking OCR text against the page image for Valid quotation percentage. Check each cited page separately. A repeated quotation in different records counts as separate uses. Missing evidence is an extraction problem; quotation percentages describe evidence actually supplied.
 
 ### Reporting and interpretation
 
@@ -356,7 +358,7 @@ Build and test in the same six steps:
 1. **Add and prepare:** Document registration and page preparation.
 2. **Extract:** One complete local extractor run with saved content, issues, settings, responses, and measurements.
 3. **Verify:** Verification of that exact output, with the same source and tool access.
-4. **Prepare the reference:** Blank reference templates and validation, keeping model outputs hidden from reference authors.
+4. **Prepare the reference:** Require both successful linked outputs, then generate blank reference templates and validate completed references, keeping model outputs hidden from reference authors.
 5. **Assess:** Assessment templates, record matching, reference revisions, scoring, and evidence and resolution checks.
 6. **Analyze:** Calculation of the agreed measures, comparison notebooks, and practical research reporting.
 
@@ -364,7 +366,7 @@ Use the two development plans as an open, iterative process. Start with a straig
 
 Check that extraction, verification, JSON repairs, saved files, and measurements work together. Use selected expert coding and assessment examples to check the templates and calculations; complete independent references are not required for both development plans. Keep development runs outside the comparison and fix the study settings before starting it.
 
-Remaining development choices are model suitability and quantization, full document capacity, image/OCR support and software, tool call limits, and the overall summary rule. Hosted APIs remain an option. Expansion, release format, redistribution permissions, and storage for published artifacts can be decided later.
+Remaining development choices are model suitability and quantization, full document capacity, image support, shared OCR software, request timeout values, tool call limits, and the overall summary rule. Hosted APIs remain an option. Expansion, release format, redistribution permissions, and storage for published artifacts can be decided later.
 
 Retain short observations about model limitations, useful tools, failures, and necessary expert intervention. Record expectations separately from observed results. Use the existing change log when entries are requested. These observations support the practical contribution; a larger software tracking system is unnecessary.
 
@@ -384,7 +386,18 @@ All fields listed below are required unless marked optional. Unknown final field
 
 The linked `pages.json` is an ordered list with `page_number` (positive integer), `text` (string or null), `readable` (Boolean), `image_available` (Boolean), and `problem` (string or null). Include every known PDF page once. An empty string denotes a known blank page; null denotes unavailable text. If opening or counting fails, use null page count and an empty list. Processing an image only PDF requires a tested image or OCR route.
 
-**Profiles.** `configs/profiles.json` contains `schema_version: 1` and a `profiles` list. Each entry has:
+**Shared tool configuration.** `configs/profiles.json` contains `schema_version: 1`, one `document_tools` object, and a `profiles` list. The shared object contains:
+
+| Field | Type and meaning |
+| --- | --- |
+| `ocr_enabled` | Boolean; enable OCR in the shared comparison setup. |
+| `ocr_engine`, `ocr_language` | Strings, or null when OCR is disabled during development. |
+| `image_render_dpi` | Positive integer controlling page image resolution; render as PNG. |
+| `tool_timeout_seconds` | Positive number limiting one MCP tool request. |
+
+Validate the shared setup before comparison, including a tested OCR engine. Save a copy as `settings.document_tools` in every run. Require matching shared settings for the paired extractor and verifier; there are no per model OCR switches.
+
+**Model profiles.** Each entry in the `profiles` list has:
 
 | Field | Type and meaning |
 | --- | --- |
@@ -394,9 +407,10 @@ The linked `pages.json` is an ordered list with `page_number` (positive integer)
 | `context_limit` | Positive integer; tested model context setting. |
 | `prompt_paths` | Nonempty ordered list of instruction file paths. |
 | `max_tool_calls` | Positive integer limiting tool calls within a run. |
-| `tools` | Object: `image_input_enabled` and `ocr_enabled` (Booleans), `image_render_dpi` (positive integer), `ocr_engine` and `ocr_language` (strings or null when disabled). Render images as PNG. |
+| `model_timeout_seconds` | Positive number limiting one model request. |
+| `image_input_enabled` | Boolean; enable delivery of page images only after testing the model and serving setup. |
 
-Only send supported settings; retain unsupported generation controls as null. Test image input on the actual model and serving setup before enabling it for both agents.
+Only send supported generation settings; retain unsupported controls as null. Python enforces the model timeout from the profile and the tool timeout from the shared configuration. Direct image input is model specific; OCR returns text through MCP. Experts check OCR against the original page during assessment.
 
 **Run file.** A completed run's `output.json` contains:
 
@@ -412,8 +426,8 @@ Only send supported settings; retain unsupported generation controls as null. Te
 | `status` | `running`, `succeeded`, or `failed`. |
 | `started_at`, `ended_at` | UTC timestamps; end nullable while active. |
 | `elapsed_seconds` | Nonnegative number or null if unavailable. |
-| `settings` | Complete selected profile, prompt text in `prompt_texts` (ordered list of strings), and detected `environment` details below. |
-| `model_calls` | Ordered list with `input_tokens`, `output_tokens` (nonnegative integers or null), and `response_path` (string or null). |
+| `settings` | Complete selected profile, a saved copy of the shared `document_tools`, prompt text in `prompt_texts` (ordered list of strings), and detected `environment` details below. |
+| `model_calls` | Ordered list with `input_tokens`, `output_tokens` (nonnegative integers or null), `finish_reason` (provider reported completion reason, string or null), `truncated` (Boolean or null if undisclosed), and `response_path` (string or null). Reported truncation fails the run. |
 | `tool_log_path` | String or null if no tools were called. |
 | `content` | Appendix B object; null if no valid final content was produced. |
 | `review` | Object with `issues` list from Appendix C; null if no valid final review was produced. |
@@ -433,7 +447,7 @@ Agents return one object containing `content` and `review`. The verifier returns
 
 **Evidence.** Every record has an `evidence` list of objects containing `quote` (string) and `page_numbers` (nonempty list of unique positive integers). Each quote is an exact continuous passage and may span pages. Count the first PDF page as 1, regardless of printed labels. Multiple passages use separate evidence objects.
 
-Use OCR to recover visible text, labels, and written values from scans, tables, charts, and diagrams. Check recovered wording and numbers against the page image before quoting them, and cite the original PDF pages. Use separate evidence objects for separate passages, including headings or footnotes needed to understand a value. Flag unreadable or uncertain material as an issue; do not turn a generated visual description into a quotation. Flag missing or unsupported evidence and exclude unresolved material from a curated release.
+Agents can use OCR through MCP tools to recover text, labels, and written values from scans, tables, charts, and diagrams, quoting the recovered wording and citing original PDF pages. Experts check that wording and numbers against the page image during Valid quotation percentage assessment. Agent visual verification of OCR is not a prerequisite for extraction. Use separate evidence objects for separate passages, including headings or footnotes needed to understand a value. Flag unreadable or uncertain material as an issue; do not turn a generated visual description into a quotation. Flag missing or unsupported evidence and exclude unresolved material from a curated release.
 
 **Goals.**
 
@@ -503,7 +517,7 @@ An assessment contains `schema_version`, `plan_id`, `configuration` (`extractor_
 | `quotation_checks` | `record_id`, `evidence_index` (zero based list position), `claim_fields` (nonempty list of fields the quotation is used to support), `supports_claim` (Boolean or null), `page_checks` (list of `page_number` and `correct` Boolean or null), and `reason`. |
 | `resolution_checks` | `issue_id`, `justified` (Boolean or null), and `reason`. One row per initially open issue marked resolved by the verifier; empty for E. |
 
-IDs, descriptions, paths, and reasons are strings; plural ID fields are lists. Evidence follows Appendix B. Experts assign matches and which claims each quotation is used to support. Python prefills known identifiers, evidence lists, and pending rows, but does not assign meaning or scores. Support is true only if all assigned claims are supported. Check each cited page independently.
+IDs, descriptions, paths, and reasons are strings; plural ID fields are lists. Evidence follows Appendix B. Experts assign matches and which claims each quotation is used to support. Python prefills known identifiers, evidence lists, and pending rows, but does not assign meaning or scores. Mark `supports_claim` true only when the quotation faithfully matches the original PDF's wording and numbers and supports all assigned claims; include the OCR visual check here. Check each cited page independently.
 
 An omitted reference item has no output IDs and scores 0 once assessed. Undetermined support and null judgments are pending. Validate all required coverage before marking an assessment complete. Save revised completed assessments separately; analysis uses the explicitly selected assessment files.
 
@@ -520,12 +534,14 @@ Agents and experts use these rules when extracting records or completing the ref
 | Detail and status | Preserve qualifications, conditions, populations, geography, responsibility, and timing where stated. Code status as reported in the document; a past deadline does not establish completion. Use `not_specified` when status is not established. |
 | Links and scope | Link records only where the source explicitly associates them through wording, headings, or table structure. Use `plan_wide` for an explicitly overall statement without specific links and `unspecified` when scope is unclear. Do not assign responsibility solely because an agency issued the plan. |
 | Monitoring, benefits, and costs | Keep monitoring activity separate from evidence of reduced heat risk. Preserve whether benefits are expected, modelled, or observed, and whether costs are estimates, allocations, expenditure, or needs. Record shared budgets once; do not invent allocations or convert amounts. |
-| Quotations and OCR | Quote visible source text and numbers, including OCR recovered from visuals and checked against the page image. Include headings or footnotes needed to understand them. Cite original PDF page numbers, starting at 1. Do not present an inferred visual description as a quotation. |
+| Quotations and OCR | Agents may quote OCR text returned through MCP tools and flag uncertainty. Experts check recovered wording and numbers against the original page image during Valid quotation percentage assessment. Include necessary headings or footnotes and cite original PDF pages, starting at 1. Do not present an inferred visual description as a quotation. |
 | Missing information | Use `null`, `not_specified`, or empty lists as defined in the schema. Check empty categories before accepting absence. Unreadable material is a source gap, not proof of absence. Keep unresolved gaps or uncertainty as issues. |
 
 ### F. JSON validation and repair rules
 
 Apply the same fixed rules to extractor and verifier final responses. Fix the rules before comparison. Repairs may change formatting, but must preserve wording, factual values, and meaning. They do not add another model call or run ID.
+
+Check completion metadata before repairs. Reported truncation fails the run immediately, even if the response looks like valid JSON. Preserve the response for manual retry; do not append content to a cut-off answer. Record the provider's finish reason and truncation flag in `model_calls`, using null when undisclosed.
 
 Report detected errors as `syntax` when JSON cannot be read, `structure` when fields, types, or values violate the schema, `reference` when IDs, paths, or page references are invalid, or `other` for another validation failure. Show the line and column or field path where available, with a plain-language explanation. A syntax error may prevent later checks until it is repaired.
 
@@ -535,7 +551,7 @@ Apply only these repairs, in the listed order:
 | --- | --- |
 | JSON code fence | Remove a Markdown code fence only when it encloses the entire response and contains one JSON answer without surrounding commentary. |
 | Trailing comma | Remove a comma immediately before a closing brace or bracket, outside quoted text. |
-| Missing closing brace or bracket | Append missing closing delimiters only at the end, after a complete value, when the required nesting is unambiguous and generation ended normally. Do not complete cut-off responses, unfinished strings, or missing values. |
+| Missing closing brace or bracket | Append missing closing delimiters only at the end, after a complete value, when the required nesting is unambiguous and completion metadata confirms generation ended normally. Do not apply this repair when completion status is unknown, or complete cut-off responses, unfinished strings, or missing values. |
 | Single page number | Convert a positive integer in `page_numbers` to a one-item list, such as `12` to `[12]`. Check the page range afterward. Do not interpret text or guess page numbers. |
 | Missing field | Leave it missing and report a structure error. Do not insert `null`, `not_specified`, an empty list, or invented content. |
 | Other or ambiguous error | Leave it unchanged and report it. Do not guess values, change quotations, remove records or unknown fields, or repair broken references. |
@@ -552,12 +568,12 @@ A module is a Python file containing related functions. These proposed files bel
 | --- | --- | --- |
 | `cli.py` | 1 to 6 | Handle commands, select documents, profiles, and input files, and show status, errors, and repairs. Call the shared modules. |
 | `documents.py` | 1 | Register PDFs and collection details, check duplicate checksums, prepare page text, and record preparation problems. |
-| `agents.py` | 2 and 3 | Load the selected profile and prompts. Run extraction or verification, check context and tool limits, start the local MCP server and act as its client, and validate and save the final output. |
-| `models.py` | 2 and 3 | Connect to Ollama or a hosted provider. Send model requests, images, and tool messages; return raw responses and usage measurements. |
-| `document_tools.py` | 2 and 3 | Define the document tool functions and expose them through the local MCP server. Restrict access to the selected source and permitted run artifacts. |
+| `agents.py` | 2 and 3 | Load the selected profile, shared tool configuration, and prompts. Run the agent loop and start the MCP server as its client. Enforce context/tool limits and request timeouts, fail on reported truncation, and validate and save outputs. |
+| `models.py` | 2 and 3 | Connect to Ollama or a hosted provider. Send model requests, images, and tool messages within the request timeout; return raw responses, completion metadata, and usage measurements. |
+| `document_tools.py` | 2 and 3 | Define document tool functions and expose them through the local MCP server using the shared configuration. Restrict access to the selected source and permitted run artifacts. |
 | `validation.py` | Shared | Check JSON syntax, required fields, types, IDs, links, page ranges, and assessment coverage. Classify errors; for model final responses, call `repair.py` and validate again. |
 | `repair.py` | 2 and 3 | Apply only the format repairs in Appendix F. Return the repaired text and details of each change for the validation report. |
-| `expert_files.py` | 4 and 5 | Generate blank reference templates for Prepare the reference, then assessment templates for Assess; import completed expert files. Experts supply matches and judgments. |
+| `expert_files.py` | 4 and 5 | Require both successful linked outputs before generating or accepting an initial reference. Generate reference and assessment templates and import completed expert files. Experts supply matches and judgments. |
 | `metrics.py` | 6 | Calculate the agreed measures from selected run and assessment files, and export tables under `runs/analysis/`. Notebooks save figures there too. |
 | `storage.py` | Shared | Allocate IDs, preserve inputs and completed files, and save runs, raw responses, logs, reports, and status. |
 
@@ -602,12 +618,14 @@ The model revision, software versions, settings, timings, and tokens are illustr
     "context_limit": 32768,
     "prompt_paths": ["prompts/extractor.md"],
     "max_tool_calls": 10,
-    "tools": {
-      "image_input_enabled": false,
-      "ocr_enabled": false,
+    "model_timeout_seconds": 600,
+    "image_input_enabled": false,
+    "document_tools": {
+      "ocr_enabled": true,
       "image_render_dpi": 150,
-      "ocr_engine": null,
-      "ocr_language": null
+      "ocr_engine": "illustrative-ocr-engine",
+      "ocr_language": "eng",
+      "tool_timeout_seconds": 120
     },
     "prompt_texts": [
       "Extract stated heat adaptation records with source quotations and PDF page numbers. Flag uncertain or incomplete records. Return content and review."
@@ -624,7 +642,7 @@ The model revision, software versions, settings, timings, and tokens are illustr
       "model_client_version": "illustrative-version",
       "preparation_version": "v1",
       "tools_version": "v1",
-      "ocr_version": null,
+      "ocr_version": "illustrative-version",
       "model_loaded_at_start": true
     }
   },
@@ -632,6 +650,8 @@ The model revision, software versions, settings, timings, and tokens are illustr
     {
       "input_tokens": 1024,
       "output_tokens": 256,
+      "finish_reason": "stop",
+      "truncated": false,
       "response_path": "runs/plan_0001/run_extract_0001/responses/response_01.json"
     }
   ],

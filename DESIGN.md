@@ -6,7 +6,7 @@
 
 This study will build and evaluate a workflow that pairs open weight large language models (LLMs) with heat adaptation experts to extract data from government plans. The main contribution is practical knowledge about building the workflow, model limitations, useful tools, and where expert intervention is needed. The dataset is also an important output and may support future fine-tuning.
 
-Sections 1 to 6 explain the study and processing steps. The appendix defines the JSON fields, gives an example for implementation, provides shared coding instructions and JSON repair rules, and lists the planned Python modules. This document describes proposed software; it does not mean the software has been built or tested.
+Sections 1 to 6 explain the study and processing steps. The appendix provides JSON field definitions, shared coding and repair rules, planned Python modules, and a worked example. This document describes proposed software; it does not mean the software has been built or tested.
 
 ## 1. Research questions and study design
 
@@ -40,7 +40,7 @@ Keep failed attempts. Retry manually after fixing the problem. A deliberate repe
 
 Fix models, prompts, tools, document preparation, and scoring rules before comparison. Changes to these choices require a documented revision of the study setup; do not silently pool outputs from different setups.
 
-## 2. Plans, extracted content, and correctness
+## 2. Plans and extracted content
 
 Experts screen documents before import. Eligible documents are final government or public agency plans that are publicly available in English, were published or updated in 2010 or later, and address heat adaptation directly or through a dedicated heat section with at least one heat action. Prioritize recent versions. The original PDF must be readable by a person and have stable PDF page numbers, including readable scans.
 
@@ -56,21 +56,7 @@ Each output contains plan metadata and five content lists:
 | Benefits and impacts | Expected or reported outcomes, including adverse impacts. |
 | Costs and resources | Financial costs and other resource requirements. |
 
-Every content record includes quotations and PDF page references. Preserve what the source states, including qualifications, quantities, populations, and timing. Do not infer a goal solely from an action or interpret monitoring activity as proof of reduced heat risk. Appendix B defines the fields; Appendix F gives shared coding instructions for agents and experts.
-
-### Correctness scoring
-
-Match model records to expert reference records by meaning. Different wording is acceptable.
-
-| Score | Meaning |
-| --- | --- |
-| 1 | All required substantive information is correct, with no unsupported substantive additions. |
-| 0.5 | Some substantive information is correct, but at least one required part is wrong, missing, or unsupported. |
-| 0 | No substantive information is correct, or the reference record is omitted. |
-
-For example, a correctly identified action with an incorrect implementation status scores 0.5. Correctly recording that the source does not specify a detail does not reduce the score. Assess evidence separately from content.
-
-Count each reference item once. A split output may need several records to cover one reference item; a combined output may cover several reference items. Duplicates earn no extra credit.
+Every content record includes quotations and PDF page references. Preserve what the source states, including qualifications, quantities, populations, and timing. Do not infer a goal solely from an action or interpret monitoring activity as proof of reduced heat risk. Appendix B defines the fields; Appendix E gives shared coding instructions for agents and experts.
 
 ## 3. Processing one document
 
@@ -117,13 +103,23 @@ Process one document at a time initially. The CLI lists registered documents and
 
 Select profiles explicitly. To verify or retry verification, select the exact successful extractor run. Verification uses the same prepared source path as that run. Completed work is read from its saved file; the software does not search automatically for equivalent runs.
 
-**JSON validation and repair.** A Python module checks the final response, reports syntax, structure, reference, or other errors, and applies only the permitted format repairs in Appendix G. It preserves the original response, records each repair, and validates the result again. Repairs happen within the same run without another model call. Missing fields and other errors outside the repair rules are reported and left unchanged; any remaining validation error fails the run.
+**JSON validation and repair.** A Python module checks the final response, reports syntax, structure, reference, or other errors, and applies only the permitted format repairs in Appendix F. It preserves the original response, records each repair, and validates the result again. Repairs happen within the same run without another model call. Missing fields and other errors outside the repair rules are reported and left unchanged; any remaining validation error fails the run.
 
 A failed model request or unhandled error also ends that run. Recoverable source problems stay in the issue list. Stop on failure, retain available responses and measurements, and retry manually with a new run ID. There are no automatic retries or retry count settings.
 
 If verification fails, the successful E output remains available. Retry only verification using the same saved extraction. If a process is interrupted, confirm it has stopped before marking it failed; do not invent an elapsed duration from the later recovery time.
 
 Completed files remain unchanged. Save expert corrections separately after assessment. If inputs or settings change, start new work and label it appropriately. Missing or damaged saved inputs must be restored or recreated explicitly before use.
+
+### Simple issue handling
+
+Keep one issue per affected record, describing its problems together. For an omission, empty category, or source gap, describe the distinct item or problem and cite affected pages. Keep the same issue ID when the verifier adds a previously missing record.
+
+Each issue has a description, optional type, origin stage, open/resolved status, and resolution explanation. Keep every extractor issue in the verifier output, including already resolved ones. Add new verifier issues with new IDs.
+
+Resolve an issue only when all its concerns are addressed or source checking establishes that correction is unnecessary. A justified confirmation of absence can resolve uncertainty without correcting an error. Correctly unspecified source details alone do not create issues. Check empty categories before accepting absence.
+
+Open issues remain for expert review. Source recovery happens within the agent's tools or through an explicit later rerun; it does not need a separate routing system. Keep tool activity in the run log and compare the saved E and E+V issue lists. No separate concern or event history is required.
 
 ## 4. Python system, settings, and saved files
 
@@ -145,7 +141,7 @@ Start with tools for reading page text, rendering page images, OCR, and locating
 
 ### Workflow
 
-The CLI selects and starts each stage. Arrows show processing order. Experts fill the initial reference from the original PDF with model outputs hidden. All stages use `validation.py` and `storage.py`; model final responses also use `repair.py`. Notebooks call `metrics.py` for analysis. Appendix H describes the modules.
+The CLI selects and starts each stage. Arrows show processing order. Experts fill the initial reference from the original PDF with model outputs hidden. All stages use `validation.py` and `storage.py`; model final responses also use `repair.py`. Notebooks call `metrics.py` for analysis. Appendix G describes the modules.
 
 ```mermaid
 flowchart TD
@@ -239,18 +235,33 @@ Python calculates these from saved run files.
 | Operational performance | Successful processing runtime | E: successful extractor duration. E+V: that same duration plus successful verifier duration. Exclude failed attempts, time between attempts, initial preparation, and human review. |
 | Operational performance | Tokens used | Sum input and output tokens across all model calls within the selected successful stages. Report input, output, and total separately. |
 | Operational performance | Failed executions | Count distinct failed extractor and verifier run IDs in the comparison work, including retries. Report by stage; shared extraction failures count once. |
+| Evidence quality | Records with supporting quotations | Number of output records with at least one quotation listed. |
 | Verifier and review outcomes | Initially open issues | Count open issues in the shared extractor output. |
 | Verifier and review outcomes | Initial issues marked resolved | Count initially open issues marked resolved by the verifier. |
 | Verifier and review outcomes | Issues remaining for expert review | Count all open issues in each output. |
 | Verifier and review outcomes | New verifier issues | Count issue IDs in the verifier output absent from the extractor output, including new issues the verifier resolves. |
 
+Python counts records with supporting quotations across the five output lists, once per record when at least one nonempty quotation is listed. This counts quotation presence without judging validity. Records without quotations do not count.
+
 Measure each stage from start to finish, including loading initiated within the stage, model requests, agent requested tools, validation, and permitted format repairs. Hosted duration includes network and provider waits. Record whether a model was already loaded. Include model calls made by OCR tools in token counts. Missing required duration or usage data makes the relevant total null.
 
 For example, extraction taking 100 seconds, a failed verification taking 30 seconds, and a successful verifier retry taking 60 seconds give E runtime of 100 seconds and E+V runtime of 160 seconds. Retain the failed attempt's measurements in its run file and count the failure. This runtime describes successful processing, not total effort including failures. A failed E+V process has no successful E+V runtime; its successful E output can still be reported.
 
-### Measures after expert assessment
+### Correctness scoring
 
-The record quotation count is available before assessment; the other measures below require expert judgments.
+Match model records to expert reference records by meaning. Different wording is acceptable.
+
+| Score | Meaning |
+| --- | --- |
+| 1 | All required substantive information is correct, with no unsupported substantive additions. |
+| 0.5 | Some substantive information is correct, but at least one required part is wrong, missing, or unsupported. |
+| 0 | No substantive information is correct, or the reference record is omitted. |
+
+For example, a correctly identified action with an incorrect implementation status scores 0.5. Correctly recording that the source does not specify a detail does not reduce the score. Assess evidence separately from content.
+
+Count each reference item once. A split output may need several records to cover one reference item; a combined output may cover several reference items. Duplicates earn no extra credit.
+
+### Measures after expert assessment
 
 | Category | Measure | Calculation |
 | --- | --- | --- |
@@ -258,7 +269,6 @@ The record quotation count is available before assessment; the other measures be
 | Extraction quality | Fully correct record rate | Reference records scored 1 ÷ all final reference records × 100. |
 | Extraction quality | Additional record count | Number of distinct additional items compared with the initial reference. |
 | Extraction quality | Supported additional record percentage | Additional items judged supported ÷ all additional items × 100. |
-| Evidence quality | Records with supporting quotations | Number of output records with at least one quotation listed. |
 | Evidence quality | Valid quotation percentage | Supplied quotation uses judged to support their assigned claims ÷ all supplied quotation uses × 100. |
 | Evidence quality | Page reference correctness | Correct cited pages ÷ all cited pages assessed across quotation uses × 100. |
 | Verifier and review outcomes | Expert confirmed initial resolutions | Count initially open issues the verifier marked resolved whose resolution experts judge justified. Report alongside the number claimed resolved. |
@@ -267,25 +277,17 @@ For ten reference records with six fully correct, two partial, and two omitted, 
 
 The quality denominator counts records across the five reference lists. Metadata, evidence objects, individual targets, and issue descriptions are not separate records. Unsupported additional items do not lower a reference based score, so always report additional record count and support percentage alongside the record rates.
 
-Python counts records with supporting quotations across the five output lists, once per record when at least one nonempty quotation is listed. This counts quotation presence without judging validity. Records without quotations do not count.
-
 Check each quotation against the claims it is used to support and each cited page separately. A repeated quotation in different records counts as separate uses. Missing evidence is an extraction problem; quotation percentages describe evidence actually supplied.
 
-Keep E and E+V paired by plan. Report per plan results and underlying counts. The proposed overall summary is the mean of valid per plan percentages, with the number of contributing plans; confirm this after the development assessment. Zero denominators are not applicable, not zero. Pending checks make the corresponding final measure unavailable until completed.
+### Reporting and interpretation
+
+Keep E and E+V paired by plan. Report per plan results and underlying counts. Treat overall summaries as descriptive. The proposed overall summary is the mean of valid per plan percentages, with the number of contributing plans; confirm this after the development assessment. Zero denominators are not applicable, not zero. Pending checks make the corresponding final measure unavailable until completed.
+
+Interpret findings within the small comparison set and the participating experts' judgments. Different outputs may share errors, and the expert reference can also require correction. Saving the initial reference and shared revisions makes those changes visible.
 
 Issue counts are indicators of review workload. They do not measure expert review time. Issues marked resolved by the verifier are claims; expert confirmation and changes in extraction quality establish whether the verifier helped.
 
 Deferred analyses are issue and referral percentages by type, a genuine issue rate across all flags, and a separately coded count of unflagged problems. Optional issue types may still be saved. Detailed results by content category can be calculated later from the same record scores.
-
-### Simple issue handling
-
-Keep one issue per affected record, describing its problems together. For an omission, empty category, or source gap, describe the distinct item or problem and cite affected pages. Keep the same issue ID when the verifier adds a previously missing record.
-
-Each issue has a description, optional type, origin stage, open/resolved status, and resolution explanation. Keep every extractor issue in the verifier output, including already resolved ones. Add new verifier issues with new IDs.
-
-Resolve an issue only when all its concerns are addressed or source checking establishes that correction is unnecessary. A justified confirmation of absence can resolve uncertainty without correcting an error. Correctly unspecified source details alone do not create issues. Check empty categories before accepting absence.
-
-Open issues remain for expert review. Source recovery happens within the agent's tools or through an explicit later rerun; it does not need a separate routing system. Keep tool activity in the run log and compare the saved E and E+V issue lists. No separate concern or event history is required.
 
 ## 6. Implementation order and remaining decisions
 
@@ -305,15 +307,13 @@ Remaining development choices are model suitability and quantization, full docum
 
 Retain short observations about model limitations, useful tools, failures, and necessary expert intervention. Record expectations separately from observed results. Use the existing change log when entries are requested. These observations support the practical contribution; a larger software tracking system is unnecessary.
 
-Interpret findings within the small comparison set and the participating experts' judgments. Report changes for each plan and treat overall summaries as descriptive. Different outputs may share errors, and the expert reference can also require correction. Saving the initial reference and shared revisions makes those changes visible.
-
-## Appendix: JSON fields, example, and rules
+## Appendix: JSON fields, rules, and example
 
 A schema defines allowed fields, types, and values. The following definitions guide implementation; validators and templates will be created when coding is authorized.
 
 Use JSON objects for records and lists for multiple items. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are relative to the project root. Use `[]` for empty lists, `null` for unavailable nullable values, and the defined enum value such as `not_specified` where required. An enum is a fixed set of permitted values.
 
-All fields listed below are required unless marked optional. Unknown final fields and invalid values fail validation unless corrected by a permitted format repair in Appendix G. IDs and paths must resolve, and page numbers must be within the original PDF's page range.
+All fields listed below are required unless marked optional. Unknown final fields and invalid values fail validation unless corrected by a permitted format repair in Appendix F. IDs and paths must resolve, and page numbers must be within the original PDF's page range.
 
 ### A. Registry, source, profiles, and run details
 
@@ -397,7 +397,7 @@ Pair each target with its deadline. Preserve quantities, units, baselines, and t
 
 Planned means proposed or committed without evidence work has begun; in progress means underway or functioning; completed means finished; discontinued means stopped or withdrawn. Use not specified when the source does not establish status. Issuing a plan does not establish responsibility for each action.
 
-Combine repeated mentions of the same action. Split distinct actions into separate records, even when they appear in one statement. Keep each action's stated details with that action. Appendix F gives examples.
+Combine repeated mentions of the same action. Split distinct actions into separate records, even when they appear in one statement. Keep each action's stated details with that action. Appendix E gives examples.
 
 **Monitoring, benefits, and costs.** All three have `scope`, `related_goal_ids`, `related_action_ids`, and `evidence`, plus these fields:
 
@@ -446,7 +446,63 @@ IDs, descriptions, paths, and reasons are strings; plural ID fields are lists. E
 
 An omitted reference item has no output IDs and scores 0 once assessed. Undetermined support and null judgments are pending. Validate all required coverage before marking an assessment complete. Save revised completed assessments separately; analysis uses the explicitly selected assessment files.
 
-### E. Compact run example
+### E. Shared coding instructions
+
+Agents and experts use these rules when extracting records or completing the reference. Apply them with the field definitions in Appendix B.
+
+| Topic | Rule |
+| --- | --- |
+| Heat relevance | Extract information explicitly connected to heat adaptation. Include actions explicitly intended in the plan to reduce heat risk or its impacts. A clear heat-specific heading can establish this context. Do not infer heat relevance from general climate, greening, or health measures. |
+| Separate actions | Record one distinct action per record. Split "plant trees and install drinking fountains" into two actions. Keep quantities, locations, implementers, and timing with the relevant action. |
+| Repeated information | Combine repeated descriptions of the same item and retain the evidence needed for its details. Different wording alone does not create another record. Flag conflicting source statements rather than choosing one without explanation. |
+| Goals and targets | Record stated goals, not goals inferred from actions. Pair each target with its stated deadline, preserving quantities, units, and baselines. |
+| Detail and status | Preserve qualifications, conditions, populations, geography, responsibility, and timing where stated. Code status as reported in the document; a past deadline does not establish completion. Use `not_specified` when status is not established. |
+| Links and scope | Link records only where the source explicitly associates them through wording, headings, or table structure. Use `plan_wide` for an explicitly overall statement without specific links and `unspecified` when scope is unclear. Do not assign responsibility solely because an agency issued the plan. |
+| Monitoring, benefits, and costs | Keep monitoring activity separate from evidence of reduced heat risk. Preserve whether benefits are expected, modelled, or observed, and whether costs are estimates, allocations, expenditure, or needs. Record shared budgets once; do not invent allocations or convert amounts. |
+| Quotations and OCR | Quote visible source text and numbers, including OCR recovered from visuals and checked against the page image. Include headings or footnotes needed to understand them. Cite original PDF page numbers, starting at 1. Do not present an inferred visual description as a quotation. |
+| Missing information | Use `null`, `not_specified`, or empty lists as defined in the schema. Check empty categories before accepting absence. Unreadable material is a source gap, not proof of absence. Keep unresolved gaps or uncertainty as issues. |
+
+### F. JSON validation and repair rules
+
+Apply the same fixed rules to extractor and verifier final responses. Fix the rules before comparison. Repairs may change formatting, but must preserve wording, factual values, and meaning. They do not add another model call or run ID.
+
+Report detected errors as `syntax` when JSON cannot be read, `structure` when fields, types, or values violate the schema, `reference` when IDs, paths, or page references are invalid, or `other` for another validation failure. Show the line and column or field path where available, with a plain-language explanation. A syntax error may prevent later checks until it is repaired.
+
+Apply only these repairs, in the listed order:
+
+| Case | Rule |
+| --- | --- |
+| JSON code fence | Remove a Markdown code fence only when it encloses the entire response and contains one JSON answer without surrounding commentary. |
+| Trailing comma | Remove a comma immediately before a closing brace or bracket, outside quoted text. |
+| Missing closing brace or bracket | Append missing closing delimiters only at the end, after a complete value, when the required nesting is unambiguous and generation ended normally. Do not complete cut-off responses, unfinished strings, or missing values. |
+| Single page number | Convert a positive integer in `page_numbers` to a one-item list, such as `12` to `[12]`. Check the page range afterward. Do not interpret text or guess page numbers. |
+| Missing field | Leave it missing and report a structure error. Do not insert `null`, `not_specified`, an empty list, or invented content. |
+| Other or ambiguous error | Leave it unchanged and report it. Do not guess values, change quotations, remove records or unknown fields, or repair broken references. |
+
+Preserve the raw response. Save any repaired candidate separately as `responses/repaired_final.txt`, then repeat all format and reference checks. A run succeeds only if the final candidate passes every check. Otherwise, save the available files and fail the run. A repaired response that passes is part of the successful run; initial format errors are reported but do not count as a separate failed execution. Expert assessment still determines correctness.
+
+When final-response validation is attempted, save `validation_report.json` in the run folder with `raw_response_path`, `repaired_response_path` (null if unchanged), `initial_errors` and `remaining_errors` (lists of errors), `repairs` (list), and `valid` (Boolean). Each error has `category`, `location` (string or null), and `message`. Each repair has `rule`, `location`, `before`, and `after`, recorded as strings. Paths and other text fields are strings. The CLI shows the repairs, remaining errors, and report path. On failure, the run's `error` field summarizes the remaining problem.
+
+### G. Planned Python modules
+
+A module is a Python file containing related functions. These proposed files belong in `src/`; they have not been implemented. Stage numbers refer to section 3.
+
+| Module | Stage | Responsibility |
+| --- | --- | --- |
+| `cli.py` | 1 to 6 | Handle commands, select documents, profiles, and input files, and show status, errors, and repairs. Call the shared modules. |
+| `documents.py` | 1 | Register PDFs and collection details, check duplicate checksums, prepare page text, and record preparation problems. |
+| `agents.py` | 2 and 3 | Load the selected profile and prompts. Run extraction or verification, check context and tool limits, request tools, and validate and save the final output. |
+| `models.py` | 2 and 3 | Connect to Ollama or a hosted provider. Send model requests, images, and tool messages; return raw responses and usage measurements. |
+| `document_tools.py` | 2 and 3 | Expose the local MCP tools for page text, images, OCR, and quotation lookup. Restrict access to the selected source and permitted run artifacts. |
+| `validation.py` | Shared | Check JSON syntax, required fields, types, IDs, links, page ranges, and assessment coverage. Classify errors; for model final responses, call `repair.py` and validate again. |
+| `repair.py` | 2 and 3 | Apply only the format repairs in Appendix F. Return the repaired text and details of each change for the validation report. |
+| `expert_files.py` | 4 and 5 | Generate blank references and assessment templates in the agreed order, and import completed expert files. Experts supply matches and judgments. |
+| `metrics.py` | 6 | Calculate the agreed measures from selected run and assessment files, and export analysis tables. |
+| `storage.py` | Shared | Allocate IDs, preserve inputs and completed files, and save runs, raw responses, logs, reports, and status. |
+
+Notebooks in `notebooks/` use `metrics.py` to compare E and E+V and produce tables and figures. Keep calculation rules in the module so the CLI and notebooks use the same functions.
+
+### H. Compact run example
 
 This fictional extractor output has one action and one bundled issue. The quote says the action is planned and gives a quantity and deadline; the extraction wrongly says completed and omits those details. That action would receive partial credit. Empty lists illustrate structure, not a complete plan.
 
@@ -570,59 +626,3 @@ The model revision, software versions, settings, timings, and tokens are illustr
 ```
 
 Verification reads this complete saved output. Its run file sets `stage: verifier` and `input_run_id: run_extract_0001`, then saves its full revised `content` and `review` alongside its own settings and measurements. For a supported correction, `action_0001` remains the same record ID and `issue_0001` remains the same issue ID; its status becomes resolved with a source based explanation.
-
-### F. Shared coding instructions
-
-Agents and experts use these rules when extracting records or completing the reference. Apply them with the field definitions in Appendix B.
-
-| Topic | Rule |
-| --- | --- |
-| Heat relevance | Extract information explicitly connected to heat adaptation. Include actions explicitly intended in the plan to reduce heat risk or its impacts. A clear heat-specific heading can establish this context. Do not infer heat relevance from general climate, greening, or health measures. |
-| Separate actions | Record one distinct action per record. Split "plant trees and install drinking fountains" into two actions. Keep quantities, locations, implementers, and timing with the relevant action. |
-| Repeated information | Combine repeated descriptions of the same item and retain the evidence needed for its details. Different wording alone does not create another record. Flag conflicting source statements rather than choosing one without explanation. |
-| Goals and targets | Record stated goals, not goals inferred from actions. Pair each target with its stated deadline, preserving quantities, units, and baselines. |
-| Detail and status | Preserve qualifications, conditions, populations, geography, responsibility, and timing where stated. Code status as reported in the document; a past deadline does not establish completion. Use `not_specified` when status is not established. |
-| Links and scope | Link records only where the source explicitly associates them through wording, headings, or table structure. Use `plan_wide` for an explicitly overall statement without specific links and `unspecified` when scope is unclear. Do not assign responsibility solely because an agency issued the plan. |
-| Monitoring, benefits, and costs | Keep monitoring activity separate from evidence of reduced heat risk. Preserve whether benefits are expected, modelled, or observed, and whether costs are estimates, allocations, expenditure, or needs. Record shared budgets once; do not invent allocations or convert amounts. |
-| Quotations and OCR | Quote visible source text and numbers, including OCR recovered from visuals and checked against the page image. Include headings or footnotes needed to understand them. Cite original PDF page numbers, starting at 1. Do not present an inferred visual description as a quotation. |
-| Missing information | Use `null`, `not_specified`, or empty lists as defined in the schema. Check empty categories before accepting absence. Unreadable material is a source gap, not proof of absence. Keep unresolved gaps or uncertainty as issues. |
-
-### G. JSON validation and repair rules
-
-Apply the same fixed rules to extractor and verifier final responses. Fix the rules before comparison. Repairs may change formatting, but must preserve wording, factual values, and meaning. They do not add another model call or run ID.
-
-Report detected errors as `syntax` when JSON cannot be read, `structure` when fields, types, or values violate the schema, `reference` when IDs, paths, or page references are invalid, or `other` for another validation failure. Show the line and column or field path where available, with a plain-language explanation. A syntax error may prevent later checks until it is repaired.
-
-Apply only these repairs, in the listed order:
-
-| Case | Rule |
-| --- | --- |
-| JSON code fence | Remove a Markdown code fence only when it encloses the entire response and contains one JSON answer without surrounding commentary. |
-| Trailing comma | Remove a comma immediately before a closing brace or bracket, outside quoted text. |
-| Missing closing brace or bracket | Append missing closing delimiters only at the end, after a complete value, when the required nesting is unambiguous and generation ended normally. Do not complete cut-off responses, unfinished strings, or missing values. |
-| Single page number | Convert a positive integer in `page_numbers` to a one-item list, such as `12` to `[12]`. Check the page range afterward. Do not interpret text or guess page numbers. |
-| Missing field | Leave it missing and report a structure error. Do not insert `null`, `not_specified`, an empty list, or invented content. |
-| Other or ambiguous error | Leave it unchanged and report it. Do not guess values, change quotations, remove records or unknown fields, or repair broken references. |
-
-Preserve the raw response. Save any repaired candidate separately as `responses/repaired_final.txt`, then repeat all format and reference checks. A run succeeds only if the final candidate passes every check. Otherwise, save the available files and fail the run. A repaired response that passes is part of the successful run; initial format errors are reported but do not count as a separate failed execution. Expert assessment still determines correctness.
-
-When final-response validation is attempted, save `validation_report.json` in the run folder with `raw_response_path`, `repaired_response_path` (null if unchanged), `initial_errors` and `remaining_errors` (lists of errors), `repairs` (list), and `valid` (Boolean). Each error has `category`, `location` (string or null), and `message`. Each repair has `rule`, `location`, `before`, and `after`, recorded as strings. Paths and other text fields are strings. The CLI shows the repairs, remaining errors, and report path. On failure, the run's `error` field summarizes the remaining problem.
-
-### H. Planned Python modules
-
-A module is a Python file containing related functions. These proposed files belong in `src/`; they have not been implemented. Stage numbers refer to section 3.
-
-| Module | Stage | Responsibility |
-| --- | --- | --- |
-| `cli.py` | 1 to 6 | Handle commands, select documents, profiles, and input files, and show status, errors, and repairs. Call the shared modules. |
-| `documents.py` | 1 | Register PDFs and collection details, check duplicate checksums, prepare page text, and record preparation problems. |
-| `agents.py` | 2 and 3 | Load the selected profile and prompts. Run extraction or verification, check context and tool limits, request tools, and validate and save the final output. |
-| `models.py` | 2 and 3 | Connect to Ollama or a hosted provider. Send model requests, images, and tool messages; return raw responses and usage measurements. |
-| `document_tools.py` | 2 and 3 | Expose the local MCP tools for page text, images, OCR, and quotation lookup. Restrict access to the selected source and permitted run artifacts. |
-| `validation.py` | Shared | Check JSON syntax, required fields, types, IDs, links, page ranges, and assessment coverage. Classify errors; for model final responses, call `repair.py` and validate again. |
-| `repair.py` | 2 and 3 | Apply only the format repairs in Appendix G. Return the repaired text and details of each change for the validation report. |
-| `expert_files.py` | 4 and 5 | Generate blank references and assessment templates in the agreed order, and import completed expert files. Experts supply matches and judgments. |
-| `metrics.py` | 6 | Calculate the agreed measures from selected run and assessment files, and export analysis tables. |
-| `storage.py` | Shared | Allocate IDs, preserve inputs and completed files, and save runs, raw responses, logs, reports, and status. |
-
-Notebooks in `notebooks/` use `metrics.py` to compare E and E+V and produce tables and figures. Keep calculation rules in the module so the CLI and notebooks use the same functions.

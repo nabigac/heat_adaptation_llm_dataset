@@ -2,7 +2,7 @@
 
 **Study design and technical implementation (draft)**
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-01
 
 This study will build and evaluate a workflow that pairs open weight large language models (LLMs) with heat adaptation experts to extract data from government plans. The main contribution is practical knowledge about building the workflow, model limitations, useful tools, and where expert intervention is needed. The dataset is also an important output and may support future fine-tuning.
 
@@ -38,7 +38,7 @@ For each plan, use the first successful comparison extractor run and the first s
 
 Keep failed attempts. Retry manually after fixing the problem. A deliberate repeat of successful work is exploratory and does not replace the main comparison output. Do not select outputs based on expert scores.
 
-Fix models, prompts, tools, document preparation, and scoring rules before comparison. Changes to these choices require a documented revision of the study setup; do not silently pool outputs from different setups.
+Fix models, prompts, tools, document preparation, and scoring rules before comparison. Changes to these choices require a documented revision of the study setup; do not silently pool outputs from different setups. Before analysis, check that selected runs match the fixed settings for their roles and that each E/E+V pair used the same prepared source and shared tool settings.
 
 ## 2. Plans and extracted content
 
@@ -157,17 +157,20 @@ flowchart TD
     eOutput -->|"Content and issues"| verify
     verify --> evOutput["Saved E+V output"]
     pdf -->|"PDF only"| reference["4. Prepare the reference"]
-    reference -->|"Initial reference"| matchRecords
-    eOutput --> matchRecords
-    evOutput --> matchRecords
+    reference -->|"Initial reference"| assess
+    eOutput --> assess
+    evOutput --> assess
     subgraph assess["5. Assess"]
         matchRecords["Match records and review additions"] --> finalReference["Shared final reference"]
         finalReference --> scoring["Score and complete checks"]
     end
-    scoring --> analysis["6. Analyze"]
+    assess --> analysis["6. Analyze"]
     sharedSupport["Model calls and MCP tools"] -.-> extract
     sharedSupport -.-> verify
-    style assess fill:#F5F5F5,stroke:#B3B3B3,color:#000000
+    classDef default fill:#ECECFF,stroke:#9370DB,color:#000000
+    classDef assessmentStep fill:transparent,stroke:#9370DB,color:#000000
+    class matchRecords,finalReference,scoring assessmentStep
+    style assess fill:#ECECFF,stroke:#9370DB,color:#000000
 ```
 
 Assess (step 5) includes matching, reference revisions, scoring, evidence checks, and resolution checks. Analyze (step 6) calculates measures and uses notebooks to compare E and E+V and produce tables and figures. Appendix G maps the six steps to Python modules.
@@ -189,7 +192,7 @@ Later, explore Hugging Face hosted APIs if needed. Keep the workflow and MCP too
 
 Keep named extractor and verifier profiles in one editable `configs/profiles.json` file. Its shared `document_tools` object configures the MCP server once; the `profiles` list holds model settings. Add a profile by copying an entry, giving it a new name, and changing its settings. Select names through the CLI. Python saves the selected profile, shared tool settings, and prompt text inside each run, so later edits cannot alter earlier results.
 
-A profile specifies the model and endpoint, generation and context settings, prompt files, model request timeout, tool call limit, and direct image input setting. The shared tool configuration specifies OCR, page rendering, and tool request timeout. Both comparison runs use the same shared settings. Python adds detected model and software versions, hardware, and the Git commit. Appendix A defines these fields. At the tool call limit, request a final answer and leave unresolved issues open; output that remains invalid after permitted repairs still fails the run. This limit is separate from manual retries.
+A profile specifies the model and endpoint, generation and context settings, prompt files, model request timeout, tool call limit, and direct image input setting. The shared tool configuration specifies OCR, page rendering, and tool request timeout. Both comparison runs use the same shared settings. Python adds detected model and software versions, hardware, and the Git commit. Appendix A defines these fields. Python enforces the context limit before each model request and the tool-call limit before each tool execution. At the tool call limit, request a final answer and leave unresolved issues open; output that remains invalid after permitted repairs still fails the run. This limit is separate from manual retries.
 
 ### Files and identifiers
 

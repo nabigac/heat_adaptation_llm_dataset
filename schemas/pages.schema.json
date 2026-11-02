@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Heat adaptation prepared pages",
+  "description": "Page text and preparation problems defined in DESIGN.md Appendix A.",
+  "$comment": "Python must check that page numbers are complete, unique, ordered, and consistent with the original PDF and preparation.json. An empty list is needed when opening or counting fails. This schema checks individual page fields; it cannot establish that extracted text is complete or that an image or OCR route works.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "page_number",
+      "text",
+      "text_source",
+      "readable",
+      "image_available",
+      "problem"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "page_number": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Original PDF page number, counting the first PDF page as 1 regardless of printed labels."
+      },
+      "text": {
+        "type": ["string", "null"],
+        "description": "Prepared page text. An empty string denotes a known blank page; null denotes unavailable text."
+      },
+      "text_source": {
+        "type": ["string", "null"],
+        "enum": ["native", "ocr", "mixed", null],
+        "description": "How the stored text was obtained, or null when text is unavailable. This records origin, not accuracy."
+      },
+      "readable": {
+        "type": "boolean",
+        "description": "Whether preparation established a usable reading route for this page."
+      },
+      "image_available": {
+        "type": "boolean",
+        "description": "Whether preparation established that a page image can be supplied."
+      },
+      "image_path": {
+        "type": ["string", "null"], "minLength": 1,
+        "description": "Version 3: project-relative path to a preserved full-page PNG, or null when none was rendered."
+      },
+      "image_regions": {
+        "type": "array",
+        "description": "Version 3: candidate image regions, ordered from top to bottom then left to right. No duplicate page text is stored here.",
+        "items": {
+          "type": "object", "required": ["bounds", "area_fraction", "image_path"],
+          "additionalProperties": false,
+          "properties": {
+            "bounds": {
+              "type": "array", "minItems": 4, "maxItems": 4,
+              "items": {"type": "integer", "minimum": 0},
+              "description": "Left, top, right, bottom pixel bounds within the full-page PNG at the saved rendering DPI."
+            },
+            "area_fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+            "image_path": {"type": ["string", "null"], "minLength": 1}
+          }
+        }
+      },
+      "problem": {
+        "type": ["string", "null"],
+        "description": "Explanation of a page preparation problem, or null when none is recorded."
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "required": ["text"],
+          "properties": {"text": {"type": "null"}}
+        },
+        "then": {"properties": {"text_source": {"type": "null"}}}
+      },
+      {
+        "if": {
+          "required": ["text"],
+          "properties": {"text": {"type": "string"}}
+        },
+        "then": {"properties": {"text_source": {"enum": ["native", "ocr", "mixed"]}}}
+      },
+      {
+        "$comment": "No recognized OCR text does not establish that the page is blank. Only native preparation can supply the known-blank empty string.",
+        "if": {
+          "required": ["text_source"],
+          "properties": {"text_source": {"enum": ["ocr", "mixed"]}}
+        },
+        "then": {"properties": {"text": {"pattern": "\\S"}}}
+      }
+    ]
+  }
+}

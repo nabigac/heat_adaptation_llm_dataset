@@ -69,7 +69,7 @@ def test_accepts_empty_registry(registry_validator: Draft202012Validator) -> Non
         pytest.param(
             {
                 "prepared_source_path": (
-                    "data/processed/plan_0001/preparation_01/source.json"
+                    "data/processed/plan_0001/preparation_01/preparation.json"
                 )
             },
             id="prepared-plan",

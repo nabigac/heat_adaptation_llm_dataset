@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Heat adaptation document preparation",
+  "description": "Preparation metadata and status defined in DESIGN.md Appendix A.",
+  "$comment": "Enable date and date-time format checking. Python must also check project-relative paths, file existence, agreement with the registered PDF, and consistency with pages.json. A status value records the preparation outcome; the schema cannot establish PDF readability or extraction accuracy.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "plan_id",
+    "pdf_path",
+    "document_sha256",
+    "source_url",
+    "date_accessed",
+    "prepared_at",
+    "pages_path",
+    "page_count",
+    "settings",
+    "status",
+    "problem"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [2, 3],
+      "description": "Version 3 adds candidate image detection, preserved images, and mixed text. Version 2 remains readable."
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the registered document being prepared."
+    },
+    "pdf_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Project-relative path to the preserved original PDF."
+    },
+    "document_sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-fA-F]{64}$",
+      "description": "SHA-256 fingerprint of the original PDF as 64 hexadecimal characters."
+    },
+    "source_url": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source URL copied from the document registry; URL syntax checks are performed by Python."
+    },
+    "date_accessed": {
+      "type": "string",
+      "format": "date",
+      "description": "Collection access date copied from the registry, written as YYYY-MM-DD."
+    },
+    "prepared_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(?:[Zz]|\\+00:00)$",
+      "not": {"pattern": "\\s"},
+      "$comment": "The format checker validates the calendar and time. The pattern requires UTC, represented by Z or +00:00. Reject whitespace explicitly because some regular-expression end anchors allow a final newline.",
+      "description": "UTC timestamp of this preparation attempt, such as 2026-11-02T10:30:00Z."
+    },
+    "pages_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Project-relative path to this preparation's preserved pages.json file."
+    },
+    "page_count": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Number of original PDF pages, or null when a failed attempt could not determine it."
+    },
+    "settings": {
+      "type": "object",
+      "$comment": "Python supplies defaults before saving. Validation never fills missing settings. OCR details describe the configured engine, not proof that any page used OCR.",
+      "description": "Shared OCR and rendering settings saved once for this preparation.",
+      "required": ["ocr_enabled", "ocr_engine", "ocr_version", "ocr_language", "image_render_dpi"],
+      "additionalProperties": false,
+      "properties": {
+        "ocr_enabled": {
+          "type": "boolean",
+          "description": "Whether an OCR engine was configured for selective preparation fallback."
+        },
+        "ocr_engine": {"type": ["string", "null"], "minLength": 1},
+        "ocr_version": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Installed OCR package version, or null while OCR is disabled."
+        },
+        "ocr_language": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Configured engine language code, or null while OCR is disabled."
+        },
+        "image_render_dpi": {"type": "integer", "minimum": 1},
+        "candidate_image_min_area": {
+          "type": "number", "exclusiveMinimum": 0, "maximum": 1,
+          "description": "Minimum visible page-area fraction for one image region with no native text within its bounds."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["ocr_enabled"],
+            "properties": {"ocr_enabled": {"const": false}}
+          },
+          "then": {
+            "properties": {
+              "ocr_engine": {"type": "null"},
+              "ocr_version": {"type": "null"},
+              "ocr_language": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["ocr_enabled"],
+            "properties": {"ocr_enabled": {"const": true}}
+          },
+          "then": {
+            "properties": {
+              "ocr_engine": {"type": "string"},
+              "ocr_version": {"type": "string"},
+              "ocr_language": {"type": "string"}
+            }
+          }
+        }
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ready", "ready_with_gaps", "failed"],
+      "description": "Recorded outcome of the preparation checks; it does not establish semantic accuracy."
+    },
+    "problem": {
+      "type": ["string", "null"],
+      "description": "Explanation of a preparation problem, or null when none is recorded."
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": 3}}, "required": ["schema_version"]},
+      "then": {"properties": {"settings": {"required": ["candidate_image_min_area"]}}},
+      "else": {"properties": {"settings": {"not": {"required": ["candidate_image_min_area"]}}}}
+    }
+  ],
+  "if": {
+    "required": ["status"],
+    "properties": {
+      "status": {"enum": ["ready", "ready_with_gaps"]}
+    }
+  },
+  "then": {
+    "$comment": "Usable preparations require a known page count. A failed preparation may have a known count or an unavailable count.",
+    "properties": {
+      "page_count": {"type": "integer"}
+    }
+  }
+}

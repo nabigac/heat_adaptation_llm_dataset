@@ -2,11 +2,11 @@
 
 **Study design and technical implementation (draft)**
 
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-02
 
 This study will build and evaluate a workflow that pairs open weight large language models (LLMs) with heat adaptation experts to extract data from government plans. The main contribution is practical knowledge about building the workflow, model limitations, useful tools, and where expert intervention is needed. The dataset is also an important output and may support future fine-tuning.
 
-Sections 1 to 6 explain the study and processing steps. The appendix provides JSON field definitions, shared coding and repair rules, planned Python modules, and a worked example. This document describes proposed software; it does not mean the software has been built or tested.
+Sections 1 to 6 explain the study and processing steps. The appendix provides JSON field definitions, shared coding and repair rules, Python module responsibilities, and a worked example. Step 1, Add and prepare, is implemented: the CLI registers PDFs, updates collection metadata, prepares page text and selected images with OCR, and lists saved preparation status. Steps 2 to 6 remain planned. The design describes the full intended system; implementation and checks for one step do not establish that later steps work.
 
 ## 1. Research questions and study design
 
@@ -38,7 +38,7 @@ For each plan, use the first successful comparison extractor run and the first s
 
 Keep failed attempts. Retry manually after fixing the problem. A deliberate repeat of successful work is exploratory and does not replace the main comparison output. Do not select outputs based on expert scores.
 
-Fix models, prompts, tools, document preparation, and scoring rules before comparison. Changes to these choices require a documented revision of the study setup; do not silently pool outputs from different setups. Before analysis, check that selected runs match the fixed settings for their roles and that each E/E+V pair used the same prepared source and shared tool settings.
+Fix models, prompts, tools, document preparation, and scoring rules before comparison. Changes to these choices require a documented revision of the study setup; do not silently pool outputs from different setups. Before analysis, check that selected runs match the fixed settings for their roles and that each E/E+V pair used the same saved preparation and shared tool settings.
 
 ## 2. Plans and extracted content
 
@@ -64,7 +64,7 @@ These six steps also label the workflow diagram in Section 4 and the module resp
 
 | Step | What happens | What is saved |
 | --- | --- | --- |
-| 1. Add and prepare | Import the eligible PDF and collection details. Python prepares text by PDF page and records problems. | Registry entry, original PDF, page text, and preparation notes. |
+| 1. Add and prepare | Import the eligible PDF and collection details. Python prepares text by PDF page, renders affected pages and candidate regions, applies selective OCR, and records problems. | Registry entry, original PDF, page text, selected PNGs, settings, and preparation notes. |
 | 2. Extract | Select an extractor profile. Supply the whole prepared document. The agent reads, uses tools when needed, and returns content and issues. | One extractor run file, model responses, and tool activity. |
 | 3. Verify | Select the saved extractor run and a verifier profile. The verifier receives its content and issue list, plus the source. | One verifier run file with revised content and issues. |
 | 4. Prepare the reference | Once both E and E+V succeed, Python generates a blank reference template for comparison plans. Experts fill it from the original PDF without viewing model outputs, then validate and save it. | Independent initial expert reference. |
@@ -77,17 +77,27 @@ Use a small CLI, or command line interface, to import a PDF with its title, offi
 
 Collection details can be edited later without importing the PDF again. Keep the metadata used by completed runs unchanged. Correct collection metadata for future work and note meaningful corrections in the change log when requested.
 
+The `update` command takes a registered plan ID and explicitly supplied title, source URL, access date, or study set. Validate the complete proposed entry before replacing the registry; omitted fields remain unchanged. Document IDs, preserved PDF paths, checksums, and preparation links are managed by the workflow. Earlier preparation snapshots and completed model work are not rewritten. Keep development assignments fixed so development exposure cannot be hidden by relabeling. Other study-set corrections are permitted only before model work is saved for that plan.
+
+Titles and study sets remain in the registry. Each new preparation copies the current source URL and access date into its own record. An earlier preparation retains the collection values used when it was created. Supplying values already saved is a successful update with no file changes.
+
 A revised published PDF gets a new document ID. Renaming or copying the same PDF does not create a new document. Never replace the registered PDF with different contents.
 
 ### Prepare text automatically, investigate gaps with tools
 
 Python prepares page text before model processing. The extractor does not need to request routine preparation page by page.
 
+Use native extraction first. During preparation, render and apply OCR selectively when native text is unavailable or identified as unreliable; known blank pages do not require OCR. Record which method supplied each page's selected text and save shared preparation settings once. OCR requested later through MCP is saved with that run and does not change the initial preparation. The OCR backend and its defaults must be tested during development before enabling automatic fallback.
+
+Inspect image regions even when a page has native text. Flag an individual image when its visible area occupies at least 10% of the visible page and no native text appears within its bounds. Save the affected full-page PNG and candidate crops. This is a development screening rule: photographs may qualify, smaller charts or partial text layers may be missed, and table reading order is not established. Retain candidate review notes after OCR. On otherwise readable pages, append labeled regional OCR to the unchanged native text and record its source as `mixed`; do not replace native text by re-OCRing the full page. Missing or unreliable native text still uses full-page OCR.
+
 Preparation has three states:
 
-- **Ready:** Automatic checks found no problems.
-- **Ready with gaps:** Some text is unavailable or unreliable, but the PDF can be inspected with tested image or OCR tools.
-- **Failed:** The PDF cannot be opened, its pages cannot be identified, or no usable reading route is available. Fix this before processing.
+- **Ready:** Automatic checks found no problems or review flags. This does not certify complete or correct extraction.
+- **Ready with gaps:** Each page has a usable reading route, but text is unavailable or unreliable, or candidate image content needs review. Successful OCR retains review notes; the status does not necessarily mean text is still missing.
+- **Failed:** A reliable page count or required image route cannot be established, or a page has no usable reading route. Fix this before processing.
+
+Preparation first tries native PDF reading, then uses the separate renderer to investigate gaps. A native reading failure can therefore be recovered without failing the entire preparation. Known PDF-reading and rendering failures are saved as preparation attempts when possible. Identity, validation, or storage errors stop the command and may prevent publication of a complete preparation; completed earlier attempts remain unchanged.
 
 OCR, or optical character recognition, converts text in images into machine readable text. Agents can request page images or OCR to investigate tables, garbled text, or missing passages. Preserve unresolved gaps as issues. Unreadable material is not evidence that information is absent.
 
@@ -103,7 +113,9 @@ If it does not fit, stop and report the problem. Adjust the model or settings du
 
 Process one document at a time initially. The CLI lists registered documents and their preparation, extraction, and verification status. Flag failed stages with the plan ID, run ID, error category, saved run/report paths, and a manual retry action. Reference preparation stays blocked until both linked outputs succeed. These labels come from saved run records and do not need another tracking file.
 
-Select profiles explicitly. To verify or retry verification, select the exact successful extractor run. Verification uses the same prepared source path as that run. Completed work is read from its saved file; the software does not search automatically for equivalent runs.
+For preparation, `list` reads and validates the exact record linked by the registry and checks its original PDF identity. Display `not_prepared` when there is no link; otherwise display the saved `ready`, `ready_with_gaps`, or `failed` status and its record path. Do not infer readiness from file existence, choose a newer attempt automatically, or store a duplicate status in the registry. Damaged linked files produce a visible error.
+
+Select profiles explicitly. To verify or retry verification, select the exact successful extractor run. Verification uses the same preparation record as that run. Completed work is read from its saved file; the software does not search automatically for equivalent runs.
 
 **JSON validation and repair.** A Python module checks the final response, reports syntax, structure, reference, or other errors, and applies only the permitted format repairs in Appendix F. It preserves the original response, records each repair, and validates the result again. Repairs happen within the same run without another model call. Missing fields and other errors outside the repair rules are reported and left unchanged; any remaining validation error fails the run.
 
@@ -137,7 +149,7 @@ Open issues remain for expert review. Source recovery happens within the agent's
 | LLM agents | Interpret source text, request tools, and return extracted content and proposed issues. |
 | Experts | Prepare references, assess outputs, decide correctness, and explain practical lessons. |
 
-An agent is a model used in a loop: read instructions, request a tool if needed, inspect the result, and submit an answer. `agents.py` manages this loop and uses `models.py` for model requests. It also acts as the MCP client, starting the local server in `document_tools.py` and exchanging tool requests and results through standard input and output. MCP provides the connection; the tools are Python functions in that server.
+An agent is a model used in a loop: read instructions, request a tool if needed, inspect the result, and submit an answer. The planned `agents.py` module will manage this loop and use `models.py` for model requests. It will also act as the MCP client, starting the local server in `document_tools.py` and exchanging tool requests and results through standard input and output. MCP provides the connection; the tools are Python functions in that server. Currently, `document_tools.py` supplies local rendering, image-region inspection, cropping, and OCR functions for preparation. The MCP server, page-text and quotation tools, and agent integration remain to be implemented.
 
 Both agents have access to the same PDF, prepared text, and tool capabilities. For comparison plans, expert references and assessments are created after agent processing. They stay outside agent access, including during any later reruns. Treat document text as source evidence, not instructions to the agent.
 
@@ -211,7 +223,7 @@ When verification removes or splits a record, the verifier must update all affec
 
 Retain baseline issue IDs. If an issue's record is removed, set `related_record_id` to null and name the removed record in the description. If an issue affects several resulting records, link it to one and name the others in the description.
 
-A proposed project layout is below. Existing project documents appear alongside planned code, settings, and examples of generated files.
+The project layout below combines implemented step 1 files with planned later modules and examples of generated files. The model, expert, and analysis directories describe later work; their appearance here does not mean those stages exist.
 
 ```text
 heat_adaptation_llm_dataset/
@@ -220,14 +232,18 @@ heat_adaptation_llm_dataset/
 ├── CHANGELOG.md                      # Decisions, changes, and lessons learned.
 ├── AGENTS.md                         # Local agent instructions; ignored by Git.
 ├── .gitignore                        # Files excluded from Git.
+├── .python-version                   # Python 3.12 selection.
 ├── pyproject.toml                    # Python dependencies and CLI setup.
+├── uv.lock                           # Exact dependency selections.
+├── .venv/                            # Local Python environment; ignored by Git.
+├── .cache/easyocr/                    # Downloaded OCR models; ignored by Git.
 ├── .env                              # Optional API credentials; ignored by Git.
 ├── src/                              # Shared Python modules.
 │   ├── cli.py                       # Terminal commands and step selection.
 │   ├── documents.py                 # PDF registration and page preparation.
 │   ├── agents.py                    # Agent loops and MCP client.
 │   ├── models.py                    # Ollama and hosted model API calls.
-│   ├── document_tools.py            # MCP server: text, images, OCR, quotations.
+│   ├── document_tools.py            # Local rendering/OCR; MCP server planned.
 │   ├── validation.py                # JSON, link, and assessment coverage checks.
 │   ├── repair.py                    # Permitted JSON format repairs.
 │   ├── expert_files.py              # Expert templates and completed file imports.
@@ -237,14 +253,18 @@ heat_adaptation_llm_dataset/
 │   └── profiles.json                # Model profiles and shared MCP tool settings.
 ├── prompts/                         # Agent prompts and shared coding instructions.
 ├── schemas/                         # JSON field and type rules.
+│   ├── registry.schema.json          # Registered document metadata.
+│   ├── preparation.schema.json       # Preparation metadata and status.
+│   └── pages.schema.json             # Page text and preparation problems.
 ├── notebooks/                       # Output inspection and research analysis.
-├── tests/                           # Validation, repair, link, and calculation checks.
+├── tests/                           # Registration, preparation, validation, and CLI checks.
 ├── data/
 │   ├── registry/plans.json          # Registered documents and collection details.
 │   ├── raw/plan_0001.pdf             # Original PDF.
 │   └── processed/plan_0001/preparation_01/
-│       ├── source.json              # Source metadata and preparation status.
-│       └── pages.json               # Page text and preparation problems.
+│       ├── preparation.json         # Preparation metadata and status.
+│       ├── pages.json               # Page text, image links, and preparation problems.
+│       └── images/                  # Affected page PNGs and candidate-region crops.
 └── runs/                            # Generated research files; ignored by Git.
     ├── plan_0001/
     │   ├── run_extract_0001/
@@ -267,9 +287,9 @@ heat_adaptation_llm_dataset/
     └── analysis/                    # Calculated comparison tables and figures.
 ```
 
-The CLI calls the modules for the selected step. Profiles select models and prompts; the shared `document_tools` configuration sets up the MCP server. Validation uses the schemas. Notebooks call `metrics.py` to read saved runs and assessments and write comparison results under `runs/analysis/`. Appendix G gives the full module responsibilities.
+The implemented CLI calls shared modules for `add`, `update`, `prepare`, and `list`. Validation uses the registry, preparation, and pages schemas. In later steps, profiles will select models and prompts, the shared `document_tools` configuration will set up the MCP server, and notebooks will call `metrics.py` to read saved runs and assessments and write comparison results under `runs/analysis/`. Appendix G gives the full module responsibilities.
 
-Ollama runs as a local service and manages downloaded model weights outside this project. The MCP server runs locally from `src/document_tools.py`; a hosted model API changes the model connection, while document tools and saved files remain local.
+The proposed Ollama service manages downloaded LLM weights outside this project. The planned MCP server will run locally from `src/document_tools.py`; a hosted model API changes the model connection, while document tools and saved files remain local. Current preparation uses EasyOCR models cached under the project's `.cache/easyocr/` and does not require an LLM service.
 
 Preparation folders and run folders preserve their inputs. They do not need separate source, snapshot, review, batch, or result IDs. Assessment drafts use separate working files; retain earlier completed assessments if revised.
 
@@ -281,7 +301,7 @@ Prepare the reference (step 4) creates the independent reference. Assess (step 5
 
 ### Prepare the reference and assess
 
-**Prepare the reference (step 4).** Require two saved successful outputs for the same plan and prepared source, with the verifier's `input_run_id` pointing to the selected extractor run. Check this before generating or accepting an initial reference. Python generates a blank template with collection metadata and empty content lists. Do not prefill it from agent records or issues. Experts fill it from the original PDF without viewing model outputs, then validate and save it.
+**Prepare the reference (step 4).** Require two saved successful outputs for the same plan and saved preparation, with the verifier's `input_run_id` pointing to the selected extractor run. Check this before generating or accepting an initial reference. Python generates a blank template with collection metadata and empty content lists. Do not prefill it from agent records or issues. Experts fill it from the original PDF without viewing model outputs, then validate and save it.
 
 **Assess (step 5).** Only after the initial reference is saved, Python generates one assessment template for E and one for E+V. It fills known run links, quotations, page references, and relevant issues. Experts can now view the outputs and supply semantic matches and judgments.
 
@@ -365,29 +385,37 @@ Build and test in the same six steps:
 5. **Assess:** Assessment templates, record matching, reference revisions, scoring, and evidence and resolution checks.
 6. **Analyze:** Calculation of the agreed measures, comparison notebooks, and practical research reporting.
 
+Step 1's software is implemented and has been used on the first development plan. Registration, metadata corrections, preparation, preservation, validation, and status display have automated checks. This establishes a working preparation stage, not verified OCR accuracy or a complete model workflow. Continue testing document preparation with the second development plan and during later development; known recoverable gaps do not require perfect OCR before starting Extract.
+
 Use the two development plans as an open, iterative process. Start with a straightforward PDF, then try a plan with more difficult tables, layout, or scanned pages where available. Compare prepared text and page numbers with the original PDF. Inspect model outputs and tool results openly, adjust preparation, prompts, models, or tools, and repeat runs with new IDs as needed.
 
 Check that extraction, verification, JSON repairs, saved files, and measurements work together. Use selected expert coding and assessment examples to check the templates and calculations; complete independent references are not required for both development plans. Keep development runs outside the comparison and fix the study settings before starting it.
 
-Remaining development choices are model suitability and quantization, full document capacity, image support, shared OCR software, request timeout values, tool call limits, and the overall summary rule. Hosted APIs remain an option. Expansion, release format, redistribution permissions, and storage for published artifacts can be decided later.
+Remaining development choices are model suitability and quantization, full document capacity, image support, OCR and rendering suitability, request timeout values, tool call limits, and the overall summary rule. EasyOCR on the CPU with English, 150 DPI rendering, and a 10% candidate image threshold are the current preparation defaults, not fixed comparison settings. A higher-DPI accuracy comparison has not yet been tested. Hosted APIs remain an option. Expansion, release format, redistribution permissions, and storage for published artifacts can be decided later.
 
 Retain short observations about model limitations, useful tools, failures, and necessary expert intervention. Record expectations separately from observed results. Use the existing change log when entries are requested. These observations support the practical contribution; a larger software tracking system is unnecessary.
 
 ## Appendix: JSON fields, rules, and example
 
-A schema defines allowed fields, types, and values. The following definitions guide implementation; validators and templates will be created when coding is authorized.
+A schema defines allowed fields, types, and values. Registry, preparation, and page schemas and their validation functions are implemented. The remaining definitions guide later schemas, validators, and templates as their steps are built.
 
 Use JSON objects for records and lists for multiple items. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are relative to the project root. Use `[]` for empty lists, `null` for unavailable nullable values, and the defined enum value such as `not_specified` where required. An enum is a fixed set of permitted values.
 
 All fields listed below are required unless marked optional. Unknown final fields and invalid values fail validation unless corrected by a permitted format repair in Appendix F. IDs and paths must resolve, and page numbers must be within the original PDF's page range.
 
-### A. Registry, source, profiles, and run details
+### A. Registry, preparation, profiles, and run details
 
-**Registry.** `data/registry/plans.json` contains `schema_version: 1` and a `plans` list. Each entry has `plan_id`, `plan_title`, `pdf_path`, `document_sha256`, `source_url`, `date_accessed`, `study_set`, and `prepared_source_path`. These are strings, except `prepared_source_path` may be null until preparation. Study set is `development`, `comparison`, or `expansion`. Development plans stay outside comparison.
+**Registry.** `data/registry/plans.json` contains `schema_version: 1` and a `plans` list. Each entry has `plan_id`, `plan_title`, `pdf_path`, `document_sha256`, `source_url`, `date_accessed`, `study_set`, and `prepared_source_path`. These are strings, except `prepared_source_path` may be null until preparation; when present, it links to a saved `preparation.json`. Study set is `development`, `comparison`, or `expansion`. Development plans stay outside comparison.
 
-**Prepared source.** Each `source.json` contains `schema_version` (integer), `plan_id`, `pdf_path`, `document_sha256`, `source_url`, `date_accessed`, `prepared_at` (timestamp), `pages_path`, `page_count` (positive integer or null on failure), `status` (`ready`, `ready_with_gaps`, or `failed`), and `problem` (string or null). The other fields are strings. The PDF checksum is a 64 character hexadecimal SHA-256 value.
+**Preparation record.** Each `preparation.json` contains `schema_version` (integer, currently 3), `plan_id`, `pdf_path`, `document_sha256`, `source_url`, `date_accessed`, `prepared_at` (timestamp), `pages_path`, `page_count` (positive integer or null on failure), `settings` (object), `status` (`ready`, `ready_with_gaps`, or `failed`), and `problem` (string or null). The other fields are strings. The PDF checksum is a 64 character hexadecimal SHA-256 value. Version 2 added preparation settings and page text sources. Version 3 adds candidate image detection, preserved page and crop images, and mixed text. Keep version 2 records readable; preserve earlier files rather than silently rewriting them. Registry and run schema versions are separate.
 
-The linked `pages.json` is an ordered list with `page_number` (positive integer), `text` (string or null), `readable` (Boolean), `image_available` (Boolean), and `problem` (string or null). Include every known PDF page once. An empty string denotes a known blank page; null denotes unavailable text. If opening or counting fails, use null page count and an empty list. Processing an image only PDF requires a tested image or OCR route.
+Preparation `settings` contains `ocr_enabled` (Boolean), `ocr_engine`, `ocr_version`, `ocr_language` (strings, all null when disabled), and `image_render_dpi` (positive integer). Version 3 also requires `candidate_image_min_area` (number greater than 0 and at most 1), defaulting to `0.10`. This applies to each image separately, not their combined area. Python supplies defaults before saving and detects the installed OCR package version when enabled; validation does not insert missing values. Rendering defaults to 150 DPI. Selective OCR defaults to EasyOCR on the CPU with English (`en`); test suitability on the development plans. Download recognition and detection models explicitly during setup; normal preparation uses cached models offline and loads one reader only when a page or candidate region needs OCR. The preparation CLI permits an explicit `--no-ocr` override; candidate detection and image preservation still run. Later profile configuration supplies the shared tool settings; each preparation retains the settings used when it was created.
+
+The linked `pages.json` is an ordered list with `page_number` (positive integer), `text` (string or null), `text_source` (`native`, `ocr`, `mixed`, or null), `readable` (Boolean), `image_available` (Boolean), and `problem` (string or null). Store the selected page text once. Its source records origin, not accuracy; retain problems with questionable text. A null text value requires a null source, and a string requires `native`, `ocr`, or `mixed`. A known blank page uses an empty string with source `native`; empty OCR output cannot establish blankness. OCR or mixed text requires OCR-enabled preparation settings. Compute any summary of OCR page numbers from these entries rather than maintaining a separate list.
+
+Version 3 pages also require `image_path` (project-relative string or null) and `image_regions` (list, empty when no candidates). A page image is saved as `images/page_0001.png` within its preparation, with crops named `images/page_0001_region_01.png`. Each region records `bounds` (four nonnegative integers: left, top, right, bottom pixels from the saved page image's top-left), `area_fraction` (visible image polygon area divided by visible page area), and `image_path` (project-relative string or null if rendering or cropping failed). Publish images and page data before the preparation record. Loading checks referenced PNGs and crop dimensions. In version 3, `image_available` agrees with whether a preserved full-page `image_path` is present. Version 2 pages retain their original fields and cannot use `mixed`.
+
+Include every known PDF page once. If neither reader can identify the pages, use null page count and an empty list. Processing an image only PDF requires a tested image or OCR route. Additional diagnostic extraction outputs can be saved separately when needed; routine preparation does not duplicate native and OCR text on every page.
 
 **Shared tool configuration.** `configs/profiles.json` contains `schema_version: 1`, one `document_tools` object, and a `profiles` list. The shared object contains:
 
@@ -425,7 +453,7 @@ Only send supported generation settings; retain unsupported controls as null. Py
 | `purpose` | `development`, `comparison`, or `exploratory`. |
 | `input_run_id` | Successful extractor run ID for verification; null for extraction. |
 | `retry_of_run_id` | Failed run being retried, or null. |
-| `source_path` | String linking to the preserved prepared source. |
+| `source_path` | String linking to the preserved `preparation.json` used by this run. |
 | `status` | `running`, `succeeded`, or `failed`. |
 | `started_at`, `ended_at` | UTC timestamps; end nullable while active. |
 | `elapsed_seconds` | Nonnegative number or null if unavailable. |
@@ -563,17 +591,17 @@ Preserve the raw response. Save any repaired candidate separately as `responses/
 
 When final-response validation is attempted, save `validation_report.json` in the run folder with `raw_response_path`, `repaired_response_path` (null if unchanged), `initial_errors` and `remaining_errors` (lists of errors), `repairs` (list), and `valid` (Boolean). Each error has `category`, `location` (string or null), and `message`. Each repair has `rule`, `location`, `before`, and `after`, recorded as strings. Paths and other text fields are strings. The CLI shows the repairs, remaining errors, and report path, subject to Section 4's restrictions on comparison feedback before reference preparation is complete. On failure, the run's `error` field summarizes the remaining problem.
 
-### G. Planned Python modules
+### G. Python modules
 
-A module is a Python file containing related functions. These proposed files belong in `src/`; they have not been implemented. Step numbers refer to the same six steps in Section 3 and the Section 4 diagram.
+A module is a Python file containing related functions. These files belong in `src/`; the table describes their intended responsibilities across the full workflow. `cli.py`, `documents.py`, `validation.py`, and `storage.py` implement their registration and preparation responsibilities. `document_tools.py` supplies local image inspection, rendering, cropping, and OCR; its MCP server remains planned. The other modules and later-stage responsibilities are not yet implemented. Step numbers refer to the same six steps in Section 3 and the Section 4 diagram.
 
 | Module | Step | Responsibility |
 | --- | --- | --- |
 | `cli.py` | 1 to 6 | Handle commands, select documents, profiles, and input files, and show status, errors, and repairs. Call the shared modules. |
-| `documents.py` | 1 | Register PDFs and collection details, check duplicate checksums, prepare page text, and record preparation problems. |
+| `documents.py` | 1 | Register PDFs, update collection details, check duplicate checksums, prepare page text and selected images with OCR, and derive status from saved preparations. |
 | `agents.py` | 2 and 3 | Load the selected profile, shared tool configuration, and prompts. Run the agent loop and start the MCP server as its client. Enforce context/tool limits and request timeouts, fail on reported truncation, and validate and save outputs. |
 | `models.py` | 2 and 3 | Connect to Ollama or a hosted provider. Send model requests, images, and tool messages within the request timeout; return raw responses, completion metadata, and usage measurements. |
-| `document_tools.py` | 2 and 3 | Define document tool functions and expose them through the local MCP server using the shared configuration. Restrict access to the selected source and permitted run artifacts. |
+| `document_tools.py` | 1 to 3 | Supply local image inspection, rendering, cropping, and OCR for preparation. Add page-text and quotation tools and expose the tools through the local MCP server using the shared configuration. Restrict access to the selected source and permitted run artifacts. |
 | `validation.py` | Shared | Check JSON syntax, required fields, types, IDs, links, page ranges, and assessment coverage. Classify errors; for model final responses, call `repair.py` and validate again. |
 | `repair.py` | 2 and 3 | Apply only the format repairs in Appendix F. Return the repaired text and details of each change for the validation report. |
 | `expert_files.py` | 4 and 5 | Require both successful linked outputs before generating or accepting an initial reference. Generate reference and assessment templates and import completed expert files. Experts supply matches and judgments. |
@@ -586,7 +614,7 @@ During Analyze (step 6), notebooks in `notebooks/` use `metrics.py` to compare E
 
 This fictional extractor output has one action and one bundled issue. The quote says the action is planned and gives a quantity and deadline; the extraction wrongly says completed and omits those details. That action would receive partial credit. Empty lists illustrate structure, not a complete plan.
 
-The model revision, software versions, settings, timings, and tokens are illustrative placeholders. No referenced files have been created.
+This is a format illustration, not a saved model run. The model revision, software versions, generation settings, timings, and tokens are illustrative placeholders. The OCR engine and language match the current preparation defaults; model-stage tool integration remains planned.
 
 ```json
 {
@@ -597,7 +625,7 @@ The model revision, software versions, settings, timings, and tokens are illustr
   "purpose": "comparison",
   "input_run_id": null,
   "retry_of_run_id": null,
-  "source_path": "data/processed/plan_0001/preparation_01/source.json",
+  "source_path": "data/processed/plan_0001/preparation_01/preparation.json",
   "status": "succeeded",
   "started_at": "2026-10-31T12:00:00Z",
   "ended_at": "2026-10-31T12:00:30Z",
@@ -626,8 +654,8 @@ The model revision, software versions, settings, timings, and tokens are illustr
     "document_tools": {
       "ocr_enabled": true,
       "image_render_dpi": 150,
-      "ocr_engine": "illustrative-ocr-engine",
-      "ocr_language": "eng",
+      "ocr_engine": "easyocr",
+      "ocr_language": "en",
       "tool_timeout_seconds": 120
     },
     "prompt_texts": [
@@ -643,7 +671,7 @@ The model revision, software versions, settings, timings, and tokens are illustr
       "code_dirty": false,
       "python_version": "illustrative-version",
       "model_client_version": "illustrative-version",
-      "preparation_version": "v1",
+      "preparation_version": "v3",
       "tools_version": "v1",
       "ocr_version": "illustrative-version",
       "model_loaded_at_start": true

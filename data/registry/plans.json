@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "plans": [
+    {
+      "plan_id": "plan_0001",
+      "plan_title": "Freetown Heat Action Plan",
+      "pdf_path": "data/raw/plan_0001.pdf",
+      "document_sha256": "4fb593eff1633132313c4281f18f23e7fbaf7aa7d011e86b028923136397964f",
+      "source_url": "https://freetownthetreetown.sl/wp-content/uploads/2025/03/HAP-2025-new-HM-SS-Update-1.pdf",
+      "date_accessed": "2026-11-02",
+      "study_set": "development",
+      "prepared_source_path": "data/processed/plan_0001/preparation_02/preparation.json"
+    }
+  ]
+}

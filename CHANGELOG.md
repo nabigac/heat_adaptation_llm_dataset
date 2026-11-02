@@ -31,3 +31,12 @@ Keep each entry concise. Under observed result, record what was observed and lea
 - **Remaining questions:** What still needs to be answered? Write "None" if there are no open questions.
 
 ## Entries
+
+### 2026-11-01 — Set up the document-registration development environment
+
+- **Category:** Code
+- **Problem:** The repository contained documentation only, and `uv` could not find Python 3.12. Exact dependency selections were not recorded.
+- **Decision/change:** Approved the initial scope of environment setup, a registration CLI, registry validation, and PDF-preservation checks, proceeding file by file with explanations. Created `pyproject.toml`, `.python-version`, and `uv.lock`; used `uv` to install CPython 3.12.14, create `.venv`, and install `jsonschema` 4.26.0, `pytest` 9.2.0, and nine supporting packages.
+- **Reason:** Establish a reproducible development environment and reliable document-registration foundation before text preparation and model processing.
+- **Observed result:** Interpreter version and paths, environment isolation, Git exclusion, and agreement with the lockfile verified. JSON Schema library smoke checks and pytest startup passed.
+- **Remaining questions:** Select the first development PDF. Document-registration behavior is not yet implemented or tested.

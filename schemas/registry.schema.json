@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Heat adaptation document registry",
+  "description": "Registry structure defined in DESIGN.md Appendix A.",
+  "$comment": "Use a format checker to validate calendar dates. Python must also check cross-entry uniqueness, source URL syntax, project-relative paths, file existence, and PDF checksum agreement.",
+  "type": "object",
+  "required": ["schema_version", "plans"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Version of the saved registry structure."
+    },
+    "plans": {
+      "type": "array",
+      "description": "Registered document versions; an empty registry is valid.",
+      "items": {
+        "type": "object",
+        "required": [
+          "plan_id",
+          "plan_title",
+          "pdf_path",
+          "document_sha256",
+          "source_url",
+          "date_accessed",
+          "study_set",
+          "prepared_source_path"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Identifier assigned to one registered document version."
+          },
+          "plan_title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Plan title supplied during collection."
+          },
+          "pdf_path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project-relative path to the preserved original PDF."
+          },
+          "document_sha256": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "description": "SHA-256 fingerprint of the original PDF as 64 hexadecimal characters."
+          },
+          "source_url": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Official source URL supplied during collection; URL syntax checks are performed by Python."
+          },
+          "date_accessed": {
+            "type": "string",
+            "format": "date",
+            "description": "Date the source was accessed, written as YYYY-MM-DD."
+          },
+          "study_set": {
+            "type": "string",
+            "enum": ["development", "comparison", "expansion"],
+            "description": "Study set assigned to the document; development plans stay outside comparison."
+          },
+          "prepared_source_path": {
+            "type": ["string", "null"],
+            "minLength": 1,
+            "description": "Project-relative path to a preserved source.json preparation, or null until preparation exists."
+          }
+        }
+      }
+    }
+  }
+}

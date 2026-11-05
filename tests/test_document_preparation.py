@@ -5,6 +5,9 @@ trees, fonts, and content streams that pypdf can read. They establish known test
 cases for native text and rendering, not accuracy on real plans. These cases
 explicitly disable automatic OCR, which is covered in test_automatic_ocr.py.
 """
+# Fixture builders create actual small PDFs; selected reader/renderer failures
+# are then injected to test recovery paths. Registration and preparation still use
+# their shared public functions, so saved paths and registry links are checked too.
 
 import copy
 import json
@@ -38,6 +41,9 @@ def _set_content(writer: PdfWriter, page: PageObject, data: bytes) -> None:
 
 def _write_pdf(path: Path, page_texts: list[str | None], *, encrypted: bool = False) -> None:
     """Create ASCII text pages; None means a structurally blank page."""
+    # Construct page resources and drawing streams so native extraction has
+    # known source content. A None entry creates a structurally blank page, which
+    # must remain distinct from text that failed to extract.
     with PdfWriter() as writer:
         font = DictionaryObject(
             {
@@ -424,6 +430,8 @@ def test_damaged_registered_original_blocks_preparation(
 def test_original_change_during_preparation_blocks_publication(
     registered_plan: tuple[Path, dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Simulate source bytes changing during processing. The final identity check
+    # must stop publication rather than attach prepared text to a different PDF.
     project, entry = registered_plan
     raw_pdf = project / entry["pdf_path"]
     registry_before = (project / "data/registry/plans.json").read_bytes()
@@ -537,6 +545,9 @@ def test_registry_link_failure_retains_completed_preparation_and_reports_its_pat
     monkeypatch: pytest.MonkeyPatch,
     committed_before_error: bool,
 ) -> None:
+    # The preparation and registry are separate publications. If linking fails,
+    # the completed preparation must survive so recovery can inspect what actually
+    # committed instead of deleting potentially valid evidence.
     project, entry = registered_plan
     real_save = storage.save_registry
 

@@ -9,7 +9,13 @@ description = "An expert-LLM workflow for extracting source-linked heat adaptati
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    # Async HTTP lets one deadline cover connection, waiting, and response reads.
+    "httpx>=0.28.1,<0.29",
+    # Count rendered requests using the tokenizer already bundled with Ollama's model.
+    "tokenizers>=0.22,<0.23",
     "jsonschema>=4.26,<5",
+    # Resolve the shared content schema locally when checking agent responses.
+    "referencing>=0.37,<1",
     # Recognize rendered page text locally when native PDF extraction fails.
     "easyocr>=1.7.2,<2",
     # Native extraction remains the first choice before rendering or OCR.
@@ -35,7 +41,7 @@ dev = [
 # Install the design's flat src/ modules explicitly. uv sync uses an editable
 # development install; release packaging of schema resources is a later step.
 package-dir = {"" = "src"}
-py-modules = ["cli", "document_tools", "documents", "storage", "validation"]
+py-modules = ["agents", "cli", "document_tools", "documents", "models", "repair", "storage", "validation"]
 packages = []
 
 [tool.pytest.ini_options]

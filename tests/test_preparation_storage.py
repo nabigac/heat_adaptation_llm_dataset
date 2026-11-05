@@ -3,6 +3,9 @@
 These tests save fictional JSON data, not research PDFs. Besides ordinary saves,
 they exercise damaged inputs and interrupted writes to check preservation rules.
 """
+# The preparation pair is tested independently of registration. These functions
+# validate and preserve page JSON/images; checking the registered original PDF
+# identity belongs to documents.py and the run-loading workflow.
 
 import copy
 import json
@@ -16,6 +19,9 @@ import storage
 @pytest.fixture
 def preparation() -> dict:
     """Give each test a fresh record pointing to its first preparation folder."""
+    # Keep a version-2 fixture to exercise backward readability. Its older page
+    # format has no preserved image_path/image_regions fields; newer image behavior
+    # is covered by the version-3 candidate-region tests.
     return {
         "schema_version": 2,
         "plan_id": "plan_0001",
@@ -386,6 +392,9 @@ def test_interrupted_save_retains_the_attempt_and_preserves_older_files(
     operation: str,
     failed_filename: str,
 ) -> None:
+    # Inject a write failure partway through the new attempt. Its retained folder
+    # must reserve the number, while the earlier complete preparation remains
+    # unchanged and available by its explicit path.
     first_path = storage.save_preparation(tmp_path, preparation, pages)
     first_directory = (tmp_path / first_path).parent
     original_bytes = {path.name: path.read_bytes() for path in first_directory.iterdir()}

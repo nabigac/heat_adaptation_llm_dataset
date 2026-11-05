@@ -3,6 +3,9 @@
 These examples exercise structure and field values. Filesystem checks and
 duplicate detection need workflow code; experts screen eligibility before import.
 """
+# The schema answers whether fields/types/dates are valid. A fixture URL and
+# fingerprint are data here: these tests do not contact the URL, open a PDF, or
+# check official provenance. Workflow tests cover identity and file preservation.
 
 # These modules come with Python: json parses JSON text, and Path handles paths.
 import json
@@ -133,6 +136,9 @@ def test_rejects_missing_plan_field(
     valid_registry: dict,
     field_name: str,
 ) -> None:
+    # Required means the key must exist even when its permitted value is null.
+    # This prevents omitted metadata from being silently filled with invented
+    # defaults during validation.
     del valid_registry["plans"][0][field_name]
 
     with pytest.raises(ValidationError) as error:

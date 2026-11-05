@@ -1,4 +1,7 @@
 """Exercise registry storage using isolated temporary project directories."""
+# These tests isolate registry file operations and ID allocation. Registry
+# loading checks saved JSON structure; original-PDF identity checks are exercised
+# through documents.py and run-storage tests, not by this fixture alone.
 
 import copy
 from pathlib import Path
@@ -11,6 +14,8 @@ import storage
 @pytest.fixture
 def registry() -> dict:
     """Return fictional metadata; no actual PDF or project registry is created here."""
+    # The saved paths and checksum are fictional. An isolated registry save/load
+    # can test exact value preservation without creating the files it describes.
     return {
         "schema_version": 1,
         "plans": [
@@ -124,6 +129,9 @@ def test_failed_replacement_does_not_publish_partial_data(
     monkeypatch: pytest.MonkeyPatch,
     existing_registry: bool,
 ) -> None:
+    # Replace the OS publication call with a controlled failure. The temporary
+    # file may have been written, but readers must still see the old complete
+    # registry (or no registry for an initial save).
     registry_path = tmp_path / "data/registry/plans.json"
     if existing_registry:
         storage.save_registry(tmp_path, registry)

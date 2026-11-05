@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "document_tools": {
+    "ocr_enabled": true,
+    "ocr_engine": "easyocr",
+    "ocr_language": "en",
+    "image_render_dpi": 150,
+    "tool_timeout_seconds": 120
+  },
+  "profiles": [
+    {
+      "name": "qwen35_27b_extractor_development",
+      "stage": "extractor",
+      "model": {
+        "name": "qwen3.5:27b",
+        "execution_mode": "local",
+        "endpoint": "http://localhost:11434",
+        "api_service": null,
+        "provider": null
+      },
+      "generation": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "max_output_tokens": 16384
+      },
+      "context_limit": 73728,
+      "prompt_paths": [
+        "prompts/shared_coding.md",
+        "prompts/field_definitions.md",
+        "prompts/extractor.md"
+      ],
+      "max_tool_calls": 10,
+      "model_timeout_seconds": 1800,
+      "image_input_enabled": false
+    }
+  ]
+}

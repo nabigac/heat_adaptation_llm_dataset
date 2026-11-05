@@ -4,6 +4,9 @@ These fictional examples do not open PDFs or create saved preparations. They
 check field rules. Later Python validation must check agreement between files,
 page numbering, and links to the registered original.
 """
+# These are field-level schema checks. Python cross-document checks and file
+# loading have separate tests. Parametrized values keep one rule under test at a
+# time, including the difference between a missing key and a present null value.
 
 import json
 from pathlib import Path
@@ -16,6 +19,9 @@ from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 # check_schema checks the rules themselves; validate later checks example data.
 @pytest.fixture(scope="module")
 def preparation_validator() -> Draft202012Validator:
+    # Check the rule document itself, then enable optional format checking.
+    # Without FormatChecker, date/date-time annotations alone would not reject
+    # impossible calendar values.
     schema_path = (
         Path(__file__).resolve().parents[1] / "schemas" / "preparation.schema.json"
     )
@@ -65,6 +71,8 @@ def valid_preparation() -> dict:
 
 @pytest.fixture
 def valid_pages() -> list[dict]:
+    # These dictionaries model saved page fields; they are not extracted here
+    # from a PDF. Tests change their values to check the schema's individual rules.
     return [
         {
             "page_number": 1,

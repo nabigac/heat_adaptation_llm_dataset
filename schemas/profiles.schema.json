@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:profiles",
+  "title": "Editable model profiles and shared document tools",
+  "description": "The configuration format in DESIGN.md Appendix A. Valid fields do not establish model availability, capacity, or tested capability.",
+  "$comment": "Reuse the run schema's setting fields so editable profiles and saved run settings agree. Python checks unique names, finite numbers, and portable prompt paths. Loading reads only the explicitly selected profile's prompts. No runtime environment or credentials belong in this configuration.",
+  "type": "object",
+  "required": ["schema_version", "document_tools", "profiles"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "document_tools": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/document_tools"},
+    "profiles": {"type": "array", "items": {"$ref": "#/$defs/profile"}}
+  },
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "required": [
+        "name", "stage", "model", "generation", "context_limit", "prompt_paths",
+        "max_tool_calls", "model_timeout_seconds", "image_input_enabled"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/name"},
+        "stage": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/stage"},
+        "model": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/model"},
+        "generation": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/generation"},
+        "context_limit": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/context_limit"},
+        "prompt_paths": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/prompt_paths"},
+        "max_tool_calls": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/max_tool_calls"},
+        "model_timeout_seconds": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/model_timeout_seconds"},
+        "image_input_enabled": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/image_input_enabled"}
+      }
+    }
+  }
+}

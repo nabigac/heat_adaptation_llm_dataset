@@ -3,6 +3,9 @@
 The schema tests cover the detailed field rules separately. These tests focus on
 reading JSON, reporting problems, preserving input, and handling unusable schemas.
 """
+# Start with accepted registry values, then syntax/field errors and unusable
+# schemas. The validators return structured problems; tests also verify that
+# rejection does not rewrite inputs or invent defaults.
 
 import copy
 import json
@@ -18,6 +21,9 @@ import validation
 @pytest.fixture
 def valid_registry() -> dict:
     """Supply fresh fictional data; none of these tests needs an actual PDF."""
+    # Use Unicode punctuation and nullable metadata to expose accidental text
+    # normalization or replacement. The fictional fingerprint is not checked
+    # against a PDF by these field-only validation functions.
     return {
         "schema_version": 1,
         "plans": [
@@ -124,6 +130,9 @@ def test_reports_syntax_error_with_line_and_column() -> None:
     ],
 )
 def test_rejects_ambiguous_or_nonstandard_json(text: str) -> None:
+    # Python normally keeps the last duplicate JSON key. These cases require
+    # explicit rejection, so an earlier value cannot disappear silently when
+    # a saved document or response is parsed.
     data, problems = validation.parse_registry_json(text)
 
     assert data is None

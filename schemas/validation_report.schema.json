@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Heat adaptation final-response validation report",
+  "description": "Validation findings and permitted repair details from DESIGN.md Appendix F. This format does not implement repairs.",
+  "type": "object",
+  "required": ["raw_response_path", "repaired_response_path", "initial_errors", "remaining_errors", "repairs", "valid"],
+  "additionalProperties": false,
+  "properties": {
+    "raw_response_path": {"type": "string", "pattern": "\\S"},
+    "repaired_response_path": {"type": ["string", "null"], "pattern": "\\S"},
+    "initial_errors": {"type": "array", "items": {"$ref": "#/$defs/error"}},
+    "remaining_errors": {"type": "array", "items": {"$ref": "#/$defs/error"}},
+    "repairs": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["rule", "location", "before", "after"],
+        "additionalProperties": false,
+        "properties": {
+          "rule": {"type": "string", "pattern": "\\S"},
+          "location": {"type": "string"},
+          "before": {"type": "string"}, "after": {"type": "string"}
+        }
+      }
+    },
+    "valid": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"valid": {"const": true}}, "required": ["valid"]},
+      "then": {"properties": {"remaining_errors": {"maxItems": 0}}},
+      "else": {"properties": {"remaining_errors": {"minItems": 1}}}
+    },
+    {
+      "if": {"properties": {"repairs": {"maxItems": 0}}, "required": ["repairs"]},
+      "then": {"properties": {"repaired_response_path": {"type": "null"}}},
+      "else": {"properties": {"repaired_response_path": {"type": "string"}}}
+    }
+  ],
+  "$defs": {
+    "error": {
+      "type": "object", "required": ["category", "location", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "category": {"type": "string", "enum": ["syntax", "structure", "reference", "other"]},
+        "location": {"type": ["string", "null"]},
+        "message": {"type": "string", "pattern": "\\S"}
+      }
+    }
+  }
+}

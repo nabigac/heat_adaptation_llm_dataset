@@ -4,6 +4,9 @@ Most cases replace the OCR backend with controlled results: no downloads or
 neural inference are needed for those tests. The final case uses real cached
 English models on a known image-only PDF and skips if setup has not been run.
 """
+# Follow the controlled backend tests first, then the preparation tests, then
+# the cached-model example at the end. monkeypatch temporarily replaces selected
+# functions/imports and pytest restores them after each case.
 
 import logging
 import sys
@@ -31,6 +34,9 @@ def image_bytes() -> bytes:
 
 @pytest.fixture
 def fake_easyocr(monkeypatch: pytest.MonkeyPatch):
+    # SimpleNamespace groups observable test state. The fake backend records
+    # constructor arguments and recognition calls, so tests can inspect settings
+    # and inject a failure without loading neural models.
     state = SimpleNamespace(
         loads=[], calls=[], result=["Open 3 cooling centres", "by 2028."],
         load_error=None, read_error=None,
@@ -180,6 +186,8 @@ def mixed_plan(project: Path, tmp_path: Path) -> dict:
 
 @pytest.fixture
 def controlled_ocr(monkeypatch: pytest.MonkeyPatch):
+    # This replacement controls only the OCR reader used by preparation. The PDF
+    # and saved preparation still go through the real document/storage functions.
     state = SimpleNamespace(loads=0, images=[], result="RECOVERED OCR TEXT", load_error=None)
 
     class Reader:
@@ -388,6 +396,9 @@ _CACHED_MODELS = all(
 def test_real_ocr_recovers_known_text_from_an_image_only_pdf(project: Path, tmp_path: Path) -> None:
     # A deliberately clear example checks real integration, not the accuracy of
     # OCR on complex plans, tables, or low-quality scans. It performs no downloads.
+    # This case uses cached English weights on a generated known phrase. It checks
+    # the real OCR connection, while chart/table accuracy on research plans remains
+    # a separate empirical question.
     expected = "OPEN 3 COOLING CENTRES BY 2028"
     source = tmp_path / "scanned.pdf"
     with Image.new("RGB", (1200, 300), "white") as image:

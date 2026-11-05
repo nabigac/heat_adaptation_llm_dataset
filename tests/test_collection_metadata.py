@@ -3,6 +3,9 @@
 All documents live in temporary projects. The tests protect saved input snapshots
 and distinguish a preparation's recorded status from whether its files validate.
 """
+# These cases use real registry/preparation files in temporary projects. They
+# separate corrections for future collection work from earlier saved snapshots,
+# and protect development exposure from being hidden by a study-set edit.
 
 import json
 from pathlib import Path
@@ -45,6 +48,8 @@ def register_plan(project: Path, tmp_path: Path, *, kind="blank", study_set="dev
 
 def file_snapshot(root: Path) -> dict[str, bytes]:
     """Include JSON, originals, and PNGs, so unintended writes are observable."""
+    # Snapshot file contents as bytes so JSON, PDFs, and images can be compared
+    # after an operation. This compares contents, not filesystem modification times.
     return {str(path.relative_to(root)): path.read_bytes()
             for path in root.rglob("*") if path.is_file()}
 
@@ -219,6 +224,9 @@ def test_study_set_can_be_corrected_before_model_work(project, tmp_path, initial
 
 
 def test_saved_model_work_keeps_its_bytes_and_prevents_study_set_changes(project, tmp_path):
+    # Any preserved model work blocks relabeling, including incomplete/failed work.
+    # The placeholder file here represents saved activity; this test does not run
+    # a model or require its output to be a valid successful run.
     entry = register_plan(project, tmp_path, study_set="expansion")
     run = project / "runs/plan_0001/run_extract_0001/output.json"
     run.parent.mkdir(parents=True)

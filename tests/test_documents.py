@@ -3,6 +3,9 @@
 PDF-like byte fixtures test registration only. They do not demonstrate that page
 preparation works or that any real plan meets the study's eligibility criteria.
 """
+# Registration tests focus on byte identity, copying, and registry publication.
+# PDF-like fixture bytes are sufficient for that boundary; actual page extraction
+# is exercised in test_document_preparation.py.
 
 import copy
 import hashlib
@@ -23,6 +26,9 @@ def project(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def incoming_pdf(tmp_path: Path) -> Path:
+    # This input belongs to the test's temporary directory. Registration must
+    # create an independent preserved copy, so later edits to the supplied file
+    # cannot alter the registered original.
     path = tmp_path / "incoming.pdf"
     path.write_bytes(b"%PDF-1.4\nFictional registration fixture\n%%EOF\n")
     return path
@@ -230,6 +236,8 @@ def test_original_destination_is_never_overwritten(
 def test_copy_detects_source_changes_after_initial_fingerprinting(
     project: Path, incoming_pdf: Path, metadata: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Hashing and copying are different operations. Replacing the incoming bytes
+    # between them must be detected by checking the completed copy's checksum.
     preserve = storage.preserve_original_pdf
 
     def change_then_copy(*args, **kwargs):

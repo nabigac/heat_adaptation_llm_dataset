@@ -4,6 +4,9 @@ Schema tests cover individual field rules separately. These tests check parsing,
 problem reports, agreement between documents, and preservation of supplied data.
 All examples are fictional; no PDFs or saved research preparations are needed.
 """
+# The validators receive Python dictionaries/lists or JSON strings and perform
+# no filesystem access. Pair tests add relationships between preparation metadata
+# and page entries after both documents pass their individual field rules.
 
 import copy
 import json
@@ -41,6 +44,8 @@ def valid_preparation() -> dict:
 
 @pytest.fixture
 def valid_pages() -> list[dict]:
+    # Include a known blank page using an empty native string. Later cases use
+    # None for unavailable text; those states must not be silently interchanged.
     return [
         {
             "page_number": 1,
@@ -331,6 +336,46 @@ def test_pair_preserves_schema_setup_error_location(
     assert len(problems) == 1
     assert problems[0].category == "other"
     assert problems[0].location == str(schema_path)
+
+
+@pytest.mark.parametrize("status", ["ready", "ready_with_gaps"])
+@pytest.mark.parametrize("schema_version", [2, 3])
+def test_pair_rejects_unreadable_pages_for_ready_statuses(
+    valid_preparation: dict,
+    valid_pages: list[dict],
+    status: str,
+    schema_version: int,
+) -> None:
+    # Stacked parametrization covers two readiness labels times two format
+    # versions. Two nonadjacent unreadable flags ensure every affected page is
+    # reported, and the deep copy checks that validation does not repair the input.
+    valid_preparation.update(schema_version=schema_version, status=status)
+    if schema_version == 3:
+        valid_preparation["settings"]["candidate_image_min_area"] = 0.10
+        for page in valid_pages:
+            page.update(image_available=False, image_path=None, image_regions=[])
+
+    # Only change readability: even retained text cannot override an explicit
+    # unreadable flag. Report every affected page, including nonadjacent ones.
+    for index in (0, 2):
+        valid_pages[index]["readable"] = False
+    before = copy.deepcopy((valid_preparation, valid_pages))
+
+    problems = validation.validate_preparation_pages(valid_preparation, valid_pages)
+
+    assert problems == [
+        validation.ValidationProblem(
+            category="reference",
+            location=f"pages.json:$[{index}].readable",
+            message=(
+                f"Preparation status '{status}' requires every page to be readable; "
+                f"PDF page {page_number} is marked unreadable."
+            ),
+        )
+        for index, page_number in ((0, 1), (2, 3))
+    ]
+    # Validation reports the contradiction without changing its status or pages.
+    assert (valid_preparation, valid_pages) == before
 
 
 def test_pair_accepts_failed_attempt_with_unknown_count(valid_preparation: dict) -> None:

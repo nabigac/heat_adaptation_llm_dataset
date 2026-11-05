@@ -7,9 +7,15 @@ this study pairs open-weight large language models (LLMs) with heat adaptation e
 - [technical design draft](DESIGN.md): implementation, data formats, and evaluation approach.
 - [structured change log](CHANGELOG.md): decisions, changes, and lessons learned during the study.
 
+## current progress
+
+part 1, document registration and preparation, is implemented. part 2, extraction, is in progress: Python modules now load profiles and prompts, assemble the full prepared document, connect to local Ollama, constrain and validate responses, apply permitted repairs, and save/load run records. these components still need an agent loop, MCP tools, and integration into a complete saved extraction. verification, expert files, and analysis remain planned.
+
+the latest development check assembled all 46 pages of the first plan and confirmed that the request fits the current token budget. it did not generate an extraction. see the [development checkpoint](DESIGN.md#current-development-checkpoint-2026-11-04) for settings, evidence, limitations, and remaining work.
+
 ## command line interface
 
-registration, metadata updates, preparation, and status listing are implemented. model processing, expert files, and analysis remain planned.
+the available commands are `add`, `update`, `prepare`, and `list`. extraction and verification commands are not yet implemented.
 
 ### set up the environment
 
@@ -27,7 +33,7 @@ initialize the English OCR models once if using automatic OCR:
 uv run --locked python -c "from document_tools import EasyOcrReader; EasyOcrReader(download_models=True)"
 ```
 
-models are cached in `.cache/easyocr/`; normal preparation uses them offline. no LLM model is needed yet.
+models are cached in `.cache/easyocr/`; normal preparation uses them offline. registration and preparation do not require an LLM model. local model development additionally requires a running Ollama service and the selected model weights; the [current profile](configs/profiles.json) uses `qwen3.5:27b`. Ollama manages those weights outside this repository. the token checker supports only the runtime/model/tokenizer setup validated in the [design](DESIGN.md#prompts-response-schema-and-token-budgeting).
 
 ### register a new PDF
 
@@ -91,4 +97,4 @@ uv run --locked pytest -q
 
 add `--help` to any command for its options. commands use the current project directory; pass `--project-root "/path/to/project"` after the command to select another location. successful preparation, including `ready_with_gaps`, returns 0; failures return 1 and invalid arguments return 2.
 
-real OCR checks require the cached models and are skipped when unavailable. tests do not establish extraction accuracy on every PDF. back up `data/raw/` and `data/processed/` separately; both are excluded from Git.
+real OCR checks require the cached models and are skipped when unavailable. tests do not establish extraction accuracy on every PDF. back up `data/raw/`, `data/processed/`, `runs/`, and `artifacts/` separately; all are excluded from Git. `artifacts/` holds local progress handoffs and development evidence and is absent from a fresh clone.

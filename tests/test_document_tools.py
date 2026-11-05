@@ -1,4 +1,7 @@
 """Check local page rendering independently of any MCP server or OCR engine."""
+# These tests inspect decoded PNG pixels/dimensions and resource handling. They
+# exercise local PDFium/Pillow helpers, not model tool calls. OCR setting tests
+# replace version detection where needed so expected metadata is controlled.
 
 from io import BytesIO
 
@@ -13,6 +16,8 @@ import document_tools
 @pytest.fixture
 def pdf_bytes() -> bytes:
     """Make two pages with different known marks, entirely in memory."""
+    # Two different drawn marks reveal whether the requested page was rendered.
+    # Using BytesIO keeps the fixture in memory; callers receive encoded PDF bytes.
     with PdfWriter() as writer:
         for drawing in (b"20 20 60 40 re f", b"160 100 40 30 re f"):
             page = writer.add_blank_page(width=300, height=200)
@@ -95,6 +100,8 @@ def test_context_manager_closes_document_and_repeated_close_is_safe(pdf_bytes: b
 
 
 def test_refuses_oversized_render_without_allocating_or_downsampling() -> None:
+    # The limit must be checked before allocating a huge bitmap. Passing this case
+    # means the request fails visibly, not that the renderer quietly lowers DPI.
     with PdfWriter() as writer:
         writer.add_blank_page(width=14400, height=14400)
         with BytesIO() as output:

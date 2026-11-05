@@ -13,6 +13,9 @@ import documents
 import storage
 
 
+# Start reading at main(): arguments choose an operation, documents.py performs
+# the work, and the small helpers below print its result. The model/run-record
+# functions are currently library code; this CLI exposes only Part 1 commands.
 def main(argv: list[str] | None = None) -> int:
     """Run a command and return 0 on success or 1 when the requested operation fails.
 
@@ -20,12 +23,16 @@ def main(argv: list[str] | None = None) -> int:
     actual terminal arguments. Invalid command syntax is handled by argparse (2).
     """
     parser = _build_parser()
+    # argparse returns a Namespace: named attributes such as args.command and
+    # args.plan_id hold the values supplied in the terminal or a test's list.
     args = parser.parse_args(argv)
     if args.command == "update" and all(
         getattr(args, field) is None for field in ("title", "source_url", "date_accessed", "study_set")
     ):
         parser.error("update requires --title, --source-url, --date-accessed, or --study-set.")
     try:
+        # expanduser handles a leading ~; resolve makes later paths independent
+        # of relative spelling. The document functions check the project itself.
         root = args.project_root.expanduser().resolve()
         if args.command == "add":
             _add_document(root, args)
@@ -52,6 +59,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Register PDFs, update collection metadata, prepare pages, and list status.",
         allow_abbrev=False,
     )
+    # Explicit option names prevent a shortened flag from acquiring a different
+    # meaning as more commands/options are added to the project.
     # Subcommands select an operation; a required subcommand avoids an ambiguous run.
     commands = parser.add_subparsers(dest="command", required=True)
     add = commands.add_parser(
@@ -110,6 +119,8 @@ def _add_project_argument(parser: argparse.ArgumentParser) -> None:
 
 def _add_document(root: Path, args: argparse.Namespace) -> None:
     """Pass collected arguments to registration and show its saved result."""
+    # Tuple unpacking gives names to both returned values: the registry entry
+    # and whether this call created it or reused an identical registered PDF.
     entry, created = documents.register_document(
         project_root=root,
         pdf_path=args.pdf,
@@ -132,6 +143,8 @@ def _add_document(root: Path, args: argparse.Namespace) -> None:
 def _prepare_document(root: Path, plan_id: str, *, ocr_enabled: bool = True) -> int:
     """Run preparation, display its saved outcome, and return the stage exit status."""
     preparation, record_path = documents.prepare_document(root, plan_id, ocr_enabled=ocr_enabled)
+    # Report paths returned by the workflow, rather than guessing which numbered
+    # attempt was saved. A retained failed attempt also has useful report paths.
     print(f"Preparation for {preparation['plan_id']}.")
     print(f"Status: {preparation['status']}")
     page_count = preparation["page_count"]
@@ -187,6 +200,8 @@ def _list_documents(root: Path) -> None:
         print("No registered documents.")
         return
     print(f"{'PLAN_ID':<14} {'STUDY_SET':<12} {'PREPARATION':<20} TITLE")
+    # :<14 and the other widths left-align display columns; they do not change
+    # stored values. _display_text only removes line breaks from terminal output.
     for entry in entries:
         print(
             f"{entry['plan_id']:<14} {entry['study_set']:<12} "

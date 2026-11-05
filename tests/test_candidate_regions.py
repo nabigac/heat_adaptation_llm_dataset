@@ -3,6 +3,9 @@
 The PDF fixtures deliberately place images and text at known coordinates. This
 lets us check the selection rule independently of OCR's recognition accuracy.
 """
+# The first cases isolate geometry and the 10% selection boundary. Later cases
+# exercise saving, selective OCR, and failures. Known coordinates let us distinguish
+# a screening/cropping mistake from a recognition mistake.
 
 import copy
 import json
@@ -29,6 +32,9 @@ def make_pdf(
     rotation=0, crop_box=None, nested=False, image=None,
 ) -> bytes:
     """Draw image placements on a 400-point square, optionally inside a group."""
+    # Each placement matrix controls an image's scale and position on a known
+    # 400-by-400 PDF page. Optional rotation, cropping, and nesting isolate the
+    # coordinate transformations that preparation must handle.
     with PdfWriter() as writer:
         page = writer.add_blank_page(width=400, height=400)
         bitmap = DecodedStreamObject()
@@ -105,6 +111,8 @@ def test_two_smaller_images_are_not_added_together_to_meet_threshold():
 
 
 def test_background_image_with_native_text_is_not_a_candidate():
+    # A text layer inside the image bounds excludes the region by the agreed
+    # screening rule. This case checks that rule, not that every label is recoverable.
     with document_tools.PdfPageRenderer(make_pdf(matrices=((400, 0, 0, 400, 0, 0),))) as renderer:
         assert renderer.find_candidate_regions(1) == []
 
@@ -179,6 +187,9 @@ def register_pdf(project, tmp_path, data=None):
 
 @pytest.fixture
 def controlled_ocr(monkeypatch):
+    # Record each recognized image and return controlled wording. This lets us
+    # prove that regional OCR receives the crop and that native text stays intact,
+    # without treating recognition quality as part of the geometry test.
     state = SimpleNamespace(loads=0, images=[], result="CHART LABEL 42")
 
     class Reader:

@@ -2,11 +2,11 @@
 
 **Study design and technical implementation (draft)**
 
-**Last updated:** 2026-11-02
+**Last updated:** 2026-11-04
 
 This study will build and evaluate a workflow that pairs open weight large language models (LLMs) with heat adaptation experts to extract data from government plans. The main contribution is practical knowledge about building the workflow, model limitations, useful tools, and where expert intervention is needed. The dataset is also an important output and may support future fine-tuning.
 
-Sections 1 to 6 explain the study and processing steps. The appendix provides JSON field definitions, shared coding and repair rules, Python module responsibilities, and a worked example. Step 1, Add and prepare, is implemented: the CLI registers PDFs, updates collection metadata, prepares page text and selected images with OCR, and lists saved preparation status. Steps 2 to 6 remain planned. The design describes the full intended system; implementation and checks for one step do not establish that later steps work.
+Sections 1 to 6 explain the study and processing steps. The appendix provides JSON field definitions, shared coding and repair rules, Python module responsibilities, and a worked example. Step 1, Add and prepare, is implemented. Step 2, Extract, has tested library components through complete input assembly and token-budget checking, but no complete saved extraction or tool-using agent loop yet. Steps 3 to 6 remain planned. The design describes the full intended system; implementation and checks for one component do not establish that later stages work. Section 6 records the current development checkpoint.
 
 ## 1. Research questions and study design
 
@@ -105,9 +105,9 @@ Save the exact initial page text and preparation notes used by runs. New prepara
 
 ### Use the whole document
 
-Supply the full prepared text with PDF page numbers, instructions, and field definitions. Verification also receives the saved extractor content and issues. Check that each request fits the model's context limit, the amount of information it can process at once, including room for responses and tool results.
+Supply the full prepared text with PDF page numbers, instructions, and field definitions. Verification also receives the saved extractor content and issues. Check that each complete request fits the model's context limit, the amount of information it can process at once. Count the rendered instructions, source, metadata, chat markers, and any conversation history, including tool definitions and results when those capabilities are implemented. Reserve the profile's full `max_output_tokens` for the next answer, including model thinking where applicable: input tokens plus reserved output tokens must not exceed `context_limit`. Repeat the check before every model request as history grows.
 
-If it does not fit, stop and report the problem. Adjust the model or settings during development. Do not silently truncate the document or switch to page groups.
+If it does not fit, or a reliable count cannot be established for the selected serving setup, stop and report the problem before generation. Adjust the model or settings during development. Do not silently truncate the document, reduce the answer allowance, or switch to page groups. Requests for no truncation or context shifting and checks of returned usage are additional safeguards; they do not replace the pre-generation check.
 
 ### Run, retry, and inspect status
 
@@ -149,7 +149,7 @@ Open issues remain for expert review. Source recovery happens within the agent's
 | LLM agents | Interpret source text, request tools, and return extracted content and proposed issues. |
 | Experts | Prepare references, assess outputs, decide correctness, and explain practical lessons. |
 
-An agent is a model used in a loop: read instructions, request a tool if needed, inspect the result, and submit an answer. The planned `agents.py` module will manage this loop and use `models.py` for model requests. It will also act as the MCP client, starting the local server in `document_tools.py` and exchanging tool requests and results through standard input and output. MCP provides the connection; the tools are Python functions in that server. Currently, `document_tools.py` supplies local rendering, image-region inspection, cropping, and OCR functions for preparation. The MCP server, page-text and quotation tools, and agent integration remain to be implemented.
+An agent is a model used in a loop: read instructions, request a tool if needed, inspect the result, and submit an answer. Currently, `agents.py` loads profiles and prompts and builds the extractor's complete input; `models.py` supplies local text-model requests. The remaining agent loop will use those components and act as the MCP client, starting the local server in `document_tools.py` and exchanging tool requests and results through standard input and output. MCP provides the connection; the tools are Python functions in that server. Currently, `document_tools.py` supplies local rendering, image-region inspection, cropping, and OCR functions for preparation. The MCP server, page-text and quotation tools, and agent integration remain to be implemented.
 
 Both agents have access to the same PDF, prepared text, and tool capabilities. For comparison plans, expert references and assessments are created after agent processing. They stay outside agent access, including during any later reruns. Treat document text as source evidence, not instructions to the agent.
 
@@ -198,13 +198,45 @@ Start locally with Ollama on the Apple M5 Pro MacBook with 64 GB of memory. The 
 | Extractor | Qwen3.5 27B | `qwen3.5:27b` |
 | Verifier | Gemma 4 31B | `gemma4:31b` |
 
+The extractor model is installed locally and has been exercised with small synthetic extraction fixtures and a longer capacity diagnostic. The installed weights use Ollama's safetensors/MLX serving path; do not assume a GGUF backend. Gemma remains an untested candidate, with no verifier profile or prompt implemented. Neither candidate has completed the study's extraction-and-verification workflow.
+
 Test memory use, full document capacity, tool calls, structured JSON, and direct image input on the development plans. Test the shared OCR tool separately. Load models sequentially. These candidates may change with observed performance or a move to hosted APIs. Different model families can still share errors.
 
 Later, explore Hugging Face hosted APIs if needed. Keep the workflow and MCP tools local; send the required source text and tool results to the selected provider. Use the same output format. Hosting is a development choice, not another experimental configuration. Hosted availability and capabilities must be tested.
 
-Keep named extractor and verifier profiles in one editable `configs/profiles.json` file. Its shared `document_tools` object configures the MCP server once; the `profiles` list holds model settings. Add a profile by copying an entry, giving it a new name, and changing its settings. Select names through the CLI. Python saves the selected profile, shared tool settings, and prompt text inside each run, so later edits cannot alter earlier results.
+Keep named extractor and verifier profiles in one editable `configs/profiles.json` file. Its shared `document_tools` object will configure the MCP server once; the `profiles` list holds model settings. Add a profile by copying an entry, giving it a new name, and changing its settings. The implemented loader requires an explicit profile name and stage and preserves the shared tool settings and exact ordered prompt texts. The planned extraction and verification commands will select profiles by name and save those settings inside each run, so later edits cannot alter earlier results. Only the extractor development profile currently exists.
 
-A profile specifies the model and endpoint, generation and context settings, prompt files, model request timeout, tool call limit, and direct image input setting. The shared tool configuration specifies OCR, page rendering, and tool request timeout. Both comparison runs use the same shared settings. Python adds detected model and software versions, hardware, and the Git commit. Appendix A defines these fields. Python enforces the context limit before each model request and the tool-call limit before each tool execution. At the tool call limit, request a final answer and leave unresolved issues open; output that remains invalid after permitted repairs still fails the run. This limit is separate from manual retries.
+A profile specifies the model and endpoint, generation and context settings, prompt files, model request timeout, tool call limit, and direct image input setting. The shared tool configuration specifies OCR, page rendering, and tool request timeout. Both comparison runs use the same shared settings. The future runner must add detected model and software versions, hardware, and the Git commit; the loader does not invent environment values. Appendix A defines these fields. The local adapter enforces the text request's context budget before generation. Tool-call enforcement remains part of the planned loop: check the limit before each tool execution, then request a final answer and leave unresolved issues open at the limit. Output that remains invalid after permitted repairs still fails the run. This limit is separate from manual retries.
+
+The current development profile is `qwen35_27b_extractor_development`, using `qwen3.5:27b` at `http://localhost:11434`:
+
+| Setting | Current value |
+| --- | --- |
+| Context limit | 73,728 tokens. |
+| Maximum output reservation | 16,384 tokens, including model thinking where applicable. |
+| Capacity available for all input | 57,344 tokens before instructions, source, metadata, and any later history are counted. |
+| Complete model-request timeout | 1,800 seconds, shared by preflight and generation. |
+| Tool-call limit | 10, configured for the future loop; not yet exercised. |
+| Direct image input | Disabled. |
+| Temperature, top-p, seed | `null`; use model defaults rather than claiming deterministic generation. |
+
+These are provisional development settings. The larger context and output reservation preserve input capacity; they do not establish usable generation at their full limits. Fix comparison settings only after the development workflow has been tested.
+
+### Prompts, response schema, and token budgeting
+
+Prompts explain how to interpret the source and code its contents. For the extractor, `prompt_paths` selects `shared_coding.md`, `field_definitions.md`, and `extractor.md` in that order. The profile loader preserves each file's exact text separately. The implemented `build_extractor_input()` joins those texts with two newline characters into one system message, then supplies collection metadata, original PDF page numbers, preparation notes, and the entire prepared source in a user message. The shared instructions group definitions and coding rules by category, including monitoring versus evaluation, benefit types, and costs and resources. A verifier will also receive the selected saved extractor content and issues. Role-specific instructions change; the shared coding rules and response contract remain common. The full agent runner and verifier prompt/profile remain to be implemented.
+
+Input assembly requires an explicit registered plan, profile name, and saved `preparation.json` path. `storage.load_plan_preparation()` is shared with run storage: it checks the selected preparation's identity, original PDF checksum, readiness, pages, and linked images. Current registry corrections or a newer preparation cannot replace that selected snapshot. Assembly includes every page in order, preserves saved text and source-gap notes, distinguishes known blank pages from unavailable text, and retains version 2 compatibility without inventing absent region information. It returns an `ExtractorInput` containing the source identity, page count, settings, messages, and compatible response schema. Building it does not count tokens, call a model, rerun OCR, write files, or create a research run.
+
+The response schema supplies machine-readable field, nesting, type, and allowed-value rules. For local Ollama structured generation, send both the instruction messages and the compatible agent-response schema in the same `/api/chat` request. Messages go in `messages`; the schema dictionary goes separately in `format`. Sending only `format: "json"` requests JSON without imposing our full response structure. The schema constrains answer structure; the prompts still supply the coding meanings and source-handling rules. [Ollama chat API](https://docs.ollama.com/api/chat).
+
+`models.py` implements `prepare_ollama_response_schema()`. It generates a fresh provider copy from `content.schema.json` and `agent_response.schema.json`, expanding known local references and rewriting the nonblank-string pattern into an equivalent whole-string form tested with Ollama. It rejects unsupported conversions rather than dropping constraints. The original files remain authoritative for Python validation; a provider copy is not a separate editable contract. The input builder returns this copy as `response_format`, which the caller passes explicitly to the adapter. Preserve the exact request and sent schema with each future model call so later schema edits cannot obscure what was used; automatic run-saving integration remains planned.
+
+`models.py` also implements a text-only token-budget check, automatically applied by `request_ollama_chat()` and available separately as `check_ollama_token_budget()` without generating an answer. The first supported setup is local `qwen3.5:27b` with Ollama 0.40.14 and its Qwen3.5 safetensors/MLX assets. The check verifies the runtime version and served-model digest, loads the matching installed tokenizer with the `tokenizers` library, and requests the fully rendered prompt using Ollama's private render-only flag. The counted text includes chat markers and the assistant prefix. Disable tokenizer truncation and padding during counting; do not add special tokens already supplied by the renderer. No additional model weights or tokenizer files are downloaded by the check. A different model, runtime, or tokenizer configuration requires validation before support is enabled. The private flag and its JSON response fields are version-specific. [Ollama 0.40.14 request and response definitions](https://github.com/ollama/ollama/blob/v0.40.14/api/types.go), [Qwen3.5 renderer](https://github.com/ollama/ollama/blob/v0.40.14/model/renderers/qwen35.go).
+
+Forward the same schema to render-only and generation requests. On this serving path the `format` schema is passed to generation separately from prompt rendering; do not count the entire HTTP request or automatically add a second schema token charge. Any schema text explicitly included in messages is counted as part of the rendered prompt. Tool and image accounting must be implemented and tested before enabling those request types. [Ollama 0.40.14 chat implementation](https://github.com/ollama/ollama/blob/v0.40.14/server/routes.go).
+
+The check returns a report with counts, output reservation, remaining capacity, request and rendered-prompt checksums, runtime/model/tokenizer identifiers, and any error, plus the received preflight HTTP bodies. Tokenizer asset fingerprints are checked against those validated during development, so a tag update cannot silently introduce an untested tokenizer. The future runner must save those audit artifacts with the request; automatic run-storage integration remains planned. Preflight counts are separate from provider-reported generation usage and do not populate Appendix A's `model_calls` usage fields. Render-only operations do not generate answers or create additional research model calls, although setup and model loading still contribute to stage duration. Preflight and generation share one model-request timeout, with no automatic retries. After generation, fail a known disagreement between counted and reported input tokens, retaining the response for investigation. This checks serving consistency, not semantic correctness, quotation support, or completeness.
 
 ### Files and identifiers
 
@@ -223,7 +255,7 @@ When verification removes or splits a record, the verifier must update all affec
 
 Retain baseline issue IDs. If an issue's record is removed, set `related_record_id` to null and name the removed record in the description. If an issue affects several resulting records, link it to one and name the others in the description.
 
-The project layout below combines implemented step 1 files with planned later modules and examples of generated files. The model, expert, and analysis directories describe later work; their appearance here does not mean those stages exist.
+The project layout below combines implemented steps 1 and 2 components with planned later modules and examples of generated files. Expert modules, notebooks, agent-generated run contents, and analysis outputs remain planned; their appearance here does not mean those stages have been completed.
 
 ```text
 heat_adaptation_llm_dataset/
@@ -238,16 +270,17 @@ heat_adaptation_llm_dataset/
 ├── .venv/                            # Local Python environment; ignored by Git.
 ├── .cache/easyocr/                    # Downloaded OCR models; ignored by Git.
 ├── .env                              # Optional API credentials; ignored by Git.
+├── artifacts/                        # Local handoffs and diagnostic evidence; ignored by Git.
 ├── src/                              # Shared Python modules.
 │   ├── cli.py                       # Terminal commands and step selection.
 │   ├── documents.py                 # PDF registration and page preparation.
-│   ├── agents.py                    # Agent loops and MCP client.
-│   ├── models.py                    # Ollama and hosted model API calls.
+│   ├── agents.py                    # Profiles and full input assembly; loop/MCP client planned.
+│   ├── models.py                    # Local text Ollama calls, schema copy, token budgeting.
 │   ├── document_tools.py            # Local rendering/OCR; MCP server planned.
-│   ├── validation.py                # JSON, link, and assessment coverage checks.
+│   ├── validation.py                # JSON, source, content, response, and run checks.
 │   ├── repair.py                    # Permitted JSON format repairs.
-│   ├── expert_files.py              # Expert templates and completed file imports.
-│   ├── metrics.py                   # Measure calculations and exports.
+│   ├── expert_files.py              # Planned expert templates and completed file imports.
+│   ├── metrics.py                   # Planned measure calculations and exports.
 │   └── storage.py                   # IDs, file saving, and status.
 ├── configs/
 │   └── profiles.json                # Model profiles and shared MCP tool settings.
@@ -255,9 +288,15 @@ heat_adaptation_llm_dataset/
 ├── schemas/                         # JSON field and type rules.
 │   ├── registry.schema.json          # Registered document metadata.
 │   ├── preparation.schema.json       # Preparation metadata and status.
-│   └── pages.schema.json             # Page text and preparation problems.
-├── notebooks/                       # Output inspection and research analysis.
-├── tests/                           # Registration, preparation, validation, and CLI checks.
+│   ├── pages.schema.json             # Page text and preparation problems.
+│   ├── content.schema.json           # Plan information and five content lists.
+│   ├── agent_response.schema.json    # Model-authored content and review issues.
+│   ├── profiles.schema.json          # Shared tools and named model profiles.
+│   ├── run.schema.json               # Saved run record and settings.
+│   ├── tool_log.schema.json          # Tool activity entries.
+│   └── validation_report.schema.json # Format errors, repairs, and final validity.
+├── notebooks/                       # Planned output inspection and research analysis.
+├── tests/                           # Document, schema, run, model, budget, and input checks.
 ├── data/
 │   ├── registry/plans.json          # Registered documents and collection details.
 │   ├── raw/plan_0001.pdf             # Original PDF.
@@ -287,13 +326,13 @@ heat_adaptation_llm_dataset/
     └── analysis/                    # Calculated comparison tables and figures.
 ```
 
-The implemented CLI calls shared modules for `add`, `update`, `prepare`, and `list`. Validation uses the registry, preparation, and pages schemas. In later steps, profiles will select models and prompts, the shared `document_tools` configuration will set up the MCP server, and notebooks will call `metrics.py` to read saved runs and assessments and write comparison results under `runs/analysis/`. Appendix G gives the full module responsibilities.
+The implemented CLI calls shared modules for `add`, `update`, `prepare`, and `list`. Part 2 additionally provides profile and prompt loading, complete extractor input assembly from a selected preparation, content/response/run validation, permitted repairs, run-record saving/loading, the local Ollama adapter, compatible schema preparation, and text-only token budgeting. These components are not yet wired into an extraction or verification command or agent loop. In later steps, the shared `document_tools` configuration will set up the MCP server, and notebooks will call `metrics.py` to read saved runs and assessments and write comparison results under `runs/analysis/`. Appendix G gives the full module responsibilities.
 
-The proposed Ollama service manages downloaded LLM weights outside this project. The planned MCP server will run locally from `src/document_tools.py`; a hosted model API changes the model connection, while document tools and saved files remain local. Current preparation uses EasyOCR models cached under the project's `.cache/easyocr/` and does not require an LLM service.
+The local Ollama service manages downloaded LLM weights and tokenizer assets outside this project. The planned MCP server will run locally from `src/document_tools.py`; a hosted model API changes the model connection, while document tools and saved files remain local. Current preparation uses EasyOCR models cached under the project's `.cache/easyocr/` and does not require an LLM service.
 
 Preparation folders and run folders preserve their inputs. They do not need separate source, snapshot, review, batch, or result IDs. Assessment drafts use separate working files; retain earlier completed assessments if revised.
 
-Track code, tests, dependency settings, schemas, prompts, profiles, registry metadata, and project documents in Git. Keep `AGENTS.md` local. Exclude credentials, PDFs, prepared text, model weights, and generated runs; back up excluded research files. Release packaging is a later decision.
+Track code, tests, dependency settings, schemas, prompts, profiles, registry metadata, and project documents in Git. Keep `AGENTS.md` local. Exclude credentials, PDFs, prepared text, model weights, generated runs, and local `artifacts/` handoffs and diagnostics; back up excluded research files separately. Local handoffs and their evidence are not distributed in a fresh clone. Release packaging is a later decision.
 
 ## 5. Expert assessment and measures
 
@@ -387,6 +426,22 @@ Build and test in the same six steps:
 
 Step 1's software is implemented and has been used on the first development plan. Registration, metadata corrections, preparation, preservation, validation, and status display have automated checks. This establishes a working preparation stage, not verified OCR accuracy or a complete model workflow. Continue testing document preparation with the second development plan and during later development; known recoverable gaps do not require perfect OCR before starting Extract.
 
+### Current development checkpoint (2026-11-04)
+
+Step 2 has implemented content and agent-response contracts; strict structural and reference validation; saved run settings and run records; preservation and loading of run files; the four permitted final-response repairs; profile and ordered prompt loading; a local text-only Ollama adapter; compatible structured-output schema preparation; token-budget enforcement; and complete extractor input assembly. Python modules and tests include explanatory comments. The latest recorded full suite passed 1,506 tests with 11 existing OCR/PyTorch warnings. These checks establish the tested software behavior, not extraction accuracy.
+
+Development diagnostics found that Ollama's context option alone did not reliably reject an oversized request, motivating explicit counting and usage checks. Sending the original nonblank-string pattern through structured generation also produced excessively short field values. The equivalent whole-string pattern in the maintained provider copy retained Python acceptance behavior in tested cases and allowed useful synthetic responses. Two maintained-schema fixtures passed the full validators without repairs and preserved all nine checked quotations literally; unnecessary issue flags and category-coding questions remained. Format compliance does not establish faithful or complete coding.
+
+A separate 65,536-context diagnostic counted 54,013 input tokens, matched the provider's reported input count, generated 1,525 output tokens, and recovered three source-only markers with normal completion. It took about 263 seconds including preflight. Sampled swap remained zero; the largest sampled Ollama-reported allocation was about 24.6 GB, not total system memory or a guaranteed peak. This supported trying a larger development context on this Mac, but did not test the full context or output allowance. The later 73,728-context and 16,384-output settings remain provisional; generation at their full limits is **Not yet tested**.
+
+The latest live check used the exact input builder output for Freetown `plan_0001`, explicitly selecting `data/processed/plan_0001/preparation_02/preparation.json`. All 46 pages and saved preparation notes were included. The selected preparation remains `ready_with_gaps`, with 34 native and 12 mixed pages. Input counted 23,772 tokens; reserving 16,384 output tokens produced a total of 40,156 against 73,728, leaving 33,572. The check took about 4.04 seconds and returned no generated answer. It establishes that this assembled text request fits, not that extraction is complete or accurate. Recount after any input, schema-delivery, history, or supported modality changes.
+
+The remaining step 2 work is to expose source-bound document tools through MCP, implement and test tool-message accounting and the bounded agent loop, capture actual run environment and measurements, and preserve requests, preflight evidence, responses, logs, and validation reports together. Add the extraction command when that workflow exists, then perform and inspect a real development extraction. The second development plan and preparation follow-ups remain outstanding. No complete saved study extraction, verifier run, expert reference, assessment, or comparison result exists yet. Verification will require its own prompt, profile, model checks, and integration in step 3.
+
+The local `artifacts/heat_adaptation_part_2_handoff_2026-11-04.txt` records this checkpoint. A companion progress JSON preserves the detailed event history, and `artifacts/part_2_evidence_2026-11-04/manifest.json` maps byte-preserved temporary diagnostics and scripts to archived files with SHA-256 checksums. These are development evidence, separate from formal `runs/` records. Historical scripts retain original paths and may generate answers; the archive is not an automatically portable replay. The Part 1 handoff remains unchanged. The combined entry in `CHANGELOG.md` summarizes the Part 2 batch.
+
+### Continue development before comparison
+
 Use the two development plans as an open, iterative process. Start with a straightforward PDF, then try a plan with more difficult tables, layout, or scanned pages where available. Compare prepared text and page numbers with the original PDF. Inspect model outputs and tool results openly, adjust preparation, prompts, models, or tools, and repeat runs with new IDs as needed.
 
 Check that extraction, verification, JSON repairs, saved files, and measurements work together. Use selected expert coding and assessment examples to check the templates and calculations; complete independent references are not required for both development plans. Keep development runs outside the comparison and fix the study settings before starting it.
@@ -397,7 +452,7 @@ Retain short observations about model limitations, useful tools, failures, and n
 
 ## Appendix: JSON fields, rules, and example
 
-A schema defines allowed fields, types, and values. Registry, preparation, and page schemas and their validation functions are implemented. The remaining definitions guide later schemas, validators, and templates as their steps are built.
+A schema defines allowed fields, types, and values. Registry, preparation, page, content, agent-response, profile, run, tool-log, and validation-report schemas and their validation functions are implemented. Expert reference and assessment definitions guide later schemas, validators, and templates as their steps are built.
 
 Use JSON objects for records and lists for multiple items. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are relative to the project root. Use `[]` for empty lists, `null` for unavailable nullable values, and the defined enum value such as `not_specified` where required. An enum is a fixed set of permitted values.
 
@@ -593,16 +648,16 @@ When final-response validation is attempted, save `validation_report.json` in th
 
 ### G. Python modules
 
-A module is a Python file containing related functions. These files belong in `src/`; the table describes their intended responsibilities across the full workflow. `cli.py`, `documents.py`, `validation.py`, and `storage.py` implement their registration and preparation responsibilities. `document_tools.py` supplies local image inspection, rendering, cropping, and OCR; its MCP server remains planned. The other modules and later-stage responsibilities are not yet implemented. Step numbers refer to the same six steps in Section 3 and the Section 4 diagram.
+A module is a Python file containing related functions. These files belong in `src/`; the table describes their intended responsibilities across the full workflow. Registration and preparation are implemented. Part 2 adds configuration loading and complete extractor input assembly in `agents.py`, local text-model calls, compatible schemas and token budgeting in `models.py`, permitted repairs in `repair.py`, and response/run validation and storage. `document_tools.py` supplies local image inspection, rendering, cropping, and OCR; its MCP server remains planned. Agent-loop integration, verification, expert files, and metrics remain planned. Step numbers refer to the same six steps in Section 3 and the Section 4 diagram.
 
 | Module | Step | Responsibility |
 | --- | --- | --- |
 | `cli.py` | 1 to 6 | Handle commands, select documents, profiles, and input files, and show status, errors, and repairs. Call the shared modules. |
 | `documents.py` | 1 | Register PDFs, update collection details, check duplicate checksums, prepare page text and selected images with OCR, and derive status from saved preparations. |
-| `agents.py` | 2 and 3 | Load the selected profile, shared tool configuration, and prompts. Run the agent loop and start the MCP server as its client. Enforce context/tool limits and request timeouts, fail on reported truncation, and validate and save outputs. |
-| `models.py` | 2 and 3 | Connect to Ollama or a hosted provider. Send model requests, images, and tool messages within the request timeout; return raw responses, completion metadata, and usage measurements. |
+| `agents.py` | 2 and 3 | Load the selected profile, shared tool configuration, and prompts; assemble every page of the selected saved preparation and return messages and the response schema. These input functions are implemented. The planned loop will start the MCP server as its client, enforce tool limits, use model context/timeout/truncation checks, and coordinate output validation and saving. |
+| `models.py` | 2 and 3 | Prepare a compatible response schema and check the complete request's token budget before generation. Connect to Ollama or a hosted provider within the request timeout; return raw responses, preflight evidence, completion metadata, and usage measurements. Local text-only Ollama support is implemented; hosted, image, and tool-message support remain planned. |
 | `document_tools.py` | 1 to 3 | Supply local image inspection, rendering, cropping, and OCR for preparation. Add page-text and quotation tools and expose the tools through the local MCP server using the shared configuration. Restrict access to the selected source and permitted run artifacts. |
-| `validation.py` | Shared | Check JSON syntax, required fields, types, IDs, links, page ranges, and assessment coverage. Classify errors; for model final responses, call `repair.py` and validate again. |
+| `validation.py` | Shared | Check JSON syntax, required fields, types, IDs, links, page ranges, preparation consistency, and run contracts. Classify errors; for model final responses, call `repair.py` and validate again. Expert assessment coverage checks remain planned. |
 | `repair.py` | 2 and 3 | Apply only the format repairs in Appendix F. Return the repaired text and details of each change for the validation report. |
 | `expert_files.py` | 4 and 5 | Require both successful linked outputs before generating or accepting an initial reference. Generate reference and assessment templates and import completed expert files. Experts supply matches and judgments. |
 | `metrics.py` | 6 | Calculate the agreed measures from selected run and assessment files, and export tables under `runs/analysis/`. Notebooks save figures there too. |
@@ -614,7 +669,7 @@ During Analyze (step 6), notebooks in `notebooks/` use `metrics.py` to compare E
 
 This fictional extractor output has one action and one bundled issue. The quote says the action is planned and gives a quantity and deadline; the extraction wrongly says completed and omits those details. That action would receive partial credit. Empty lists illustrate structure, not a complete plan.
 
-This is a format illustration, not a saved model run. The model revision, software versions, generation settings, timings, and tokens are illustrative placeholders. The OCR engine and language match the current preparation defaults; model-stage tool integration remains planned.
+This is a format illustration, not a saved model run or a classification of the real development plan as comparison data. The context limit, output reservation, timeout, OCR engine, and language match current development settings. Other model and environment details, prompt texts, controls, timings, and measured tokens are illustrative placeholders. Model-stage tool integration remains planned.
 
 ```json
 {
@@ -644,12 +699,16 @@ This is a format illustration, not a saved model run. The model revision, softwa
       "temperature": 0,
       "top_p": null,
       "seed": null,
-      "max_output_tokens": 8192
+      "max_output_tokens": 16384
     },
-    "context_limit": 32768,
-    "prompt_paths": ["prompts/extractor.md"],
+    "context_limit": 73728,
+    "prompt_paths": [
+      "prompts/shared_coding.md",
+      "prompts/field_definitions.md",
+      "prompts/extractor.md"
+    ],
     "max_tool_calls": 10,
-    "model_timeout_seconds": 600,
+    "model_timeout_seconds": 1800,
     "image_input_enabled": false,
     "document_tools": {
       "ocr_enabled": true,
@@ -659,7 +718,9 @@ This is a format illustration, not a saved model run. The model revision, softwa
       "tool_timeout_seconds": 120
     },
     "prompt_texts": [
-      "Extract stated heat adaptation records with source quotations and PDF page numbers. Flag uncertain or incomplete records. Return content and review."
+      "Illustrative shared coding instructions: extract stated heat adaptation information and preserve source qualifications.",
+      "Illustrative field definitions: return content and review with required fields, source quotations, and PDF page numbers.",
+      "Illustrative extractor task: read the full source, investigate gaps with available tools, and retain unresolved issues."
     ],
     "environment": {
       "model_revision": "illustrative-model-revision",

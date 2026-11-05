@@ -17,6 +17,9 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
 
 
+# Read this file in three groups: settings/OCR, image geometry, then rendering.
+# The functions work with PDF/PNG bytes in memory. documents.py decides when to
+# call them; storage.py decides where their returned images/text are preserved.
 DEFAULT_IMAGE_RENDER_DPI = 150
 DEFAULT_OCR_ENGINE = "easyocr"
 DEFAULT_OCR_LANGUAGE = "en"
@@ -45,6 +48,8 @@ def build_preparation_settings(
         or not isinstance(image_render_dpi, int)
         or image_render_dpi < 1
     ):
+        # Python considers True an int subclass. Explicitly reject it so a flag
+        # cannot accidentally request a one-DPI render.
         raise ValueError("Image rendering DPI must be a positive integer.")
     if not isinstance(ocr_enabled, bool):
         raise ValueError("OCR enabled must be a Boolean.")
@@ -125,6 +130,8 @@ class EasyOcrReader:
             from PIL import Image
 
             with Image.open(BytesIO(image_bytes)) as image:
+                # BytesIO gives encoded bytes a file-like interface. verify()
+                # checks the image container before sending it to recognition.
                 image.verify()
             # detail=0 returns text fragments. Keep their reported order and join
             # them with line breaks; do not infer columns or rewrite quotations.
@@ -136,6 +143,8 @@ class EasyOcrReader:
         if not isinstance(fragments, list) or not all(isinstance(item, str) for item in fragments):
             raise OcrError("EasyOCR returned an unexpected text result.")
         text = "\n".join(fragments)
+        # These checks establish a usable text result, not correct recognition.
+        # Plausible but mistaken words/numbers still require source review.
         if not text.strip():
             # No recognized text does not prove that the original page is blank.
             raise OcrError("OCR did not recognize usable text; page blankness remains unconfirmed.")
@@ -151,6 +160,8 @@ class EasyOcrReader:
 def ocr_page_image(image_bytes: bytes, *, reader: EasyOcrReader | None = None) -> str:
     """OCR one rendered page; pass a shared reader to avoid reloading its models."""
     if reader is None:
+        # A caller processing several images can pass one reader to reuse its
+        # loaded models. A standalone call constructs its own reader instead.
         reader = EasyOcrReader()
     return reader.read_text(image_bytes)
 
@@ -171,10 +182,15 @@ def _clip_polygon(points: list[tuple[float, float]], box: tuple) -> list[tuple[f
     Each pass cuts the polygon at one page edge, retaining intersection points.
     """
     left, bottom, right, top = box
+    # Each edge says which coordinate to test (0=x, 1=y), its boundary value,
+    # and which side is inside the page. Repeating this clips all four edges.
     edges = ((0, left, True), (0, right, False), (1, bottom, True), (1, top, False))
     for axis, boundary, keep_greater in edges:
         clipped = []
         for start, end in zip(points, points[1:] + points[:1]):
+            # Pair each corner with the next, including last-to-first, so the
+            # polygon stays closed. When an edge crosses the boundary, retain
+            # its intersection point as a new corner of the visible polygon.
             start_inside = start[axis] >= boundary if keep_greater else start[axis] <= boundary
             end_inside = end[axis] >= boundary if keep_greater else end[axis] <= boundary
             if start_inside != end_inside:
@@ -196,10 +212,14 @@ def _image_polygons(page, form=None, parent_matrix=None, depth: int = 0):
     if depth > 15:
         raise PageInspectionError("Image groups exceed the supported inspection depth of 15.")
     parent_matrix = parent_matrix if parent_matrix is not None else pdfium.PdfMatrix()
+    # A matrix describes scaling/rotation/position. The initial identity matrix
+    # leaves coordinates unchanged; nested groups add their own transformations.
     for obj in page.get_objects(form=form, max_depth=1):
         if obj.type == pdfium_raw.FPDF_PAGEOBJ_IMAGE:
             yield [parent_matrix.on_point(*point) for point in obj.get_quad_points()]
         elif obj.type == pdfium_raw.FPDF_PAGEOBJ_FORM:
+            # yield from forwards each child image polygon to our caller. It
+            # does not collect a second image list or render the group itself.
             yield from _image_polygons(
                 page, obj, obj.get_matrix().multiply(parent_matrix), depth + 1
             )
@@ -212,6 +232,8 @@ def crop_page_image(image_bytes: bytes, bounds: list[int], *, dpi: int) -> bytes
     try:
         with Image.open(BytesIO(image_bytes)) as image:
             left, top, right, bottom = bounds
+            # Reject out-of-image bounds instead of letting Pillow pad the crop
+            # with new pixels, which could conceal a coordinate-conversion bug.
             if not (0 <= left < right <= image.width and 0 <= top < bottom <= image.height):
                 raise ValueError("Candidate crop lies outside the rendered page.")
             with image.crop((left, top, right, bottom)) as crop, BytesIO() as output:
@@ -233,6 +255,8 @@ class PdfPageRenderer:
             raise ValueError("Image rendering DPI must be a positive integer.")
         self.image_render_dpi = image_render_dpi
         self._document = None
+        # Opening one renderer per document lets several pages reuse the same
+        # PDFium document. The with/close methods below release its resources.
         try:
             self._document = pdfium.PdfDocument(pdf_bytes)
             # Initialize form rendering before retrieving pages, so supported
@@ -259,11 +283,15 @@ class PdfPageRenderer:
         page = bitmap = image = None
         try:
             page = self._document.get_page(page_number - 1)
+            # Our public page numbers start at 1; the rendering library indexes
+            # pages from 0. Keep that conversion here, not in saved references.
             width, height = page.get_size()
             scale = self.image_render_dpi / 72  # PDF page units are normally 1/72 inch.
             if not all(math.isfinite(value) and value > 0 for value in (width, height)):
                 raise PageRenderingError("The PDF page has invalid dimensions.")
             pixels = math.ceil(width * scale) * math.ceil(height * scale)
+            # Check allocation size before page.render creates the bitmap.
+            # math.ceil rounds up because a partial pixel still needs storage.
             if pixels > _MAX_RENDER_PIXELS:
                 raise PageRenderingError(
                     f"Rendering page {page_number} would exceed {_MAX_RENDER_PIXELS:,} pixels. "
@@ -272,6 +300,8 @@ class PdfPageRenderer:
             bitmap = page.render(
                 scale=scale, rev_byteorder=True, draw_annots=True, fill_color=(255, 255, 255, 255)
             )
+            # A bitmap holds pixels; PNG encoding turns those pixels into the
+            # portable image bytes returned to preparation or later tools.
             image = bitmap.to_pil()
             with BytesIO() as output:
                 image.save(
@@ -326,6 +356,8 @@ class PdfPageRenderer:
             scale = self.image_render_dpi / 72
             pixels_w, pixels_h = math.ceil(width * scale), math.ceil(height * scale)
             converter = pdfium.PdfPosConv(page, (0, 0, pixels_w, pixels_h, 0))
+            # PDF coordinates and top-left image coordinates differ. This
+            # converter accounts for page geometry when producing crop bounds.
             textpage = page.get_textpage()
             candidates = []
             seen_bounds = set()
@@ -340,11 +372,16 @@ class PdfPageRenderer:
                     for start, end in zip(polygon, polygon[1:] + polygon[:1])
                 )) / 2
                 fraction = image_area / area
+                # Test each image independently. Using < retains an image
+                # exactly at the threshold; smaller images are not added up.
                 if fraction < min_area:
                     continue
                 left, right = min(p[0] for p in polygon), max(p[0] for p in polygon)
                 bottom, top = min(p[1] for p in polygon), max(p[1] for p in polygon)
                 if textpage.get_text_bounded(left, bottom, right, top, errors="strict").strip():
+                    # Native text in this rectangle excludes the candidate. This
+                    # heuristic can miss partially readable image text; it is a
+                    # screening rule rather than a completeness guarantee.
                     continue
                 pixels = [converter.to_bitmap(*point) for point in polygon]
                 bounds = (
@@ -353,6 +390,8 @@ class PdfPageRenderer:
                     min(pixels_w, max(point[0] for point in pixels)),
                     min(pixels_h, max(point[1] for point in pixels)),
                 )
+                # Clamp the crop to the full-page image. Candidate metadata and
+                # later cropping must refer to that same preserved image frame.
                 if bounds[0] >= bounds[2] or bounds[1] >= bounds[3]:
                     raise PageInspectionError("Candidate image has no usable crop at the selected DPI.")
                 if bounds in seen_bounds:

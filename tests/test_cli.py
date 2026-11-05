@@ -1,4 +1,7 @@
 """Check CLI commands against temporary projects and the shared workflow code."""
+# Most tests call cli.main with an argument list inside this process. capsys
+# captures stdout/stderr so normal output and errors can be checked separately.
+# The final subprocess tests additionally check the real command's exit status.
 
 import subprocess
 import sys
@@ -21,6 +24,8 @@ def project(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def add_arguments(project: Path, tmp_path: Path) -> list[str]:
+    # Return the complete command arguments, including the temporary project
+    # root. Tests can remove/change one option while keeping the rest valid.
     pdf = tmp_path / "incoming plan.pdf"
     # Registration fixtures establish byte preservation, not PDF readability.
     pdf.write_bytes(b"%PDF-1.4\nFictional CLI registration fixture\n%%EOF\n")
@@ -503,6 +508,9 @@ def test_prepare_exit_status_reaches_a_separate_python_process(
     capsys: pytest.CaptureFixture,
     readable_pdf: bool,
 ) -> None:
+    # A returned integer inside Python is not enough to prove shell behavior.
+    # Starting a separate process checks that the entry point turns that value into
+    # the actual exit status observed by terminal users or scripts.
     if readable_pdf:
         with PdfWriter() as writer:
             writer.add_blank_page(width=300, height=300)

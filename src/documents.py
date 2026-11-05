@@ -32,6 +32,9 @@ from document_tools import (
 from validation import validate_registry_structure
 
 
+# This module coordinates the workflow. storage.py owns file operations,
+# validation.py owns field/relationship checks, and document_tools.py owns image
+# inspection/rendering/OCR. Keeping those jobs separate lets the CLI stay small.
 def sha256_file(path: Path | str) -> str:
     """Fingerprint file contents, independently of the filename or location."""
     # rb means read binary bytes, avoiding text decoding or newline conversion.
@@ -51,6 +54,8 @@ def list_documents(project_root: Path | str) -> list[dict]:
     if not root.is_dir():
         raise NotADirectoryError(f"Project root is not an existing directory: {root}")
     registry = _load_or_start_registry(root)
+    # Listing is read-only, but still refuses damaged identities. Showing a saved
+    # readiness label for the wrong or modified PDF would mislead later work.
     _check_registered_records(root, registry)
     entries = []
     for entry in registry["plans"]:
@@ -105,6 +110,8 @@ def register_document(
         "study_set": study_set,
         "prepared_source_path": existing["prepared_source_path"] if existing else None,
     }
+    # Build and validate the entire proposed entry before copying any PDF. The
+    # one-entry wrapper applies the same schema used for the complete registry.
     problems = validate_registry_structure({"schema_version": 1, "plans": [entry]})
     if problems:
         raise storage.RegistryValidationError(problems)
@@ -163,6 +170,9 @@ def update_document_metadata(
             "study_set": study_set,
         }.items() if value is not None
     }
+    # A dictionary comprehension above collects only explicitly supplied edits.
+    # None means "leave this field alone"; an empty string is still an edit and
+    # must be rejected if it violates that field's rules.
     if not requested:
         raise ValueError("Provide at least one collection-metadata field to update.")
     root = Path(project_root).resolve()
@@ -171,11 +181,15 @@ def update_document_metadata(
     registry = storage.load_registry(root)
     _check_registered_records(root, registry)
     selected = next((entry for entry in registry["plans"] if entry["plan_id"] == plan_id), None)
+    # next(..., None) selects the matching entry or returns None when absent.
+    # It does not allocate a new plan or silently choose a similar document.
     if selected is None:
         raise ValueError(f"No registered document has plan ID {plan_id!r}.")
     _load_registered_preparation(root, selected)
 
     updated = dict(selected, **requested)
+    # This is a new dictionary. Checks can fail without partly changing the
+    # original entry; only a fully valid proposal reaches save_registry below.
     problems = validate_registry_structure({"schema_version": 1, "plans": [updated]})
     if problems:
         raise storage.RegistryValidationError(problems)
@@ -245,6 +259,8 @@ def prepare_document(
     settings = build_preparation_settings(
         image_render_dpi=image_render_dpi, ocr_enabled=ocr_enabled, ocr_language=ocr_language
     )
+    # The settings object is saved with this attempt. Reading the installed OCR
+    # version here does not load its neural models or download any weights.
     root = Path(project_root).resolve()
     if not root.is_dir():
         raise NotADirectoryError(f"Project root is not an existing directory: {root}")
@@ -272,6 +288,9 @@ def prepare_document(
     prepared_at = datetime.now(UTC).isoformat(timespec="seconds")
     page_count, pages, document_problem = _read_pdf_pages(pdf_bytes)
     directory = storage.next_preparation_directory(root, plan_id)
+    # pages is an ordered list: entry 0 describes physical PDF page 1. Native
+    # extraction establishes the first reading route; fallbacks enrich that same
+    # list and collect only the images needed for detected gaps or review.
     # A readable caption cannot establish that an image elsewhere on its page
     # contains no text. Inspect every page's image geometry before selecting OCR.
     page_count, pages, image_problem, artifacts = _prepare_page_fallbacks(
@@ -295,6 +314,9 @@ def prepare_document(
         problem = f"{problem}\n{page_summary}" if problem else page_summary
 
     unreadable_pages = [page["page_number"] for page in pages if not page["readable"]]
+    # "readable" means a usable text/image route exists, not that its content is
+    # accurate. Keep review notes even when OCR succeeds, so uncertainty remains
+    # visible in ready_with_gaps rather than becoming an apparent clean result.
     if page_count is None or image_problem is not None or unreadable_pages:
         status = "failed"
         if unreadable_pages:
@@ -359,6 +381,8 @@ def _prepare_page_fallbacks(
     failed save cannot attach new images to a completed earlier preparation.
     """
     artifacts = {}
+    # Artifacts maps a future project-relative filename to PNG bytes. Helpers
+    # return bytes; storage publishes them together with the new preparation.
     ocr_reader = None
     ocr_initialization_problem = None
     ocr_initialization_attempted = False
@@ -413,6 +437,9 @@ def _prepare_page_fallbacks(
                 # A candidate with good native text needs regional supplements,
                 # whereas missing/unreliable native text needs full-page OCR.
                 needs_full_ocr = settings["ocr_enabled"] and not page["readable"]
+                # Decide from the native result before candidate screening adds
+                # review notes: an image flag alone should not replace good text
+                # with a second full-page OCR transcription.
                 try:
                     page["image_regions"] = renderer.find_candidate_regions(
                         page["page_number"], min_area=settings["candidate_image_min_area"]
@@ -427,6 +454,8 @@ def _prepare_page_fallbacks(
                         "potential missing content requires image review.",
                     )
                 if document_problem is None and page["problem"] is None:
+                    # Clean native pages need neither a duplicate page render nor
+                    # OCR. A document-level warning still triggers image review.
                     continue
                 try:
                     image_bytes = renderer.render_page(page["page_number"])
@@ -440,6 +469,9 @@ def _prepare_page_fallbacks(
                     page["image_path"] = f"{stem}.png"
                     artifacts[page["image_path"]] = image_bytes
                     page["image_available"] = True
+                    # An image can preserve a reading route even if OCR returns
+                    # no usable text. Later agents still need supported tools or
+                    # image input to use it; this flag is not a model capability.
                     page["readable"] = True
                     for index, region in enumerate(page["image_regions"], start=1):
                         try:
@@ -469,6 +501,9 @@ def _prepare_page_fallbacks(
                                 f"OCR supplemented candidate region {index}; "
                                 "verify against the page image.")
                     if needs_full_ocr:
+                        # Full-page OCR is reserved for unavailable/unreliable
+                        # native text. Successful regional OCR instead appends to
+                        # the original native string in the loop above.
                         try:
                             page["text"] = recognize(image_bytes)
                         except OcrError as error:
@@ -521,6 +556,9 @@ def _read_pdf_pages(pdf_bytes: bytes) -> tuple[int | None, list[dict], str | Non
                 if page_count < 1:
                     return None, [], "The PDF contains no identifiable pages."
                 opening_warnings = list(handler.messages)
+                # Keep opening warnings at document level. For each page, record
+                # only the newly emitted warnings so notes do not accumulate on
+                # unrelated later pages.
                 pages = []
                 for index in range(page_count):
                     warning_start = len(handler.messages)
@@ -595,6 +633,9 @@ def _load_or_start_registry(project_root: Path) -> dict:
         return storage.load_registry(project_root)
 
     for relative_path in ("data/raw", "data/processed", "runs"):
+        # Missing metadata beside existing research files is a recovery problem,
+        # not evidence of an empty project. Reinitializing here could lose links
+        # to documents or earlier model work.
         directory = storage.resolve_project_path(project_root, relative_path)
         if directory.exists() and any(directory.iterdir()):
             raise FileNotFoundError(
@@ -629,6 +670,8 @@ def _check_registered_records(project_root: Path, registry: dict) -> None:
     seen_ids = set()
     seen_checksums = set()
     seen_paths = set()
+    # Sets retain distinct values and make repeated identities easy to detect.
+    # Resolving each PDF path also detects two spellings of the same saved file.
     for entry in registry["plans"]:
         _check_collection_details(entry)
         plan_id = entry["plan_id"]

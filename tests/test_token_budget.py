@@ -106,13 +106,16 @@ def generation_requests(server):
             and json.loads(request.content).get("_debug_render_only") is not True]
 
 
-def test_counts_rendered_input_reserves_full_answer_and_leaves_assets_unchanged(settings, messages, assets, server):
+@pytest.mark.parametrize("runtime_version", ["0.40.14", "0.40.16"])
+def test_counts_rendered_input_reserves_full_answer_and_leaves_assets_unchanged(settings, messages, assets, server, runtime_version):
+    server["version"] = runtime_version
     before = {p: p.read_bytes() for p in assets["root"].rglob("*") if p.is_file()}
     result = check(settings, messages, assets, server)
     assert result.report["input_tokens"] == 4  # Saved tokenizer truncation/padding were disabled.
     assert result.report["output_tokens_reserved"] == 4
     assert result.report["remaining_tokens"] == 8 and result.report["fits"]
     assert result.report["error"] is None
+    assert result.report["runtime_version"] == runtime_version
     assert result.report["rendered_prompt"] == server["prompt"]
     assert result.report["rendered_prompt_sha256"] == hashlib.sha256(server["prompt"].encode()).hexdigest()
     assert result.report["tokenizer_digest"] == assets["tokenizer"]["digest"]
@@ -140,7 +143,9 @@ def test_forwards_entire_request_and_schema_to_rendering_without_double_counting
     assert result.report["input_tokens"] == 4  # Count what the runtime actually renders.
 
 
-def test_auto_preflight_precedes_generation_and_returns_audit_evidence(settings, messages, assets, server):
+@pytest.mark.parametrize("runtime_version", ["0.40.14", "0.40.16"])
+def test_auto_preflight_precedes_generation_and_returns_audit_evidence(settings, messages, assets, server, runtime_version):
+    server["version"] = runtime_version
     result = generate(settings, messages, assets, server)
     assert result.completion_status == "normal" and result.response_text == "OK"
     assert result.token_budget.report["fits"] and result.token_budget.report["input_tokens"] == 4
@@ -149,7 +154,9 @@ def test_auto_preflight_precedes_generation_and_returns_audit_evidence(settings,
     assert server["requests"][-1] is generation_requests(server)[0]
 
 
-def test_oversized_request_never_generates_or_becomes_a_recorded_model_call(settings, messages, assets, server):
+@pytest.mark.parametrize("runtime_version", ["0.40.14", "0.40.16"])
+def test_oversized_request_never_generates_or_becomes_a_recorded_model_call(settings, messages, assets, server, runtime_version):
+    server["version"] = runtime_version
     server["prompt"] = "one " * 20
     original_messages = copy.deepcopy(messages)
     result = generate(settings, messages, assets, server)
@@ -170,12 +177,24 @@ def test_each_request_is_counted_again_instead_of_reusing_a_stale_decision(setti
 
 
 @pytest.mark.parametrize("reported", [0, 3, 5])
-def test_changed_or_shortened_provider_input_fails_without_erasing_response(settings, messages, assets, server, reported):
+@pytest.mark.parametrize("runtime_version", ["0.40.14", "0.40.16"])
+def test_changed_or_shortened_provider_input_fails_without_erasing_response(settings, messages, assets, server, reported, runtime_version):
+    server["version"] = runtime_version
     server["reported_input_tokens"] = reported
     result = generate(settings, messages, assets, server)
     assert result.completion_status == "failed" and "preflight counted 4" in result.error
     assert result.response_text == "OK" and result.raw_response
     assert result.input_tokens == reported
+
+
+@pytest.mark.parametrize("runtime_version", ["0.40.15", "0.40.17", "0.40.16-custom", None])
+def test_unvalidated_runtime_variants_stop_before_private_rendering(settings, messages, assets, server, runtime_version):
+    server["version"] = runtime_version
+    result = generate(settings, messages, assets, server)
+    assert result.completion_status == "failed" and result.generation_started is False
+    assert "tested Ollama version" in result.error
+    assert [request.url.path for request in server["requests"]] == ["/api/version"]
+    assert generation_requests(server) == []
 
 
 @pytest.mark.parametrize("problem", ["model", "host", "version", "digest", "missing_manifest", "corrupt_blob", "too_much_output", "native_capacity"])
@@ -348,3 +367,78 @@ def test_cancellation_propagates_with_preflight_evidence(settings, messages, ass
         assert budget.raw_responses["version"] == b"partial preflight bytes"
 
     asyncio.run(run())
+
+
+@pytest.fixture
+def tool_context():
+    """A completed tool exchange whose exact fields must reach the renderer."""
+    tools = [{"type": "function", "function": {"name": "get_page_text", "description": "Read one saved page.",
+        "parameters": {"type": "object", "properties": {"page_number": {"type": "integer", "minimum": 1}},
+                       "required": ["page_number"]}}}]
+    calls = [{"id": "page_1", "function": {"index": 0, "name": "get_page_text", "arguments": {"page_number": 1}}}]
+    messages = [{"role": "user", "content": "Inspect source page 1."},
+                {"role": "assistant", "content": "", "thinking": "Exact thought.\r\n", "tool_calls": calls},
+                {"role": "tool", "tool_name": "get_page_text", "tool_call_id": "page_1",
+                 "content": '{"text":"Fictional £ wording.\\nKeep whitespace."}'}]
+    return tools, messages
+
+
+@pytest.mark.parametrize("count_only", [True, False])
+def test_exact_tools_history_and_schema_reach_the_actual_counting_request(settings, assets, server, tool_context, count_only):
+    tools, messages = tool_context
+    schema = models.prepare_ollama_response_schema()
+    before = copy.deepcopy((tools, messages, schema))
+    result = (check if count_only else generate)(settings, messages, assets, server, tools=tools, response_format=schema)
+    budget = result if count_only else result.token_budget
+    _, body, _ = models.build_ollama_request(settings, messages, tools=tools, response_format=schema)
+    assert server["render_body"] == {**body, "_debug_render_only": True}
+    if not count_only:
+        assert json.loads(generation_requests(server)[0].content) == body
+    assert budget.report["input_tokens"] == 4  # The fixture renderer's whole input, not HTTP JSON length.
+    assert budget.report["tool_definition_count"] == 1
+    assert budget.report["tool_result_message_count"] == 1
+    assert budget.report["historical_tool_call_count"] == 1
+    assert budget.report["request_sha256"] == hashlib.sha256(json.dumps(body, ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    assert (tools, messages, schema) == before
+
+
+def test_growing_tool_results_are_recounted_and_blocked_before_another_generation(settings, messages, assets, server, tool_context):
+    tools, completed = tool_context
+    first = generate(settings, messages, assets, server, tools=tools)
+    assert first.completion_status == "normal"
+    completed[-1]["content"] += " one" * 40
+    server["prompt"] = "one " * 25  # Independent mock rendering of the expanded conversation.
+    second = generate(settings, completed, assets, server, tools=tools)
+    assert second.completion_status == "failed"
+    assert second.token_budget.report["input_tokens"] == 25
+    assert second.token_budget.report["fits"] is False
+    assert second.raw_response == b"" and second.tool_calls == []
+    assert len(generation_requests(server)) == 1
+    assert server["render_body"]["messages"] == completed
+
+
+def test_final_turn_can_clear_advertised_tools_without_erasing_their_history(settings, assets, server, tool_context):
+    _, messages = tool_context
+    result = check(settings, messages, assets, server, tools=[], response_format={"type": "object"})
+    assert result.report["fits"] is True
+    assert result.report["tool_definition_count"] == 0
+    assert result.report["historical_tool_call_count"] == 1
+    assert server["render_body"]["tools"] == []
+    assert server["render_body"]["messages"] == messages
+
+
+def test_provider_count_disagreement_keeps_tool_evidence_but_exposes_no_executable_calls(settings, messages, assets, server, tool_context):
+    tools, completed = tool_context
+    original = server["handle"]
+    def handle(request):
+        if request.url.path == "/api/chat" and json.loads(request.content).get("_debug_render_only") is not True:
+            server["requests"].append(request)
+            return httpx.Response(200, json={"message": completed[1], "done": True,
+                "done_reason": "stop", "prompt_eval_count": 5, "eval_count": 1})
+        return original(request)
+    server["transport"] = httpx.MockTransport(handle)
+    result = generate(settings, messages, assets, server, tools=tools)
+    assert result.completion_status == "failed" and result.tool_calls == []
+    assert result.assistant_message["tool_calls"] == completed[1]["tool_calls"]
+    assert "preflight counted 4" in result.error
+    assert len(generation_requests(server)) == 1

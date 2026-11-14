@@ -34,6 +34,20 @@ budget. If instructed that no calls remain, return your complete best-supported
 answer and leave unresolved concerns open; do not request further tool calls.
 Never fabricate source text, page numbers, measurements, or tool results.
 
+Before submitting the final answer, check:
+
+- For monitoring/evaluation, benefits, and costs, scope agrees with both link
+  lists: `linked` has at least one source-supported goal or action link;
+  `plan_wide` and `unspecified` have neither. Do not invent or remove a link
+  merely to make the fields agree.
+- Every citation uses the physical original-PDF page position from the runner's
+  page boundary or the document tool's returned `page_number`, not a printed
+  page label or an assumed offset.
+- Every quotation is one exact continuous passage. Separate passages have
+  separate evidence objects; no ellipses or connecting text have been inserted
+  to join them. Preserve unresolved source uncertainty as an issue rather than
+  guessing wording, page numbers, or relationships.
+
 Return exactly one JSON object containing `content` and `review`, with no
 Markdown code fence or surrounding commentary. Include every required field,
 use valid record links and list-valued page numbers, and preserve wording and

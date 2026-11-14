@@ -103,6 +103,20 @@ All IDs and descriptions are nonblank strings. Every entry also has exactly
 - `related_action_ids`: list of explicitly associated existing action IDs.
 - `evidence`: evidence objects supporting the description, scope, and links.
 
+Scope and link lists must agree:
+
+| `scope` | `related_goal_ids` and `related_action_ids` | Source requirement |
+| --- | --- | --- |
+| `linked` | At least one of the two lists is nonempty. | The source explicitly associates the record with those goals or actions. |
+| `plan_wide` | Both lists are empty. | The source explicitly describes an overall plan/programme statement. |
+| `unspecified` | Both lists are empty. | The source does not establish the scope. |
+
+Never combine `plan_wide` or `unspecified` with a nonempty link list. Scope
+describes the record's association with goals or actions, not its geographic
+reach: a city-wide benefit can still be `linked` to a specific action. Choose
+scope and links from the source together; do not invent or remove a relationship
+merely to satisfy this consistency rule.
+
 Unspecified scope alone does not create an issue. Record shared budgets once
 and link applicable actions; do not invent allocations or convert currencies.
 

@@ -1,13 +1,13 @@
 """Send one local Ollama chat request and retain its answer and measurements.
 
-This is the first model-connection increment in DESIGN.md. It does not run an
-agent loop, execute tools, or save a research run. Before generation it counts
+The adapter supports text, declared tools and completed tool-result histories.
+It does not run an agent loop, execute tools, or save a research run. Before generation it counts
 the fully rendered text and reserves the configured maximum output. The first
 counter supports the tested local Qwen/MLX setup; unsupported setups stop.
 We also request no runtime truncation/rolling context and check reported usage
 after the response: a runtime may ignore num_ctx.
-This adapter's controls are checked against Ollama 0.40.14; test a changed
-serving setup before using it for comparison work.
+This adapter's controls are checked against Ollama 0.40.14 and 0.40.16; test a
+changed serving setup before using it for comparison work.
 """
 
 import asyncio
@@ -17,14 +17,16 @@ import os
 import re
 import time
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 from urllib.parse import unquote, urldefrag, urlsplit
 
 import httpx
 import tokenizers
 from jsonschema import Draft202012Validator, SchemaError
+from referencing import Registry
+from referencing.exceptions import Unresolvable
 
 from repair import CompletionStatus
 from validation import validate_profiles
@@ -39,7 +41,9 @@ _RESPONSE_SCHEMA_FILES = {
 _RESPONSE_SCHEMA_URI = "urn:heat-adaptation:agent-response"
 _SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 _OLLAMA_NONBLANK_PATTERN = r"^[\s\S]*\S[\s\S]*$"
-_COUNTING_RUNTIME_VERSION = "0.40.14"
+# Render-only is private: accept exact versions whose renderer/API and live
+# counts were checked, rather than treating every patch release as compatible.
+_COUNTING_RUNTIME_VERSIONS = frozenset({"0.40.14", "0.40.16"})
 _COUNTING_MODEL = "qwen3.5:27b"
 # Tokenization must be revalidated if a tag update changes these assets, even
 # when the public model name and runtime version remain the same.
@@ -90,6 +94,13 @@ class ModelCallResult:
     # Separate preflight observations from actual generation usage. In
     # particular, a counted prompt is not a provider-reported input measurement.
     token_budget: "TokenBudgetResult | None" = None
+    # Only validated, normally completed tool requests are exposed here. On
+    # failure the original message/raw bytes still retain every received field.
+    # A future agent must check error/completion_status before executing anything.
+    tool_calls: list[dict] = field(default_factory=list)
+    # True once the application begins the generation HTTP exchange. Render-only
+    # checks are separate and must not become research model-call observations.
+    generation_started: bool = False
 
     def to_run_call(self, response_path: str | None) -> dict:
         """Copy only Appendix A's model-call fields into a future run record.
@@ -114,6 +125,18 @@ class ModelRequestCancelled(asyncio.CancelledError):
         super().__init__("Ollama request cancelled; available evidence is retained in result.")
 
 
+class ModelProgressError(RuntimeError):
+    """An evidence callback failed; stop this request without losing its bytes."""
+
+
+def _model_progress(callback, event: str, payload) -> None:
+    if callback is not None:
+        try:
+            callback(event, payload)
+        except Exception as error:
+            raise ModelProgressError(f"Cannot preserve model evidence: {type(error).__name__}: {error}") from error
+
+
 @dataclass(frozen=True)
 class TokenBudgetResult:
     """A JSON-saveable report plus exact HTTP bodies from count-only setup.
@@ -125,6 +148,70 @@ class TokenBudgetResult:
 
     report: dict
     raw_responses: dict[str, bytes]
+
+
+@dataclass
+class OllamaEnvironmentObservation:
+    """Non-generating startup observations; unavailable values remain unknown."""
+
+    values: dict = field(default_factory=lambda: {"model_loaded_at_start": None, "quantization": None})
+    raw_responses: dict[str, bytes] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+
+
+class OllamaEnvironmentCancelled(asyncio.CancelledError):
+    def __init__(self, observation: OllamaEnvironmentObservation):
+        self.observation = observation
+        super().__init__("Ollama startup observation cancelled; available evidence is attached.")
+
+
+async def observe_ollama_environment(settings: dict, *, _transport=None) -> OllamaEnvironmentObservation:
+    """Observe loaded state before render-only can load the model, plus its details.
+
+    GET /api/ps and POST /api/show do not generate answers. Their received bodies
+    are evidence, not model_calls. Failed observations stay null and do not replace
+    the adapter's mandatory preflight. No download, redirect or retry occurs.
+    """
+    result = OllamaEnvironmentObservation()
+    url, _, _ = build_ollama_request(settings, [{"role": "user", "content": ""}])
+    base = url.removesuffix("/api/chat")
+    if urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"}:
+        result.errors.append("Local startup observations require a loopback endpoint; no service was contacted.")
+        return result
+    timeout = min(settings["model_timeout_seconds"], 10.0)
+    async with httpx.AsyncClient(timeout=None, trust_env=False, follow_redirects=False,
+        transport=_transport or httpx.AsyncHTTPTransport(retries=0)) as client:
+        for name, method, route, body in [
+            ("loaded_models", "GET", "/api/ps", None),
+            ("model_details", "POST", "/api/show", {"model": settings["model"]["name"], "verbose": False}),
+        ]:
+            result.raw_responses[name] = b""
+            started = time.monotonic()
+            try:
+                async with asyncio.timeout(timeout):
+                    async with client.stream(method, base + route, json=body) as response:
+                        async for chunk in response.aiter_bytes():
+                            result.raw_responses[name] += chunk
+                        response.raise_for_status()
+                    data = _json_object(result.raw_responses[name])
+                    if time.monotonic() - started >= timeout:
+                        raise TimeoutError("Startup observation exceeded its complete-request timeout.")
+                    if name == "loaded_models":
+                        loaded = data.get("models")
+                        if not isinstance(loaded, list) or any(not isinstance(m, dict) or not
+                            (isinstance(m.get("name"), str) or isinstance(m.get("model"), str)) for m in loaded):
+                            raise ValueError("Ollama did not provide a usable loaded-model list.")
+                        result.values["model_loaded_at_start"] = any(settings["model"]["name"] in
+                            (m.get("name"), m.get("model")) for m in loaded)
+                    else:
+                        quantization = data.get("details", {}).get("quantization_level")
+                        if isinstance(quantization, str) and quantization.strip() and quantization.strip().lower() != "unknown":
+                            result.values["quantization"] = quantization
+            except asyncio.CancelledError as error:
+                raise OllamaEnvironmentCancelled(result) from error
+            except (OSError, ValueError, TypeError, AttributeError, TimeoutError, httpx.HTTPError) as error:
+                result.errors.append(f"{name}: {type(error).__name__}: {error}")
+    return result
 
 
 class TokenBudgetCheckCancelled(asyncio.CancelledError):
@@ -275,14 +362,173 @@ class _ResponseSchemaPreparer:
         return uri, tuple(path), node
 
 
+def prepare_ollama_tools(mcp_tools: list[dict]) -> list[dict]:
+    """Translate serialized MCP catalogue entries into Ollama function definitions.
+
+    A caller obtains these dictionaries with each MCP Tool's
+    model_dump(mode="json", by_alias=True). Keep the names, descriptions and
+    complete inputSchema unchanged. MCP output schemas, annotations and other
+    catalogue metadata remain on the MCP side; they are not Ollama parameters.
+    This helper neither contacts the server/model nor executes a tool.
+    """
+    if not isinstance(mcp_tools, list):
+        raise ValueError("MCP tools must be a list of serialized catalogue dictionaries.")
+    converted = []
+    for tool in mcp_tools:
+        if not isinstance(tool, dict) or not {"name", "description", "inputSchema"} <= tool.keys():
+            raise ValueError("Each MCP tool needs name, description and inputSchema.")
+        converted.append({"type": "function", "function": {
+            "name": tool["name"], "description": tool["description"],
+            "parameters": deepcopy(tool["inputSchema"]),
+        }})
+    _validate_ollama_tools(converted)
+    return converted
+
+
+def _validate_ollama_tools(tools: list[dict] | None) -> dict[str, dict]:
+    """Check the provider catalogue without weakening its argument schemas."""
+    if tools is None:
+        return {}
+    if not isinstance(tools, list):
+        raise ValueError("Ollama tools must be a list of function definitions or None.")
+    definitions = {}
+    for tool in tools:
+        if not isinstance(tool, dict) or set(tool) != {"type", "function"} or tool["type"] != "function":
+            raise ValueError("Each Ollama tool needs only type='function' and a function definition.")
+        function = tool["function"]
+        if not isinstance(function, dict) or set(function) != {"name", "description", "parameters"}:
+            raise ValueError("A tool function needs only name, description and parameters.")
+        name = function["name"]
+        if not isinstance(name, str) or not name.strip() or name != name.strip():
+            raise ValueError("Tool names must be nonblank strings without surrounding whitespace.")
+        if name in definitions:
+            raise ValueError(f"Duplicate tool name: {name!r}.")
+        if not isinstance(function["description"], str) or not function["description"].strip():
+            raise ValueError("Tool descriptions must be nonblank strings.")
+        parameters = function["parameters"]
+        if not isinstance(parameters, dict) or parameters.get("type") != "object":
+            raise ValueError("Tool parameters must be a JSON Schema object with type='object'.")
+        if parameters.get("$schema", _SCHEMA_DIALECT) != _SCHEMA_DIALECT:
+            raise ValueError("Tool parameters must use JSON Schema Draft 2020-12.")
+        try:
+            Draft202012Validator.check_schema(parameters)
+        except SchemaError as error:
+            raise ValueError(f"Invalid parameter schema for {name!r}: {error.message}") from error
+        definitions[name] = function
+    # Fail before HTTP if values contain NaN, infinity, unsupported objects or
+    # invalid Unicode. Do not trim names/descriptions or rewrite schema contents.
+    json.dumps(tools, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return definitions
+
+
+def _validate_tool_calls(
+    calls: object, definitions: dict[str, dict], *, require_known: bool,
+) -> list[dict]:
+    """Validate a request list; retain argument values, order and provider IDs.
+
+    Historical calls may name tools no longer advertised on the current turn.
+    Newly generated calls must name a currently declared tool. No JSON strings
+    are decoded into arguments, defaults inserted, or model mistakes repaired.
+    """
+    if not isinstance(calls, list):
+        raise ValueError("tool_calls must be a list.")
+    identifiers = set()
+    for call in calls:
+        if not isinstance(call, dict) or not {"function"} <= call.keys() or call.keys() - {"function", "id", "type"}:
+            raise ValueError("Each tool call needs function and only optional id/type fields.")
+        if "type" in call and call["type"] != "function":
+            raise ValueError("Only function tool calls are supported.")
+        if "id" in call:
+            identifier = call["id"]
+            if not isinstance(identifier, str) or not identifier.strip() or identifier in identifiers:
+                raise ValueError("Tool call IDs must be unique nonblank strings within a request list.")
+            identifiers.add(identifier)
+        function = call["function"]
+        if (
+            not isinstance(function, dict) or not {"name", "arguments"} <= function.keys()
+            or function.keys() - {"name", "arguments", "index"}
+        ):
+            raise ValueError("Tool calls require function name and object arguments, with only optional index.")
+        name = function["name"]
+        if not isinstance(name, str) or not name.strip() or name != name.strip():
+            raise ValueError("Tool call names must be nonblank strings without surrounding whitespace.")
+        if not isinstance(function["arguments"], dict):
+            raise ValueError("Tool call arguments must be an object, not encoded JSON text.")
+        if "index" in function and (type(function["index"]) is not int or function["index"] < 0):
+            raise ValueError("Tool function index must be a nonnegative integer.")
+        if require_known and name not in definitions:
+            raise ValueError(f"The model requested undeclared tool {name!r}.")
+        if name in definitions:
+            # An empty registry prevents JSON Schema references from fetching
+            # external URLs/files. Local self-contained references still work.
+            validator = Draft202012Validator(definitions[name]["parameters"], registry=Registry())
+            try:
+                problem = next(validator.iter_errors(function["arguments"]), None)
+            except (Unresolvable, RecursionError) as error:
+                raise ValueError(f"Cannot resolve the declared argument schema for {name!r}.") from error
+            if problem is not None:
+                raise ValueError(f"Invalid arguments for tool {name!r}: {problem.message}")
+    json.dumps(calls, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return calls
+
+
+def _validate_chat_messages(messages: list[dict], definitions: dict[str, dict]) -> None:
+    """Check replayable text/tool history without executing or rewriting it.
+
+    All results must follow the original call order, with IDs checked when
+    present. Qwen3.5's Ollama 0.40.14 renderer includes tool-result content but
+    omits tool_name/tool_call_id: IDs alone cannot make reordered results clear
+    to the model. Reject incomplete or mismatched histories before continuing.
+    """
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("Supply a nonempty list of chat messages.")
+    pending = []
+    for message in messages:
+        if not isinstance(message, dict) or not {"role", "content"} <= message.keys() or not isinstance(message["content"], str):
+            raise ValueError("Each message needs role and string content.")
+        role = message["role"]
+        if pending and role != "tool":
+            raise ValueError("Supply a tool result for every pending call before continuing the conversation.")
+        if role in ("system", "user"):
+            if set(message) != {"role", "content"}:
+                raise ValueError("System/user messages support only role and text content; images remain unsupported.")
+        elif role == "assistant":
+            if message.keys() - {"role", "content", "thinking", "tool_calls"}:
+                raise ValueError("Assistant history supports only role, content, thinking and tool_calls.")
+            if "thinking" in message and not isinstance(message["thinking"], str):
+                raise ValueError("Assistant thinking must be preserved as text.")
+            if "tool_calls" in message:
+                calls = _validate_tool_calls(message["tool_calls"], definitions, require_known=False)
+                pending = list(calls)
+        elif role == "tool":
+            if message.keys() - {"role", "content", "tool_name", "tool_call_id"}:
+                raise ValueError("Tool messages support only role, content, tool_name and optional tool_call_id.")
+            if not isinstance(message.get("tool_name"), str) or not message["tool_name"].strip() or not pending:
+                raise ValueError("A tool result needs tool_name and a preceding unanswered tool call.")
+            if "tool_call_id" in message:
+                identifier = message["tool_call_id"]
+                if not isinstance(identifier, str) or not identifier.strip():
+                    raise ValueError("tool_call_id must be a nonblank string.")
+                if pending[0].get("id") != identifier:
+                    raise ValueError("tool_call_id must match the next pending call in original order.")
+            if pending[0]["function"]["name"] != message["tool_name"]:
+                raise ValueError("Tool result name must match the next pending call in original order.")
+            pending.pop(0)
+        else:
+            raise ValueError("Message role must be system, user, assistant or tool.")
+    if pending:
+        raise ValueError("The conversation ends with tool calls that still need results.")
+
+
 def build_ollama_request(
-    settings: dict, messages: list[dict], *, response_format: Literal["json"] | dict | None = None
+    settings: dict, messages: list[dict], *, response_format: Literal["json"] | dict | None = None,
+    tools: list[dict] | None = None,
 ) -> tuple[str, dict, float]:
     """Validate inputs and return (chat URL, request body, overall timeout).
 
-    The first increment accepts text messages only. Image delivery, tool
-    definitions, and tool-message histories will be added with their capability
-    and context-accounting checks; unsupported inputs are rejected, not dropped.
+    Accept text, function definitions and complete tool-result histories. Images
+    remain unsupported. Tool/schema choices are explicit: the adapter never
+    drops format or tools to force a particular kind of answer from the model.
     """
     # The loader's dictionary may already include an observed environment. Those
     # saved-record additions do not belong in an editable profile or HTTP body.
@@ -316,15 +562,8 @@ def build_ollama_request(
     except ValueError as error:
         raise ValueError("The Ollama base URL must contain a valid port.") from error
 
-    if not isinstance(messages, list) or not messages:
-        raise ValueError("Supply a nonempty list of text chat messages.")
-    for message in messages:
-        if (
-            not isinstance(message, dict) or set(message) != {"role", "content"}
-            or message["role"] not in ("system", "user", "assistant")
-            or not isinstance(message["content"], str)
-        ):
-            raise ValueError("Each text message needs only role (system/user/assistant) and string content.")
+    definitions = _validate_ollama_tools(tools)
+    _validate_chat_messages(messages, definitions)
     if response_format is not None and response_format != "json" and not isinstance(response_format, dict):
         raise ValueError("Response format must be 'json', a JSON schema object, or None.")
 
@@ -346,6 +585,8 @@ def build_ollama_request(
     }
     if response_format is not None:
         body["format"] = deepcopy(response_format)
+    if tools is not None:
+        body["tools"] = deepcopy(tools)  # Preserve explicit [] as well as nonempty catalogues.
     # Fail on non-JSON values or unencodable text before contacting the service.
     json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
     return endpoint.rstrip("/") + "/api/chat", body, profile["model_timeout_seconds"]
@@ -361,6 +602,9 @@ def _new_token_budget(body: dict) -> TokenBudgetResult:
         "tokenizers_version": tokenizers.__version__, "runtime_version": None,
         "context_limit": body["options"]["num_ctx"],
         "output_tokens_reserved": body["options"]["num_predict"],
+        "tool_definition_count": len(body.get("tools", [])),
+        "tool_result_message_count": sum(message["role"] == "tool" for message in body["messages"]),
+        "historical_tool_call_count": sum(len(message.get("tool_calls", [])) for message in body["messages"]),
         "input_tokens": None, "remaining_tokens": None, "fits": False,
         "rendered_prompt": None, "rendered_prompt_sha256": None,
         "elapsed_seconds": None, "error": None,
@@ -465,8 +709,9 @@ async def _check_token_budget(client, url: str, body: dict, result: TokenBudgetR
         report["runtime_version"] = version.get("version")
         # Render-only is a private API flag. Check the tested version BEFORE
         # using it, so an unfamiliar server cannot silently ignore that flag.
-        if report["runtime_version"] != _COUNTING_RUNTIME_VERSION:
-            raise ValueError(f"Token counting requires tested Ollama {_COUNTING_RUNTIME_VERSION}; validate this runtime before generation.")
+        if report["runtime_version"] not in _COUNTING_RUNTIME_VERSIONS:
+            tested = ", ".join(sorted(_COUNTING_RUNTIME_VERSIONS))
+            raise ValueError(f"Token counting requires a tested Ollama version ({tested}); validate this runtime before generation.")
         tags = await observe("installed_models", "GET", "/api/tags")
         matches = [model for model in tags.get("models", []) if model.get("name") == body["model"]]
         if len(matches) != 1:
@@ -506,16 +751,18 @@ async def _check_token_budget(client, url: str, body: dict, result: TokenBudgetR
 
 async def check_ollama_token_budget(
     settings: dict, messages: list[dict], *, response_format: Literal["json"] | dict | None = None,
+    tools: list[dict] | None = None,
     models_directory: Path | str | None = None, _transport: httpx.AsyncBaseTransport | None = None,
 ) -> TokenBudgetResult:
     """Inspect request fit without generating an answer or changing any settings.
 
     The schema is forwarded in format, as it will be for generation. Count the
     actual rendered input, not the HTTP envelope or a second copy of the schema.
-    Future tool/image support needs its own accounting before it can be enabled.
+    Forward the same tool definitions and completed tool history to the actual
+    renderer, including assistant thinking. Image accounting remains unsupported.
     A false fits result, including unavailable counting, must stop generation.
     """
-    url, body, timeout_seconds = build_ollama_request(settings, messages, response_format=response_format)
+    url, body, timeout_seconds = build_ollama_request(settings, messages, response_format=response_format, tools=tools)
     result = _new_token_budget(body)
     started = time.monotonic()
     try:
@@ -542,22 +789,27 @@ async def request_ollama_chat(
     messages: list[dict],
     *,
     response_format: Literal["json"] | dict | None = None,
+    tools: list[dict] | None = None,
     models_directory: Path | str | None = None,
     _transport: httpx.AsyncBaseTransport | None = None,
+    on_progress: Callable[[str, object], None] | None = None,
 ) -> ModelCallResult:
     """Check the token budget, then attempt generation once within one deadline.
 
     Use `await` in an async runner, or asyncio.run(...) from a synchronous script.
     _transport lets tests supply controlled HTTP responses without a real model.
     Configuration/programming errors raise before sending; operational failures
-    return their available bytes and measurements. There are no automatic retries.
+    return their available bytes and measurements. A synchronous on_progress sink
+    can preserve preflight evidence, headers and received chunks before completion.
+    Sink failures stop generation/reading; there are no automatic retries.
     """
-    url, body, timeout_seconds = build_ollama_request(settings, messages, response_format=response_format)
+    url, body, timeout_seconds = build_ollama_request(settings, messages, response_format=response_format, tools=tools)
     encoded = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
     token_budget = _new_token_budget(body)
     chunks = []
     status_code = None
     failure = None
+    generation_started = False
     started = time.monotonic()
     try:
         # A socket/read timeout alone can restart for every received chunk.
@@ -568,25 +820,35 @@ async def request_ollama_chat(
                 transport=_transport or httpx.AsyncHTTPTransport(retries=0),
             ) as client:
                 await _check_token_budget(client, url, body, token_budget, models_directory)
+                _model_progress(on_progress, "preflight_complete", token_budget)
                 if time.monotonic() - started >= timeout_seconds:
                     token_budget.report["fits"] = False
                     raise TimeoutError
                 if not token_budget.report["fits"]:
                     failure = token_budget.report["error"] or "The request token budget could not be established."
                 else:
+                    generation_started = True
                     async with client.stream(
                         "POST", url, content=encoded,
                         headers={"Content-Type": "application/json", "Accept-Encoding": "identity"},
                     ) as response:
                         status_code = response.status_code
+                        _model_progress(on_progress, "response_headers", status_code)
                         async for chunk in response.aiter_bytes():
                             chunks.append(chunk)
+                            _model_progress(on_progress, "response_chunk", chunk)
+                            # Disk callbacks are synchronous too. Their time is
+                            # part of this complete request's deadline.
+                            if time.monotonic() - started >= timeout_seconds:
+                                raise TimeoutError
     except TimeoutError:
         failure = f"Ollama request exceeded its complete-request timeout of {timeout_seconds} seconds."
         if not token_budget.report["fits"]:
             token_budget.report["error"] = failure
     except httpx.HTTPError as error:
         failure = f"Ollama connection or response read failed: {error}"
+    except ModelProgressError as error:
+        failure = str(error)
     except asyncio.CancelledError as error:
         # Keep cancellation semantics while giving the future runner access to
         # already-received bytes. Cancelling is not a successful model response.
@@ -596,24 +858,28 @@ async def request_ollama_chat(
             b"".join(chunks), status_code=status_code,
             elapsed_seconds=time.monotonic() - started, failure="Ollama request was cancelled.",
             context_limit=body["options"]["num_ctx"], output_limit=body["options"]["num_predict"],
+            tools=body.get("tools"),
         )
-        raise ModelRequestCancelled(replace(result, token_budget=token_budget)) from error
+        raise ModelRequestCancelled(replace(result, token_budget=token_budget,
+                                             generation_started=generation_started)) from error
     result = _interpret_response(
         b"".join(chunks), status_code=status_code,
         elapsed_seconds=time.monotonic() - started, failure=failure,
         context_limit=body["options"]["num_ctx"], output_limit=body["options"]["num_predict"],
+        tools=body.get("tools"),
     )
     if result.error is None and result.input_tokens is not None and result.input_tokens != token_budget.report["input_tokens"]:
-        result = replace(result, completion_status="failed", error=(
+        result = replace(result, completion_status="failed", tool_calls=[], error=(
             f"Ollama reported {result.input_tokens} input tokens but preflight counted {token_budget.report['input_tokens']}; "
             "the input may have changed, been shortened, or used different tokenization. Retest before proceeding."
         ))
-    return replace(result, token_budget=token_budget)
+    return replace(result, token_budget=token_budget, generation_started=generation_started)
 
 
 def _interpret_response(
     raw: bytes, *, status_code: int | None, elapsed_seconds: float, failure: str | None,
     context_limit: int, output_limit: int,
+    tools: list[dict] | None = None,
 ) -> ModelCallResult:
     """Retain valid observations even if another field or the request failed."""
     problems = []
@@ -661,6 +927,7 @@ def _interpret_response(
 
     message = payload.get("message")
     text = None
+    tool_calls = []
     if isinstance(message, dict):
         if message.get("role") != "assistant":
             problems.append("The Ollama message must have assistant role.")
@@ -668,6 +935,17 @@ def _interpret_response(
         if not isinstance(text, str):
             problems.append("The Ollama assistant content must be a string.")
             text = None
+        if "thinking" in message and not isinstance(message["thinking"], str):
+            problems.append("Ollama assistant thinking must be text when present.")
+        if "tool_calls" in message:
+            try:
+                tool_calls = _validate_tool_calls(
+                    message["tool_calls"], _validate_ollama_tools(tools), require_known=True,
+                )
+                if tool_calls and finish_reason not in {"stop", "length"}:
+                    raise ValueError("Tool requests require confirmed normal completion before execution.")
+            except (ValueError, Unresolvable) as error:
+                problems.append(f"Invalid Ollama tool request: {error}")
     else:
         message = None
         problems.append("The Ollama response is missing its assistant message.")
@@ -693,6 +971,7 @@ def _interpret_response(
         finish_reason=finish_reason, truncated=truncated, completion_status=completion_status,
         elapsed_seconds=elapsed_seconds, status_code=status_code,
         provider_timings_ns=timings, error=error,
+        tool_calls=deepcopy(tool_calls) if error is None else [],
     )
 
 

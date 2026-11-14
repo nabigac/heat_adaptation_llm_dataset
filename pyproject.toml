@@ -25,6 +25,8 @@ dependencies = [
     "pillow>=12,<14",
     # Enable jsonschema's optional date-time checker for preparation timestamps.
     "rfc3339-validator>=0.1.4,<0.2",
+    # Official MCP SDK: expose document tools and test real local client calls.
+    "mcp>=2,<3",
 ]
 
 [project.scripts]

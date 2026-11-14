@@ -134,14 +134,27 @@ timing where stated.
 
 Link records only where the source explicitly associates them through wording,
 headings, or table structure. Use `plan_wide` for an explicitly overall statement
-without specific links and `unspecified` when scope is unclear. Do not assign
+without specific links and `unspecified` when scope is unclear. Choose scope
+and links together using source evidence and the field definitions. Do not
+invent or remove a relationship merely to make the fields agree. Do not assign
 responsibility solely because an agency issued the plan.
 
 ### Quotations and OCR
 
 Use exact continuous source passages for quotations. Separate passages belong in
-separate evidence objects. Include necessary headings or footnotes as evidence
-and cite original PDF pages, starting at 1 regardless of printed page labels.
+separate evidence objects. Preserve source words, numbers, and punctuation. Do
+not insert ellipses (`...` or `[…]`), brackets, or connecting words to join
+separated passages. Include an ellipsis only when it appears in the quoted
+source passage. A record description may summarize several passages; its
+quotations must preserve the individual passages. Include necessary headings
+or footnotes as evidence.
+
+Cite physical pages in the original PDF, counted from 1. Use the number in the
+runner's `ORIGINAL PDF PAGE N` boundary or the document tool's returned
+`page_number`. Printed page labels inside the source text are not citation
+numbers. For example, if the runner labels a page as 10 and its printed label
+is 11, cite 10. Identify each page directly; do not apply a general offset to
+printed labels or guess a page number.
 
 You may quote prepared OCR text and OCR returned through the permitted tools.
 Flag uncertain wording or numbers. Expert assessment later checks recovered

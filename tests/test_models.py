@@ -54,7 +54,7 @@ def envelope(**changes) -> dict:
     return data
 
 
-def call_with_body(settings: dict, messages: list, raw: bytes, *, status: int = 200):
+def call_with_body(settings: dict, messages: list, raw: bytes, *, status: int = 200, tools=None):
     requests = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -62,7 +62,7 @@ def call_with_body(settings: dict, messages: list, raw: bytes, *, status: int = 
         return httpx.Response(status, content=raw)
 
     result = asyncio.run(models.request_ollama_chat(
-        settings, messages, response_format="json", _transport=httpx.MockTransport(handle),
+        settings, messages, response_format="json", tools=tools, _transport=httpx.MockTransport(handle),
     ))
     return result, requests
 
@@ -222,8 +222,11 @@ def test_transport_does_not_repair_or_validate_research_content(settings: dict, 
 def test_thinking_and_tool_calls_are_retained_without_executing_them(settings: dict, messages: list) -> None:
     message = {"role": "assistant", "content": "", "thinking": "Fictional provider text.",
         "tool_calls": [{"function": {"name": "page_text", "arguments": {"page_number": 1}}}]}
-    result, _ = call_with_body(settings, messages, json.dumps(envelope(message=message)).encode())
+    tools = [{"type": "function", "function": {"name": "page_text", "description": "Read one saved page.",
+        "parameters": {"type": "object", "properties": {"page_number": {"type": "integer"}}, "required": ["page_number"]}}}]
+    result, _ = call_with_body(settings, messages, json.dumps(envelope(message=message)).encode(), tools=tools)
     assert result.assistant_message == message
+    assert result.tool_calls == message["tool_calls"]
     assert result.response_text == "" and result.error is None
 
 

@@ -339,6 +339,20 @@ def _check_run_source(project_root: Path | str, record: dict) -> dict:
     return preparation
 
 
+def preparation_text_fingerprint(preparation: dict, pages: list[dict]) -> str:
+    """Identify one validated preparation's metadata and exact saved text values.
+
+    Input assembly and the MCP subprocess calculate this independently. Sorting
+    object keys ignores JSON formatting differences while retaining page order,
+    whitespace inside text, preparation notes and the original PDF checksum.
+    This is a text/metadata snapshot fingerprint, not a new checksum of image
+    pixels. Existing source loading still validates the PDF and linked images.
+    """
+    payload = {"fingerprint_version": 1, "preparation": preparation, "pages": pages}
+    encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def load_plan_preparation(
     project_root: Path | str, plan_id: str, source_path: str
 ) -> tuple[dict, dict, list[dict]]:

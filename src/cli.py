@@ -1,21 +1,25 @@
-"""Provide terminal commands for registration, metadata updates, and preparation.
+"""Provide terminal commands for document preparation and saved extraction.
 
 The CLI translates arguments into calls to shared modules, then displays results.
 Document identity, validation, and file-preservation rules stay in those modules.
 """
 
 import argparse
+import asyncio
+import logging
 import shlex
 import sys
-from pathlib import Path
+from contextlib import contextmanager
+from pathlib import Path, PurePosixPath
 
+import agents
 import documents
 import storage
 
 
 # Start reading at main(): arguments choose an operation, documents.py performs
-# the work, and the small helpers below print its result. The model/run-record
-# functions are currently library code; this CLI exposes only Part 1 commands.
+# the work, and the small helpers below print its result. Extraction delegates
+# its model/tool lifecycle, validation and saving to agents.run_extractor.
 def main(argv: list[str] | None = None) -> int:
     """Run a command and return 0 on success or 1 when the requested operation fails.
 
@@ -42,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
             # A failed attempt can be saved successfully. Return its operation
             # status instead of treating every completed function call as success.
             return _prepare_document(root, args.plan_id, ocr_enabled=args.ocr_enabled)
+        elif args.command == "extract":
+            return _extract_document(root, args)
         else:
             _list_documents(root)
     except (OSError, ValueError) as error:
@@ -56,7 +62,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """Describe commands and arguments; argparse generates their help messages."""
     parser = argparse.ArgumentParser(
         prog="heat-adaptation-llm-dataset",
-        description="Register PDFs, update collection metadata, prepare pages, and list status.",
+        description="Register PDFs, update metadata, prepare pages, extract records, and list status.",
         allow_abbrev=False,
     )
     # Explicit option names prevent a shortened flag from acquiring a different
@@ -100,6 +106,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_project_argument(preparation)
 
+    extraction = commands.add_parser("extract", help="Run and save one extractor attempt using local Ollama and MCP.", allow_abbrev=False)
+    extraction.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
+    extraction.add_argument("--source-path", required=True, help="Project-relative path to the exact saved preparation.json.")
+    extraction.add_argument("--profile", required=True, help="Exact extractor profile name in the configuration.")
+    extraction.add_argument("--purpose", required=True, choices=["development", "comparison", "exploratory"],
+                            help="Reason for this attempt; development/comparison must match the registered study set.")
+    extraction.add_argument("--retry-of-run-id", help="Failed extractor run being manually retried; never resumes or overwrites it.")
+    extraction.add_argument("--config-path", default="configs/profiles.json", help="Project-relative profile configuration (default: configs/profiles.json).")
+    _add_project_argument(extraction)
+
     listing = commands.add_parser(
         "list", help="List registered documents, saved preparation status, and links.", allow_abbrev=False
     )
@@ -115,6 +131,113 @@ def _add_project_argument(parser: argparse.ArgumentParser) -> None:
         default=Path.cwd(),
         help="Project directory containing data/ (default: current directory).",
     )
+
+
+@contextmanager
+def _comparison_logging(blind: bool):
+    """Keep protocol/client logs from bypassing comparison feedback restrictions.
+
+    This affects only this terminal invocation and is restored afterward. The
+    saved runner preserves raw model responses, operational errors and MCP
+    subprocess stderr separately; those files remain for authorized inspection.
+    """
+    saved = []
+    if blind:
+        for name in ("mcp", "httpx", "httpcore", "asyncio"):
+            logger = logging.getLogger(name)
+            saved.append((logger, logger.handlers[:], logger.propagate))
+            logger.handlers = [logging.NullHandler()]
+            logger.propagate = False
+    try:
+        yield
+    finally:
+        for logger, handlers, propagate in saved:
+            logger.handlers, logger.propagate = handlers, propagate
+
+
+def _error_categories(error: Exception) -> list[str]:
+    """Use validated category labels, never quote exception text in blind output."""
+    allowed = {"syntax", "structure", "reference", "other"}
+    categories = {getattr(problem, "category", "other") for problem in getattr(error, "problems", [])}
+    return sorted(categories & allowed) or ["other"]
+
+
+def _extract_document(root: Path, args: argparse.Namespace) -> int:
+    """Bridge the synchronous terminal to one asynchronous saved run.
+
+    Comparison plans stay blind even for exploratory repeats. The future expert
+    workflow must establish a validated initial reference before feedback can be
+    unlocked; a file merely named reference_initial.json is not sufficient.
+    """
+    blind = True  # Fail closed until registry identity/study set can be checked.
+    try:
+        registry = storage.load_registry(root)
+        entry = next((p for p in registry["plans"] if p["plan_id"] == args.plan_id), None)
+        if entry is None:
+            raise ValueError("Select an existing registered plan ID.")
+        blind = entry["study_set"] == "comparison" or args.purpose == "comparison"
+        print(f"Starting extractor for {_display_text(args.plan_id)}.", flush=True)
+        async def execute():
+            try:
+                result = await agents.run_extractor(root, args.plan_id, source_path=args.source_path,
+                    profile_name=args.profile, purpose=args.purpose, retry_of_run_id=args.retry_of_run_id,
+                    config_path=args.config_path)
+                return result, False
+            except agents.SavedExtractorCancelled as cancelled:
+                # Catch inside asyncio.run: its SIGINT handler can otherwise
+                # convert cancellation to KeyboardInterrupt and lose this result.
+                return cancelled.result, True
+        with _comparison_logging(blind):
+            saved, cancelled = asyncio.run(execute())
+    except KeyboardInterrupt:
+        print("Extraction interrupted; final saved status is unknown. Inspect existing run records before retrying.", file=sys.stderr)
+        return 130
+    except Exception as error:
+        if blind:
+            print("Extraction setup failed.", file=sys.stderr)
+            print("Error categories: " + ", ".join(_error_categories(error)), file=sys.stderr)
+            print("Comparison details withheld until the reference workflow can validate an initial reference.", file=sys.stderr)
+        elif isinstance(error, (OSError, ValueError)):
+            _display_error(error)
+        else:
+            raise  # Unexpected programming errors remain visible in development.
+        return 1
+
+    record = saved.record  # Last published status, even when completion could not be saved.
+    print(f"Status: {record['status']}")
+    print(f"Run record: {saved.record_path}")
+    folder = PurePosixPath(saved.record_path).parent
+    report = saved.execution.final_validation.report if saved.execution and saved.execution.final_validation else None
+    if report is not None:
+        if storage.resolve_project_path(root, f"{folder}/validation_report.json").is_file():
+            print(f"Validation report: {folder}/validation_report.json")
+        else:
+            print("Validation report: not saved.")
+    if blind:
+        categories = {e["category"] for e in report["remaining_errors"]} if report else set()
+        if (record["error"] and not categories) or saved.persistence_error or cancelled:
+            categories.add("other")
+        if categories:
+            print("Error categories: " + ", ".join(sorted(categories)), file=sys.stderr)
+        print("Comparison details withheld until the reference workflow can validate an initial reference.")
+    else:
+        print(f"Model requests: {len(record['model_calls'])}")
+        if record["tool_log_path"] is not None:
+            print(f"Tool log: {record['tool_log_path']}")
+        if report is not None:
+            for repair in report["repairs"]:
+                print(f"Repair [{repair['rule']}] {_display_text(repair['location'])}: {repair['before']!r} -> {repair['after']!r}")
+            for problem in report["remaining_errors"]:
+                print(f"  [{problem['category']}] {problem['location'] or '$'}: {problem['message']}", file=sys.stderr)
+        if record["error"]:
+            print(f"Error: {record['error']}", file=sys.stderr)
+        if saved.persistence_error:
+            print(f"Saving error: {saved.persistence_error}", file=sys.stderr)
+        if cancelled:
+            print("Extraction cancelled; available evidence was retained where saving succeeded.", file=sys.stderr)
+    # A valid answer in memory is not a saved success. Running/failed records,
+    # persistence failures and cancellation always produce a nonzero exit code.
+    return 130 if cancelled else (0 if record["status"] == "succeeded" and not saved.persistence_error else 1)
 
 
 def _add_document(root: Path, args: argparse.Namespace) -> None:
@@ -218,8 +341,10 @@ def _display_text(value: str) -> str:
 
 def _display_error(error: Exception) -> None:
     """Send problems and any recovery notes to stderr, separate from normal output."""
-    if isinstance(error, (storage.RegistryValidationError, storage.PreparationValidationError)):
-        label = "Registry" if isinstance(error, storage.RegistryValidationError) else "Preparation"
+    if isinstance(error, (storage.RegistryValidationError, storage.PreparationValidationError,
+                          storage.RunValidationError, agents.ProfileValidationError, agents.ExtractorInputError)):
+        label = ("Registry" if isinstance(error, storage.RegistryValidationError) else
+                 "Preparation" if isinstance(error, storage.PreparationValidationError) else "Extraction")
         print(f"{label} validation failed:", file=sys.stderr)
         for problem in error.problems:
             location = problem.location or "unknown location"

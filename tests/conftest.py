@@ -3,11 +3,13 @@
 # name; its default fixture scope creates a fresh dictionary for each test. Local
 # fixtures in a test module can override shared fixtures without changing this one.
 
+import copy
+
 import pytest
 
 
 @pytest.fixture
-def run_record() -> dict:
+def legacy_run_record() -> dict:
     """A complete fictional successful extraction with explicitly unknown versions."""
     # A succeeded label here is synthetic test data, not a completed model run.
     # Unknown version/hardware values are deliberately None; tests must not invent
@@ -73,3 +75,32 @@ def run_record() -> dict:
         "review": {"issues": []},
         "error": None,
     }
+
+
+@pytest.fixture
+def run_record(legacy_run_record) -> dict:
+    """Retain the version 1 contract for historical run and regression checks."""
+    return copy.deepcopy(legacy_run_record)
+
+
+@pytest.fixture
+def action_run_record(legacy_run_record) -> dict:
+    """A version 2 fixture used by current extraction and response-schema checks."""
+    record = copy.deepcopy(legacy_run_record)
+    record["schema_version"] = 2
+    info = record["content"]["plan_info"]
+    record["content"] = {
+        "plan_info": info,
+        "plan_actions": [{
+            "action_id": "action_0001",
+            "action": "Plant 20 trees.",
+            "action_type": ["nature-based"],
+            "action_status": "planned",
+            "action_location": None,
+            "action_recipient": None,
+            "action_cost": None,
+            "action_benefit": None,
+            "evidence": [{"quote": "We will plant 20 trees.", "page_numbers": [1]}],
+        }],
+    }
+    return record

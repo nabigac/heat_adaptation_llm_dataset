@@ -44,7 +44,7 @@ class RegistryValidationError(ValueError):
     """Stop a storage operation while retaining its structured validation problems."""
 
     def __init__(self, problems: list[ValidationProblem]) -> None:
-        # Keep the records for the future CLI, as well as a readable exception message.
+        # Keep structured records for CLI reporting and a readable exception message.
         self.problems = problems
         details = "\n".join(
             f"{problem.location or '$'}: {problem.message}" for problem in problems
@@ -71,7 +71,7 @@ class RunValidationError(ValueError):
 
     def __init__(self, problems: list[ValidationProblem]) -> None:
         # Keep machine-readable problems as well as the exception's printable
-        # summary, so a future CLI can show exact field paths and categories.
+        # summary, so the CLI can show exact field paths and categories.
         self.problems = problems
         details = "\n".join(f"{problem.location or '$'}: {problem.message}" for problem in problems)
         super().__init__(f"Run validation failed:\n{details}")
@@ -323,11 +323,30 @@ def _check_stored_run(
 def _check_run_source(project_root: Path | str, record: dict) -> dict:
     """Use the preserved preparation, allowing later collection metadata corrections."""
     try:
-        entry, preparation, _ = load_plan_preparation(project_root, record["plan_id"], record["source_path"])
+        entry, preparation, pages = load_plan_preparation(
+            project_root, record["plan_id"], record["source_path"]
+        )
     except PreparationValidationError as error:
         # Reuse the same source checks as input assembly, while retaining the
         # run API's exception type and its structured error locations.
         raise RunValidationError(error.problems) from error
+    input_path = f"runs/{record['plan_id']}/{record['run_id']}/artifacts/extractor_input.json"
+    input_file = resolve_project_path(project_root, input_path)
+    if input_file.exists():
+        try:
+            saved_input = json.loads(input_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            _run_problem(input_path, f"Cannot read the preserved source fingerprint: {error}")
+        source_fingerprint = preparation_text_fingerprint(preparation, pages)
+        if (
+            not isinstance(saved_input, dict)
+            or saved_input.get("source_fingerprint") != source_fingerprint
+        ):
+            _run_problem(input_path, "The selected source differs from the preserved startup fingerprint.")
+    elif record["schema_version"] == 2 and record["status"] == "succeeded":
+        # Early failures may precede input publication. Successful new runs must
+        # retain the snapshot that ties their answer to the exact prepared text.
+        _run_problem(input_path, "A successful version 2 run requires its preserved extractor input.")
     if record["purpose"] in {"development", "comparison"} and entry["study_set"] != record["purpose"]:
         _run_problem("$.purpose", "Development/comparison work must match the plan's study-set assignment.")
     if record["content"] is not None:

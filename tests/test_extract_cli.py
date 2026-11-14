@@ -32,6 +32,12 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 COMMAND = REPOSITORY / ".venv/bin/heat-adaptation-llm-dataset"
 
 
+@pytest.fixture
+def run_record(action_run_record):
+    """Use the current action format throughout the extraction CLI tests."""
+    return action_run_record
+
+
 def arguments(root, **changes):
     values = {"source-path": loop.SOURCE, "profile": loop.PROFILE, "purpose": "development", **changes}
     return ["extract", loop.PLAN_ID, "--project-root", str(root),

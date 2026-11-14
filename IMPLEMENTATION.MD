@@ -20,9 +20,10 @@ The pipeline supports iterative work between heat adaptation experts and LLMs. P
 | Component | Status |
 | --- | --- |
 | Registration, preparation, and saved local extraction | Implemented. |
-| Action and issue formats | Planned migration. Current prompts, schemas, validation, and saved runs use five content lists and the earlier issue field names. |
+| Action and issue formats | Implemented. New extractions use version 2 with grouped actions and the renamed issue fields. Version 1 loading uses preserved schemas. |
 | Verifier | Planned, including compatibility work for a different model. |
-| Expert files, measures, and instruction export | Planned using the streamlined evaluation in DESIGN.md. |
+| Expert-curated answer validation | Implemented through `validate_curated_dataset()`, including expert resolutions. |
+| Expert references, assessments, measures, and instruction export | Planned using the streamlined evaluation in DESIGN.md. |
 
 The target answer contains `content.plan_info`, `content.plan_actions`, and `review.issues`. Each action groups one specific activity across the plan, including its different neighborhoods and phases. New work follows the nine action fields, [category definitions](DESIGN.md#e-category-definitions), and [coding rules](DESIGN.md#f-action-coding-rules).
 
@@ -95,7 +96,7 @@ Reading errors can be returned to the model for further investigation. Timeouts,
 
 ### Models and profiles
 
-The current development profile is `qwen35_27b_extractor_development`, using local `qwen3.5:27b` at `http://localhost:11434` through the safetensors/MLX serving setup. The recorded development machine is an Apple M5 Pro with 64 GB memory. Runs record observed hardware and software.
+The current development profile is `qwen35_27b_extractor_development`, using local `qwen3.5:27b` at `http://localhost:11434` through the safetensors/MLX serving setup. Each run records observed hardware and software.
 
 `gemma4:31b` is an untested verifier candidate. The current token checker explicitly supports only the validated Qwen model, runtime versions, and tokenizer assets. A second model therefore needs request, structured-output, tool-use, and token-accounting checks as well as its profile and prompt. Test and load the models sequentially before fixing the comparison pair.
 
@@ -115,9 +116,9 @@ The current development profile is `qwen35_27b_extractor_development`, using loc
 
 ### Prompts, response schema, and token budgeting
 
-The ordered extractor prompt files are `shared_coding.md`, `field_definitions.md`, and `extractor.md`. They currently contain five-category instructions and the earlier issue field names. Migration must update the prompts, schemas, validation, and fixtures together.
+The ordered extractor prompt files are `shared_coding.md`, `field_definitions.md`, and `extractor.md`. They define activity grouping, the nine action fields, and the eight issue fields for the current format.
 
-The target prompts require reading the complete plan, grouping by specific activity, retaining all neighborhood and phase details, applying the nine fields, and flagging unresolved problems. For mixed phase statuses without an overall source status, use `unspecified` and retain each phase's status in `action`. Keep costs and benefits attached to their stated locations or phases.
+The prompts require reading the complete plan, grouping by specific activity, retaining all neighborhood and phase details, applying the nine fields, and flagging unresolved problems. For mixed phase statuses without an overall source status, use `unspecified` and retain each phase's status in `action`. Keep costs and benefits attached to their stated locations or phases.
 
 `build_extractor_input()` reads the exact selected preparation and checks PDF identity, readiness, pages, and images. It assembles input without running a model or OCR. Join exact prompt texts with two newlines in one system message. Place collection metadata, physical page boundaries, preparation notes, and all page text in a user message. The controller adds investigation and final-answer instructions.
 
@@ -150,7 +151,7 @@ Stop before generation if capacity is exceeded or reliable counting is unavailab
 
 The loop returns execution evidence, and the saved wrapper publishes checkpoints and final status. Count the readiness signal as a generation call. Preserve call/result ordering because the tested renderer omits tool-result names and identifiers from rendered text.
 
-The two-phase approach followed a synthetic development example in which imposing the final schema suppressed a needed tool request. Later fixtures worked with separate phases. Test this behavior for the chosen verifier.
+Tool investigation precedes final structured generation so the model can request source checks before producing its complete answer. Validate both phases for the chosen verifier.
 
 ### Verifier control — planned
 
@@ -191,6 +192,8 @@ Accepted `content` and `review` require a valid final answer and successful savi
 
 Preserve supporting files individually. A checkpoint failure stops execution and triggers best-effort failed finalization. If final publication fails, return the last successfully saved record and persistence error. Report success from the saved record.
 
+Saved-run loading compares the current preparation and page text with `source_fingerprint` in `artifacts/extractor_input.json` whenever that snapshot exists. A successful version 2 run requires the snapshot. Version 1 files use their original schemas, with fingerprint checking when a saved input is available.
+
 ### Selecting runs, failures, and feedback
 
 Process one plan at a time. `extract` requires a plan ID, exact `--source-path`, `--profile`, and `--purpose`. Optional `--config-path` selects another profile file. Development/comparison purposes must match the registry, and formal comparison requires observed, clean committed code.
@@ -217,7 +220,7 @@ Check completion before repairing JSON. Classify errors as `syntax`, `structure`
 
 Save the raw answer and repaired candidate separately, then repeat all checks. Limit repairs to the four formatting cases above. Any remaining error fails the run. Repairs belong to the same run and require no additional generation. Source interpretation and correctness are expert judgments.
 
-Planned issue validation will check the renamed fields, unique IDs, valid `related_action_id` links, and one linked issue per affected action. An open `issue_status` requires null `resolved_by` and `resolution`. A resolved issue requires a permitted resolver and a nonblank explanation. Extractor answers use `extractor` as `issue_origin` and as the resolver of any issue they resolve. Verification retains existing origins and can retain or reopen earlier issues. New verifier issues use `issue_origin` set to `verifier`, and a resolution made during verification uses `resolved_by` set to `verifier`. The value `expert` is permitted for resolutions in expert-curated copies. Model output validation will reject claims that an expert resolved an issue.
+Issue validation checks the renamed fields, unique IDs, valid `related_action_id` links, and one linked issue per affected action. An open `issue_status` requires null `resolved_by` and `resolution`. A resolved issue requires a permitted resolver and a nonblank explanation. Extractor answers use `extractor` as `issue_origin` and as the resolver of any issue they resolve. Verification retains existing origins and can retain or reopen earlier issues. New verifier issues use `issue_origin` set to `verifier`, and a resolution made during verification uses `resolved_by` set to `verifier`. The value `expert` is permitted for resolutions in expert-curated copies. Model output validation rejects claims that an expert resolved an issue. `validate_curated_dataset()` validates the shared answer format with expert resolutions enabled.
 
 ### Files and identifiers
 
@@ -295,56 +298,40 @@ Require expert review and schema validation for each target. Correct or exclude 
 
 ## 7. Development evidence and remaining work
 
-Use preparation notes, preserved run evidence, expert assessments, and concise development records to show how expert knowledge and model outputs shaped the workflow. Link practical lessons to the problems encountered, revisions made, and outcomes observed. The checkpoint below records development observations. Research quality results require completed expert assessment.
+New development records will show how expert knowledge and model outputs shape the workflow. Link practical lessons to the problems encountered, revisions made, and outcomes observed. The active workspace has been reset for registration and preparation of a fresh study sample.
 
 ### Current development checkpoint
 
-| Area | Observed status |
+| Area | Status |
 | --- | --- |
-| Registration and preparation | Freetown `plan_0001/preparation_02` has 46 pages, comprising 34 native and 12 mixed pages, with 19 candidate image regions on 14 pages. Status is `ready_with_gaps`. |
-| Saved extraction and engineering checks | Local execution, tools, limits, validation, saving, and CLI are implemented. The full suite was rerun on 2026-11-14 with 1,804 passes and 11 dependency warnings. Most model replies are controlled fixtures. |
-| Live integration | Fictional prepared-text and image-only runs completed through Ollama and MCP, including OCR recovery. Qwen token accounting was checked with Ollama 0.40.14 and 0.40.16. A 0.40.16 fixture completed in 193.92 seconds with matching counted/reported inputs, and an oversized request was blocked. |
-| First Freetown attempt | `run_extract_0001` failed after 1,156.61 seconds. Five model requests and ten page-text calls completed. Final generation used 12,575 output tokens, but two five-category scope/link contradictions failed validation. Accepted output is null. |
-| Diagnostic source review | Of 51 candidate quotation uses, 27 matched prepared text one physical page earlier than cited, 24 required further source review, and ten contained ellipses. These findings require expert interpretation. |
-| Prompt clarification | Five-category prompts were clarified for source links, physical pages, and continuous quotations. 436 targeted tests passed. Effects on model behavior are **Not yet tested**. |
-| Revised study protocol | Activity grouping, renamed issue fields, expert resolutions, category definitions, rubric examples, and streamlined evaluation are documented. Their implementation and development-pilot results are **Not yet tested**. |
-| Remaining research stages | Accepted full real-plan extraction, the second development plan, verification, expert assessment, comparison, and instruction assembly are pending. |
-
-The [change log](CHANGELOG.md) preserves dated evidence. Local handoffs and `artifacts/freetown_run_extract_0001_review_2026-11-14/` provide additional diagnostics and require separate backup. Historical diagnostic scripts can generate new answers.
-
-An earlier capacity check used 54,013 input tokens and 1,525 output tokens at a 65,536-token context setting. Generation at the full configured 73,728-context and 16,384-output limits is **Not yet tested**.
+| Active study data | Registry empty. Registered PDFs, preparations, runs, diagnostics, and previous changelog entries have been cleared from the active project. |
+| Registration and preparation | Implemented through `add`, `update`, `prepare`, and `list`, with native text, selective OCR, and source preservation. |
+| Action extraction | Implemented through `extract`. New runs use version 2, with one record per activity, nine action fields, and renamed issue fields. |
+| Issue and curated-answer validation | Implemented, including linked-action checks, review issues for empty evidence or type lists, model-stage resolution rules, and expert resolutions in curated copies. |
+| Saved-source integrity | Loading compares prepared text with the preserved startup fingerprint. Successful version 2 runs require their saved input. |
+| Legacy compatibility | Version 1 schemas and validation preserve the meaning of earlier file formats. |
+| Engineering checks | Full suite: 1,845 passed, with 11 dependency warnings. Controlled model replies cover format, validation, persistence, and failure handling; cached-model OCR checks also passed. |
+| Live integration check | A fictional two-page PDF produced two grouped actions through the installed CLI and local Ollama, without repairs. Both planting phases were retained in one record. All seven quotations matched the original PDF on the cited pages, and both input token counts matched preflight. The saved run loaded successfully. |
+| Real-plan assessment | Extraction quality and completeness under the new format are **Not yet tested**. |
+| Later stages | Verifier execution, expert reference/assessment files, metrics, comparison, and instruction export remain planned. |
 
 ### Next implementation steps
 
-1. **Migrate the extraction format.** Update content/run schemas, prompts, validation, response-schema conversion checks, fixtures, and relevant tests together. Apply the nine action fields, eight issue fields, category options in DESIGN.md appendix E, and coding rules in appendix F. Validate expert resolutions in curated copies and model-stage resolutions in saved runs. Assign a new run-format version and support loading earlier version 1 files with their original field names and interpretation.
-2. **Check a small example.** Include tree planting across neighborhoods and phases, differing statuses, overlapping categories, shared costs, unstated fields, expected benefits, quotations, and physical pages. Inspect source meaning and format acceptance.
-3. **Complete development extraction.** Obtain and inspect accepted action-focused outputs for both development plans. Retain earlier failures and investigate source-recovery problems that affect extraction.
-4. **Implement verification.** Validate the different model's request and token-accounting path, then implement its profile, prompt, loop, input links, and continuity checks. Test corrections, omissions, unflagged errors, and failed V retries.
-5. **Pilot assessment and measures.** Implement templates and validation for the streamlined files below. Work through coding, grouping, rubric, evidence, and resolution examples, including expert fixes after assessment. Check the appendix G calculations against hand-worked cases and settle reviewer procedures before freezing comparison settings.
-6. **Run the comparison.** Select the five plans and preserve independent references, the first successful paired outputs, assessments, failed attempts, and analysis inputs. Report the agreed measures and explanatory examples.
-7. **Assemble instruction examples.** Pilot the export format, curate supported answers and issue resolutions, include sufficient source inputs, and check example counts and source links.
+1. **Complete the development pilot.** Register the selected development PDFs through the normal CLI. Inspect grouped activities, local and phase details, quotations, page references, and source gaps against the originals.
+2. **Implement verification.** Validate a different model's request and token-accounting path, then implement its profile, prompt, and runner. Use the exact saved extraction and source, with the existing issue-continuity checks. Test corrections, omissions, unflagged errors, and failed V retries.
+3. **Pilot expert assessment and measures.** Implement templates and validation for the planned reference and assessment files. Work through grouping, scoring, evidence, and resolution examples, including expert fixes after assessment. Check appendix G calculations against hand-worked cases and settle reviewer procedures before freezing comparison settings.
+4. **Run the comparison.** Select the five comparison plans and preserve independent references, the first successful paired outputs, assessments, failed attempts, and analysis inputs. Report the agreed measures and explanatory examples.
+5. **Assemble instruction examples.** Pilot the export format, curate supported answers and issue resolutions, include sufficient source inputs, and check example counts and source links.
 
-Issue field migration applies within each issue object.
+The active extraction contract is in `schemas/content.schema.json`, `schemas/agent_response.schema.json`, and `schemas/run.schema.json`. The shared expert-curated answer contract is in `schemas/curated_dataset.schema.json`. Preserved version 1 contracts are in `schemas/legacy/v1/`. New extraction uses the current contract explicitly, and saved-run loading selects its contract from `schema_version`.
 
-| Current field | Target field |
-| --- | --- |
-| `related_record_id` | `related_action_id` |
-| `description` | `issue_description` |
-| `type` | `issue_type` |
-| `origin_stage` | `issue_origin` |
-| `status` | `issue_status` |
-
-The fields `issue_id`, `resolved_by`, and `resolution` keep their names. The target `resolved_by` options add `expert` for fixes in curated datasets. Existing saved runs retain their original field values and model settings.
-
-Before comparison, also close the saved-source loading gap. Current loading validates the linked preparation, PDF, and images, but does not compare page text with the startup fingerprint in `artifacts/extractor_input.json`. Add that comparison when loading runs for verification or assessment, so later text edits are detected. During-run fingerprint checks already exist.
-
-Direct image delivery, hosted providers, richer status listing, broader datasets, publication packaging, and fine-tuning are deferred.
+Direct image delivery, hosted providers, richer status listing, broader datasets, and fine-tuning are deferred.
 
 ## Appendix: supporting JSON files
 
-These tables define workflow files alongside the [plan dataset](DESIGN.md#appendix-dataset-coding-rules-and-evaluation). Registry, preparation, profile, and execution formats are implemented. The migrated action content and expert-file formats are planned. Existing version 1 runs use five-category content.
+These tables define workflow files alongside the [plan dataset](DESIGN.md#appendix-dataset-coding-rules-and-evaluation). Registry, preparation, profile, version 2 extraction, and curated-answer validation are implemented. Expert reference and assessment formats remain planned. Version 1 files are loaded with the preserved five-category contract.
 
-Fields are required unless stated otherwise. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are project-relative. Content, evidence objects, and missing-value conventions follow DESIGN.md. Apply the migrated content schema to new runs and planned expert files.
+Fields are required unless stated otherwise. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are project-relative. Content, evidence objects, and missing-value conventions follow DESIGN.md. New runs and curated answers use the current action content schema.
 
 ### Registry
 
@@ -426,11 +413,11 @@ Run-only `prompt_texts` and `environment` are observed/snapshotted at execution,
 
 ### Saved run
 
-Python saves this outer object in `output.json`. The action-focused migration needs a new format version; existing version 1 runs retain their original meaning.
+Python saves this outer object in `output.json`. New extraction runs use version 2. Loading version 1 selects the original content and issue schemas.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schema_version` | positive integer | Saved-format version assigned during the coordinated schema migration. |
+| `schema_version` | integer | 2 for new runs. Version 1 remains readable through its preserved contract. |
 | `plan_id` | string | Registered document version. |
 | `run_id` | string | One execution, such as `run_extract_0001`. |
 | `stage` | enum | `extractor` or `verifier`. |
@@ -560,7 +547,7 @@ Error and repair entries contain the following fields.
 
 ### Expert references — planned
 
-Use this format for the independent initial reference and shared final reference. Validate both against the action content schema. Record reviewer roles and disagreement procedures during the pilot.
+Use this planned format for the independent initial reference and shared final reference. Validate both against the current action content schema. Record reviewer roles and disagreement procedures during the pilot.
 
 | Field | Type | Meaning |
 | --- | --- | --- |

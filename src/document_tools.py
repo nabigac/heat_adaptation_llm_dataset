@@ -785,7 +785,7 @@ def create_document_tool_server(
             return document.get_page_text(page_number)
         except DocumentToolError as error:
             # A known argument error is an MCP error result, not a successful
-            # text answer containing an error sentence. The future loop can log it.
+            # text answer containing an error sentence. The loop logs the result.
             raise ToolError(str(error)) from error
 
     @server.tool(annotations=annotations)

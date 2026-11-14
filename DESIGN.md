@@ -74,7 +74,7 @@ Costs, benefits, and evidence are attached to the activity they describe. The [a
 
 Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Separate passages are represented by separate evidence entries, including relevant headings or footnotes. Adequate evidence collectively supports the activity and its stated details.
 
-Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains existing issue IDs, may add issues, and explains claimed resolutions for expert assessment. Experts may subsequently resolve issues in curated copies, with `resolved_by` recorded as `expert` and the original issue origin retained. Expert curation corrects or excludes unsupported material.
+Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains existing issue IDs, may add issues, and explains claimed resolutions for expert assessment. Experts may subsequently resolve issues in curated copies. Expert curation corrects or excludes unsupported material.
 
 ### Workflow and comparison
 
@@ -139,7 +139,7 @@ The coarse action scores and combined evidence judgment may hide differences in 
 
 A **schema** defines fields, types, and permitted values. An **object** groups named fields, a **list** holds items, and an **enum** limits a value to named choices. `null` represents unavailable information.
 
-Sections A–D define the target plan dataset, E defines category options, F gives coding rules, and G defines evaluation. The current software still uses the earlier five-category format and issue field names. [IMPLEMENTATION.MD](IMPLEMENTATION.MD#appendix-supporting-json-files) specifies workflow files and migration work.
+Sections A–D define the target plan dataset, E defines category options, F gives coding rules, and G defines evaluation. [IMPLEMENTATION.MD](IMPLEMENTATION.MD#appendix-supporting-json-files) specifies the supporting workflow files.
 
 All fields are required unless marked optional. Text is nonblank unless stated otherwise. Dates use `YYYY-MM-DD`. Record links refer to items within the same plan dataset, and cited page numbers fall within the original PDF's page range.
 

@@ -24,34 +24,29 @@ DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
 
 @pytest.fixture
+def run_record(action_run_record):
+    """Compare the provider schema with current action-format responses."""
+    return action_run_record
+
+
+@pytest.fixture
 def response(run_record: dict) -> dict:
-    """Populate every record type and both issue states with fictional data."""
+    """Populate action details and both issue states with fictional data."""
     data = copy.deepcopy({key: run_record[key] for key in ("content", "review")})
     content = data["content"]
     evidence = [{"quote": "Fictional source passage.\nContinued here.", "page_numbers": [1, 2]}]
-    content["plan_goals"] = [{
-        "goal_id": "goal_0001", "goal": "Reduce heat exposure.",
-        "targets": [{"target": "Provide shade for 20 stops.", "deadline": None}],
-        "evidence": copy.deepcopy(evidence),
-    }]
-    content["plan_actions"][0]["related_goal_ids"] = ["goal_0001"]
-    for category, prefix, description in (
-        ("plan_mon_eval", "mon_eval", "Inspect shade annually."),
-        ("plan_benefits", "benefit", "Expected reduction in exposure."),
-        ("plan_costs", "cost", "Estimated £500,000 for shade."),
-    ):
-        content[category] = [{
-            prefix + "_id": prefix + "_0001", prefix: description, "scope": "linked",
-            "related_goal_ids": ["goal_0001"], "related_action_ids": ["action_0001"],
-            "evidence": copy.deepcopy(evidence),
-        }]
+    content["plan_actions"][0]["evidence"] = copy.deepcopy(evidence)
+    content["plan_actions"][0]["action_cost"] = "Estimated £500,000 for shade."
+    second = copy.deepcopy(content["plan_actions"][0])
+    second.update(action_id="action_0002", action="Run heat outreach.", action_type=["behavioral/cultural"])
+    content["plan_actions"].append(second)
     data["review"]["issues"] = [
-        {"issue_id": "issue_0001", "related_record_id": "action_0001",
-         "description": "A fictional chart remains unclear.", "type": "source_issue",
-         "origin_stage": "extractor", "status": "open", "resolved_by": None, "resolution": None},
-        {"issue_id": "issue_0002", "related_record_id": "cost_0001",
-         "description": "A fictional budget needed clarification.", "type": "conflicting_evidence",
-         "origin_stage": "extractor", "status": "resolved", "resolved_by": "extractor",
+        {"issue_id": "issue_0001", "related_action_id": "action_0001",
+         "issue_description": "A fictional chart remains unclear.", "issue_type": "source_issue",
+         "issue_origin": "extractor", "issue_status": "open", "resolved_by": None, "resolution": None},
+        {"issue_id": "issue_0002", "related_action_id": "action_0002",
+         "issue_description": "A fictional budget needed clarification.", "issue_type": "conflicting_evidence",
+         "issue_origin": "extractor", "issue_status": "resolved", "resolved_by": "extractor",
          "resolution": "The footnote distinguishes the first phase from the total."},
     ]
     assert validate_agent_response(data, page_count=5, stage="extractor") == []
@@ -95,7 +90,7 @@ def test_every_required_field_and_unknown_field_still_rejected(response, prepare
         for key in value:
             damaged = copy.deepcopy(response)
             del at(damaged, path)[key]
-            assert_agreement(damaged, prepared_validator, key == "type")
+            assert_agreement(damaged, prepared_validator, key == "issue_type")
         damaged = copy.deepcopy(response)
         at(damaged, path)["unexpected"] = "must not be silently accepted"
         assert_agreement(damaged, prepared_validator, False)
@@ -109,8 +104,8 @@ def test_nonblank_rule_preserves_multiline_and_unicode_acceptance(response, prep
     for path in (
         ("content", "plan_actions", 0, "action"),
         ("content", "plan_info", "country"),
-        ("content", "plan_goals", 0, "targets", 0, "deadline"),
-        ("content", "plan_mon_eval", 0, "evidence", 0, "quote"),
+        ("content", "plan_actions", 0, "action_cost"),
+        ("content", "plan_actions", 0, "evidence", 0, "quote"),
         ("review", "issues", 1, "resolution"),
     ):
         changed = copy.deepcopy(response)
@@ -131,20 +126,20 @@ def test_nonblank_rule_preserves_multiline_and_unicode_acceptance(response, prep
     (("content", "plan_info", "date_accessed"), "2026-02-30", False),
     (("content", "plan_info", "date_accessed"), "2024-02-29", True),
     (("content", "plan_info", "lead_agencies"), [""], False),
-    (("content", "plan_actions", 0, "action_status"), "not_specified", True),
+    (("content", "plan_actions", 0, "action_status"), "unspecified", True),
     (("content", "plan_actions", 0, "action_status"), "unknown", False),
-    (("content", "plan_benefits", 0, "scope"), "unspecified", True),
-    (("content", "plan_costs", 0, "scope"), "national", False),
-    (("content", "plan_goals", 0, "evidence"), [], True),
-    (("content", "plan_goals", 0, "evidence", 0, "page_numbers"), [], False),
-    (("content", "plan_goals", 0, "evidence", 0, "page_numbers"), [0], False),
-    (("content", "plan_goals", 0, "evidence", 0, "page_numbers"), [1, 1], False),
-    (("content", "plan_goals", 0, "evidence", 0, "page_numbers"), [True], False),
-    (("content", "plan_goals", 0, "evidence", 0, "page_numbers"), 1, False),
-    (("review", "issues", 0, "type"), None, True),
-    (("review", "issues", 0, "type"), "invented_type", False),
-    (("review", "issues", 0, "origin_stage"), "verifier", True),
-    (("review", "issues", 0, "origin_stage"), "expert", False),
+    (("content", "plan_actions", 0, "action_type"), ["nature-based", "infrastructural"], True),
+    (("content", "plan_actions", 0, "action_type"), ["national"], False),
+    (("content", "plan_actions", 0, "evidence"), [], True),
+    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), [], False),
+    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), [0], False),
+    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), [1, 1], False),
+    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), [True], False),
+    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), 1, False),
+    (("review", "issues", 0, "issue_type"), None, True),
+    (("review", "issues", 0, "issue_type"), "invented_type", False),
+    (("review", "issues", 0, "issue_origin"), "verifier", True),
+    (("review", "issues", 0, "issue_origin"), "expert", False),
 ])
 def test_field_types_values_and_bounds_agree(response, prepared_validator, path, value, expected):
     at(response, path[:-1])[path[-1]] = value
@@ -155,7 +150,7 @@ def test_field_types_values_and_bounds_agree(response, prepared_validator, path,
     ("open", "resolved"), (None, "extractor", "verifier", "expert"), (None, "", "Clarified by a footnote.")
 )))
 def test_issue_conditional_rules_are_preserved(response, prepared_validator, status, resolver, resolution):
-    response["review"]["issues"][0].update(status=status, resolved_by=resolver, resolution=resolution)
+    response["review"]["issues"][0].update(issue_status=status, resolved_by=resolver, resolution=resolution)
     expected = ((resolver is None and resolution is None) if status == "open" else
                 (resolver in ("extractor", "verifier") and bool(resolution)))
     assert_agreement(response, prepared_validator, expected)
@@ -166,11 +161,11 @@ def test_schema_mode_does_not_replace_semantic_validation(response, prepared_val
     if damage == "duplicate_ids":
         response["review"]["issues"][1]["issue_id"] = "issue_0001"
     elif damage == "unknown_link":
-        response["content"]["plan_actions"][0]["related_goal_ids"] = ["missing_goal"]
+        response["review"]["issues"][0]["related_action_id"] = "missing_action"
     elif damage == "page_outside_document":
-        response["content"]["plan_goals"][0]["evidence"][0]["page_numbers"] = [6]
+        response["content"]["plan_actions"][0]["evidence"][0]["page_numbers"] = [6]
     else:
-        response["review"]["issues"][0]["origin_stage"] = "verifier"
+        response["review"]["issues"][0]["issue_origin"] = "verifier"
     assert_agreement(response, prepared_validator, True)
     assert validate_agent_response(response, page_count=5, stage="extractor")
 

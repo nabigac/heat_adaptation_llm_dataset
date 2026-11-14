@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:agent-response",
+  "title": "Heat adaptation agent final response",
+  "description": "The model returns content and review only, as defined in DESIGN.md Appendices B and C. Python supplies run metadata separately.",
+  "$comment": "Load the content schema into a local schema registry. Python additionally checks IDs, links, page ranges, one issue per affected record, and issue-stage consistency. A resolved status is an agent claim, not expert confirmation.",
+  "type": "object",
+  "required": ["content", "review"],
+  "additionalProperties": false,
+  "properties": {
+    "content": {"$ref": "urn:heat-adaptation:content"},
+    "review": {
+      "type": "object",
+      "required": ["issues"],
+      "additionalProperties": false,
+      "properties": {
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}}
+      }
+    }
+  },
+  "$defs": {
+    "text": {"type": "string", "pattern": "\\S"},
+    "issue": {
+      "type": "object",
+      "required": ["issue_id", "related_record_id", "description", "origin_stage", "status", "resolved_by", "resolution"],
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {"$ref": "#/$defs/text"},
+        "related_record_id": {"type": ["string", "null"], "pattern": "\\S"},
+        "description": {"$ref": "#/$defs/text"},
+        "type": {
+          "type": ["string", "null"],
+          "enum": ["unclear_meaning", "conflicting_evidence", "source_issue", "extraction_process_issue", "no_records_found", null]
+        },
+        "origin_stage": {"type": "string", "enum": ["extractor", "verifier"]},
+        "status": {"type": "string", "enum": ["open", "resolved"]},
+        "resolved_by": {"type": ["string", "null"], "enum": ["extractor", "verifier", null]},
+        "resolution": {"type": ["string", "null"], "pattern": "\\S"}
+      },
+      "if": {"properties": {"status": {"const": "open"}}, "required": ["status"]},
+      "then": {
+        "properties": {"resolved_by": {"type": "null"}, "resolution": {"type": "null"}}
+      },
+      "else": {
+        "properties": {"resolved_by": {"type": "string"}, "resolution": {"type": "string"}}
+      }
+    }
+  }
+}

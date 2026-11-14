@@ -34,6 +34,12 @@ REAL_DOCUMENT_CLIENT = agents._document_client
 
 
 @pytest.fixture
+def run_record(action_run_record):
+    """Use the current action format throughout the extractor-loop tests."""
+    return action_run_record
+
+
+@pytest.fixture
 def project(tmp_path, run_record):
     root = tmp_path / "project"
     pdf = root / f"data/raw/{PLAN_ID}.pdf"

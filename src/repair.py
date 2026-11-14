@@ -1,4 +1,4 @@
-"""Apply only the final-response format repairs permitted by DESIGN.md Appendix F.
+"""Apply only the final-response format repairs specified in IMPLEMENTATION.MD.
 
 This module edits text, not research claims. It does not call models, access
 files, fill missing fields, normalize IDs, or decide whether an answer is valid.
@@ -12,12 +12,14 @@ from dataclasses import dataclass
 from typing import Literal
 
 
-# The future model adapter must translate provider-specific completion metadata
+# The model adapter translates provider-specific completion metadata
 # into one of these states. "normal" requires positive evidence that the request
 # finished normally; a parseable answer alone cannot establish that fact.
 CompletionStatus = Literal["normal", "unknown", "truncated", "failed"]
 COMPLETION_STATUSES = ("normal", "unknown", "truncated", "failed")
 _JSON_WHITESPACE = " \t\r\n"
+# Page-number repairs support current actions and preserved version 1 records.
+# Full schema validation afterward rejects fields outside the selected format.
 _RECORD_LISTS = {
     "plan_goals", "plan_actions", "plan_mon_eval", "plan_benefits", "plan_costs",
 }

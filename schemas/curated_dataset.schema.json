@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:curated-dataset",
+  "title": "Expert-curated plan dataset",
+  "type": "object",
+  "required": [
+    "content",
+    "review"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "content": {
+      "$ref": "urn:heat-adaptation:content"
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "issues"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:heat-adaptation:agent-response#/$defs/issue"
+          }
+        }
+      }
+    }
+  }
+}

@@ -27,6 +27,12 @@ scripted = loop.scripted
 
 
 @pytest.fixture
+def run_record(action_run_record):
+    """Use the current action format for saved extractor runs."""
+    return action_run_record
+
+
+@pytest.fixture
 def facts(monkeypatch, run_record):
     environment = copy.deepcopy(run_record["settings"]["environment"])
     environment.update(runtime="ollama", code_commit="fixture-commit", code_dirty=True,
@@ -424,3 +430,20 @@ asyncio.run(agents.run_extractor(root,"plan_0099",source_path="data/processed/pl
             child.wait(timeout=5)
         child.stdout.close()
         child.stderr.close()
+
+
+@pytest.mark.parametrize("damage", ["changed_text", "missing_snapshot"])
+def test_loading_completed_action_run_checks_preserved_source(project, scripted, facts, run_record, damage):
+    scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message(loop.answer(run_record))]
+    saved = execute(project, scripted)
+    assert saved.record["status"] == "succeeded"
+    assert storage.load_run_record(project, saved.record_path) == saved.record
+    if damage == "changed_text":
+        pages_path = project / loop.SOURCE.replace("preparation.json", "pages.json")
+        pages = json.loads(pages_path.read_text())
+        pages[0]["text"] += " A later manual edit."
+        pages_path.write_text(json.dumps(pages))
+    else:
+        (folder(project, saved) / "artifacts/extractor_input.json").unlink()
+    with pytest.raises(storage.RunValidationError, match="fingerprint|preserved extractor input"):
+        storage.load_run_record(project, saved.record_path)

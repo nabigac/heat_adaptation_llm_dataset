@@ -205,6 +205,7 @@ def test_real_repair_report_and_texts_can_be_saved_before_finalization(
     raw_path = storage.save_run_file(project, active_run, "responses/response_01.txt", raw.encode("utf-8"))
     result = validation.validate_and_repair_agent_response(
         raw, page_count=5, stage="extractor", completion_status="normal", raw_response_path=raw_path,
+        schema_version=1,
     )
     repaired_path = storage.save_run_file(
         project, active_run, "responses/repaired_final.txt", result.candidate_text.encode("utf-8")

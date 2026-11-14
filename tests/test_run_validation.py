@@ -455,7 +455,7 @@ def test_wrong_run_shapes_are_reported_without_crashing(data: object) -> None:
     assert problems and all(problem.category == "structure" for problem in problems)
 
 
-@pytest.mark.parametrize("path_attribute", ["_RUN_SCHEMA_PATH", "_CONTENT_SCHEMA_PATH", "_AGENT_RESPONSE_SCHEMA_PATH"])
+@pytest.mark.parametrize("path_attribute", ["_LEGACY_RUN_SCHEMA_PATH", "_LEGACY_CONTENT_SCHEMA_PATH", "_LEGACY_RESPONSE_SCHEMA_PATH"])
 @pytest.mark.parametrize("schema_text", [None, '{"type":', '{"type": "invalid"}'])
 def test_missing_or_invalid_run_schema_dependencies_stop_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_record: dict,

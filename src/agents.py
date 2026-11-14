@@ -3,8 +3,8 @@
 Input assembly only reads files. run_extractor_loop additionally starts the local
 MCP subprocess, calls Ollama and document tools, and validates the final answer.
 The bare loop returns evidence in memory; run_extractor adds incremental saved
-run records. The extraction CLI remains separate work. No helper here silently
-retries a failed run.
+run records. cli.py calls the saved wrapper and displays its result. No helper
+here silently retries a failed run.
 """
 
 import asyncio
@@ -60,14 +60,14 @@ class ExtractorInputError(ValueError):
 
 @dataclass(frozen=True)
 class ExtractorInput:
-    """One in-memory input snapshot, ready for preview or a later model caller.
+    """One in-memory input snapshot for preview, token checks, or execution.
 
-    source_path and page_count identify the exact preparation for future run
+    source_path and page_count identify the exact preparation for saved run
     records and response validation. Pass settings, messages, and response_format
     to models.py for a separate count-only check or model request. Building this
     object does not count tokens, certify tool/image access, or start a run.
-    Frozen attributes still contain editable dictionaries/lists; save the actual
-    sent request when execution is implemented, rather than relying on this flag.
+    Frozen attributes still contain editable dictionaries/lists. The runner saves
+    each actual sent request rather than relying on this flag for preservation.
     """
 
     plan_id: str
@@ -114,7 +114,7 @@ def load_profile(
     """Return the chosen profile plus shared tools and exact ordered prompt texts.
 
     The returned dictionary supplies the configuration portion of saved run
-    settings. The future runner must add observed environment details before
+    settings. run_extractor adds observed environment details before
     creating a run record. We do not fabricate versions, hardware, or Git state.
     No profile is selected by position, guessed from a stage, or silently reused.
     """
@@ -141,7 +141,7 @@ def load_profile(
         try:
             path = resolve_project_path(project_root, prompt_path)
             # read_text() normally changes CRLF line endings to LF. Decode bytes
-            # explicitly to preserve the exact text supplied to the future model.
+            # explicitly to preserve the exact text supplied to the model.
             text = path.read_bytes().decode("utf-8")
         except (OSError, ValueError) as error:
             raise ProfileValidationError([ValidationProblem(
@@ -179,7 +179,8 @@ def build_extractor_input(
     selected snapshot. A failed or inconsistent preparation stops assembly.
     ProfileValidationError and OllamaSchemaError retain their existing interfaces;
     source-file failures become ExtractorInputError with structured locations.
-    This increment builds text messages for local Ollama, without tools/images.
+    This builder supplies text messages for local Ollama. The loop adds tools;
+    direct image input is unsupported.
     """
     settings = load_profile(project_root, profile_name, stage="extractor", config_path=config_path)
     if settings["model"]["execution_mode"] != "local":
@@ -264,7 +265,7 @@ def _format_extractor_source(preparation: dict, pages: list[dict]) -> str:
 
 # These are controller instructions, separate from the selected coding prompts.
 # Exact sent requests retain them in ModelAttempt.request_body. A readiness turn
-# is part of the planned workflow, never a retry or a model-based JSON repair.
+# is part of the extraction workflow, never a retry or a model-based JSON repair.
 FINAL_READY_SIGNAL = "READY_FOR_FINAL_RESPONSE"
 _TOOL_PHASE_INSTRUCTIONS = (
     "Python controller: this is the tool-investigation phase. All coding and source-handling rules still apply. "
@@ -654,7 +655,7 @@ def _package_version(name: str) -> str | None:
 def _code_snapshot() -> dict[str, bytes]:
     """Keep only application code/contracts/lockfiles, excluding local secrets/data."""
     root = Path(__file__).resolve().parents[1]
-    paths = list((root / "src").glob("*.py")) + list((root / "schemas").glob("*.json"))
+    paths = list((root / "src").glob("*.py")) + list((root / "schemas").rglob("*.json"))
     paths += [root / name for name in ("pyproject.toml", "uv.lock", ".python-version") if (root / name).is_file()]
     return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(paths)}
 
@@ -906,7 +907,7 @@ async def run_extractor(
     snapshot = _code_snapshot()
     settings = {**deepcopy(packet.settings), "environment": environment}
     record = {
-        "schema_version": 1, "plan_id": plan_id, "run_id": next_run_id(root, plan_id, "extractor"),
+        "schema_version": 2, "plan_id": plan_id, "run_id": next_run_id(root, plan_id, "extractor"),
         "stage": "extractor", "purpose": purpose, "input_run_id": None, "retry_of_run_id": retry_of_run_id,
         "source_path": source_path, "status": "running", "started_at": started_at, "ended_at": None,
         "elapsed_seconds": None, "settings": settings, "model_calls": [], "tool_log_path": None,

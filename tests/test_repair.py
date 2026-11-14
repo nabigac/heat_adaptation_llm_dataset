@@ -26,6 +26,7 @@ def check_final(text: str, *, completion_status: str = "normal", stage: str = "e
     return validation.validate_and_repair_agent_response(
         text, page_count=5, stage=stage, completion_status=completion_status,
         raw_response_path="runs/plan_0099/run_extract_0001/responses/response_01.txt",
+        schema_version=1,
     )
 
 
@@ -325,11 +326,12 @@ def test_report_paths_cannot_replace_raw_with_repaired_text(path: str) -> None:
     with pytest.raises(ValueError, match="raw response"):
         validation.validate_and_repair_agent_response(
             "{}", page_count=5, stage="extractor", completion_status="normal", raw_response_path=path,
+            schema_version=1,
         )
 
 
 def test_strict_parser_still_does_not_apply_repairs(response: dict) -> None:
     raw = "```json\n" + json.dumps(response) + "\n```"
-    parsed, problems = validation.parse_agent_response_json(raw, page_count=5, stage="extractor")
+    parsed, problems = validation.parse_agent_response_json(raw, page_count=5, stage="extractor", schema_version=1)
     assert parsed is None and problems[0].category == "syntax"
     assert check_final(raw).response == response

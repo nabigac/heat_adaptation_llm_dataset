@@ -36,6 +36,12 @@ scripted = loop.scripted
 facts = saved_tests.facts
 
 
+@pytest.fixture
+def run_record(action_run_record):
+    """Use the current action format for OCR-enabled extraction runs."""
+    return action_run_record
+
+
 def enable_ocr(root, *, enabled=True):
     path = root / "configs/profiles.json"
     config = json.loads(path.read_text())
@@ -382,13 +388,13 @@ def test_recognition_failure_can_remain_an_open_issue_in_a_successful_saved_run(
     call = loop.call(name="run_ocr")
     call["function"]["arguments"] = {"page_number": 1}
     final = json.loads(loop.answer(run_record))
-    final["review"]["issues"] = [{"issue_id": "issue_0001", "type": "source_issue", "status": "open",
-        "related_record_id": None, "description": "OCR could not recover page 1 text.",
-        "origin_stage": "extractor", "resolved_by": None, "resolution": None}]
+    final["review"]["issues"] = [{"issue_id": "issue_0001", "issue_type": "source_issue", "issue_status": "open",
+        "related_action_id": None, "issue_description": "OCR could not recover page 1 text.",
+        "issue_origin": "extractor", "resolved_by": None, "resolution": None}]
     scripted.replies = [loop.message(calls=[call]), loop.message(agents.FINAL_READY_SIGNAL), loop.message(json.dumps(final))]
     result = saved_tests.execute(project, scripted)
     assert result.record["status"] == "succeeded", result.record["error"]
-    assert result.record["review"]["issues"][0]["status"] == "open"
+    assert result.record["review"]["issues"][0]["issue_status"] == "open"
     log = json.loads((project / result.record["tool_log_path"]).read_text())
     assert log[0]["result"]["isError"] is True and "Saved OCR report" in log[0]["error"]
 

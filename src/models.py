@@ -1,9 +1,9 @@
 """Send one local Ollama chat request and retain its answer and measurements.
 
 The adapter supports text, declared tools and completed tool-result histories.
-It does not run an agent loop, execute tools, or save a research run. Before generation it counts
-the fully rendered text and reserves the configured maximum output. The first
-counter supports the tested local Qwen/MLX setup; unsupported setups stop.
+It does not run an agent loop, execute tools, or save a research run. Before
+generation it counts the fully rendered text and reserves the configured maximum
+output. The counter supports the tested local Qwen/MLX setup; unsupported setups stop.
 We also request no runtime truncation/rolling context and check reported usage
 after the response: a runtime may ignore num_ctx.
 This adapter's controls are checked against Ollama 0.40.14 and 0.40.16; test a
@@ -75,7 +75,7 @@ class ModelCallResult:
     raw_response preserves the HTTP body after HTTP content decoding, without
     JSON rewriting. response_text is the exact assistant content field, while
     assistant_message also retains provider fields such as thinking/tool calls.
-    The future runner saves these before deciding how to finalize the run.
+    The saved runner preserves these before deciding how to finalize the run.
     Frozen fields do not make nested dictionaries immutable.
     """
 
@@ -96,14 +96,14 @@ class ModelCallResult:
     token_budget: "TokenBudgetResult | None" = None
     # Only validated, normally completed tool requests are exposed here. On
     # failure the original message/raw bytes still retain every received field.
-    # A future agent must check error/completion_status before executing anything.
+    # The agent checks error/completion_status before executing any tool request.
     tool_calls: list[dict] = field(default_factory=list)
     # True once the application begins the generation HTTP exchange. Render-only
     # checks are separate and must not become research model-call observations.
     generation_started: bool = False
 
     def to_run_call(self, response_path: str | None) -> dict:
-        """Copy only Appendix A's model-call fields into a future run record.
+        """Copy the model-call fields defined in IMPLEMENTATION.MD into a run record.
 
         response_path must identify the file the caller actually saved. Client
         request time and provider timings are separate from whole-stage duration.
@@ -141,7 +141,7 @@ def _model_progress(callback, event: str, payload) -> None:
 class TokenBudgetResult:
     """A JSON-saveable report plus exact HTTP bodies from count-only setup.
 
-    The future runner should save report, its rendered prompt, and raw_responses
+    The saved runner preserves report, its rendered prompt, and raw_responses
     beside the exact request. These are audit artifacts, not extra model calls.
     Nested dictionaries remain mutable so a timeout can retain partial evidence.
     """
@@ -226,7 +226,7 @@ class OllamaSchemaError(ValueError):
     """Stop schema preparation when a compatible copy cannot be built safely."""
 
 
-def prepare_ollama_response_schema() -> dict:
+def prepare_ollama_response_schema(*, schema_version: int = 2) -> dict:
     """Build a fresh, self-contained provider copy of the response contract.
 
     Resolve only the two local authoritative schemas and rewrite the nonblank
@@ -236,11 +236,14 @@ def prepare_ollama_response_schema() -> dict:
 
     This preserves the validation contract; it does not prove the serving setup
     enforces every keyword. Always use the original Python validators afterward.
-    The future runner should preserve the exact sent schema with its request.
+    The saved runner preserves the exact sent schema with its request.
     """
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        raise OllamaSchemaError("Choose response schema version 1 or 2.")
+    directory = _SCHEMA_DIRECTORY / "legacy" / "v1" if schema_version == 1 else _SCHEMA_DIRECTORY
     documents = {}
     for uri, filename in _RESPONSE_SCHEMA_FILES.items():
-        path = _SCHEMA_DIRECTORY / filename
+        path = directory / filename
         try:
             document = json.loads(
                 path.read_bytes().decode("utf-8"), object_pairs_hook=_unique_fields,
@@ -850,7 +853,7 @@ async def request_ollama_chat(
     except ModelProgressError as error:
         failure = str(error)
     except asyncio.CancelledError as error:
-        # Keep cancellation semantics while giving the future runner access to
+        # Keep cancellation semantics while giving the saved runner access to
         # already-received bytes. Cancelling is not a successful model response.
         if not token_budget.report["fits"]:
             token_budget.report["error"] = "Ollama request was cancelled during token-budget checking."

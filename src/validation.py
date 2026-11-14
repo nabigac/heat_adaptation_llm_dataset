@@ -47,19 +47,46 @@ _CONTENT_SCHEMA_URI = "urn:heat-adaptation:content"
 _AGENT_RESPONSE_SCHEMA_URI = "urn:heat-adaptation:agent-response"
 _RUN_SCHEMA_URI = "urn:heat-adaptation:run"
 # These URNs are names for rule documents, not websites or run/document IDs.
-# _validate_structure maps them to the two local schema files when resolving $ref.
-# The ID field differs by category, while evidence and link checks are shared.
-_CONTENT_RECORD_LISTS = (
+# _validate_structure maps them to explicitly selected local files for $ref.
+# Only preserved version 1 content has these five record categories.
+_LEGACY_CONTENT_RECORD_LISTS = (
     ("plan_goals", "goal_id"),
     ("plan_actions", "action_id"),
     ("plan_mon_eval", "mon_eval_id"),
     ("plan_benefits", "benefit_id"),
     ("plan_costs", "cost_id"),
 )
+_CURATED_SCHEMA_PATH = _CONTENT_SCHEMA_PATH.parent / "curated_dataset.schema.json"
+_LEGACY_SCHEMA_DIRECTORY = _CONTENT_SCHEMA_PATH.parent / "legacy" / "v1"
+_LEGACY_CONTENT_SCHEMA_PATH = _LEGACY_SCHEMA_DIRECTORY / "content.schema.json"
+_LEGACY_RESPONSE_SCHEMA_PATH = _LEGACY_SCHEMA_DIRECTORY / "agent_response.schema.json"
+_LEGACY_RUN_SCHEMA_PATH = _LEGACY_SCHEMA_DIRECTORY / "run.schema.json"
+
+
+def _extraction_schema_paths(schema_version: int) -> tuple[Path, Path, Path]:
+    """Select a complete contract so old records retain their original meaning."""
+    if type(schema_version) is not int:
+        raise ValueError("Choose extraction schema version 1 or 2.")
+    if schema_version == 1:
+        return (
+            _LEGACY_CONTENT_SCHEMA_PATH,
+            _LEGACY_RESPONSE_SCHEMA_PATH,
+            _LEGACY_RUN_SCHEMA_PATH,
+        )
+    if schema_version != 2:
+        raise ValueError("Choose extraction schema version 1 or 2.")
+    return _CONTENT_SCHEMA_PATH, _AGENT_RESPONSE_SCHEMA_PATH, _RUN_SCHEMA_PATH
+
+
+def _record_lists(schema_version: int) -> tuple[tuple[str, str], ...]:
+    """List the record collections after the schema version has been checked."""
+    if schema_version == 1:
+        return _LEGACY_CONTENT_RECORD_LISTS
+    return (("plan_actions", "action_id"),)
 
 
 # A dataclass groups related values into one record. frozen=True prevents later
-# reassignment of its fields. These three fields match DESIGN.md Appendix F.
+# reassignment of its fields. Saved problem fields are defined in IMPLEMENTATION.MD.
 @dataclass(frozen=True)
 class ValidationProblem:
     """One reported problem; use dataclasses.asdict when saving it as JSON."""
@@ -118,23 +145,29 @@ def validate_pages_structure(data: object) -> list[ValidationProblem]:
     return _validate_structure(data, _PAGES_SCHEMA_PATH, "pages")
 
 
-def validate_content_structure(data: object) -> list[ValidationProblem]:
-    """Check Appendix B fields; record links and page ranges need validate_content."""
+def validate_content_structure(
+    data: object, *, schema_version: int = 2
+) -> list[ValidationProblem]:
+    """Check fields for the explicitly selected content format."""
+    content_path, _, _ = _extraction_schema_paths(schema_version)
     return _validate_structure(
-        data, _CONTENT_SCHEMA_PATH, "content", required_formats=("date",)
+        data, content_path, "content", required_formats=("date",)
     )
 
 
-def validate_agent_response_structure(data: object) -> list[ValidationProblem]:
+def validate_agent_response_structure(
+    data: object, *, schema_version: int = 2
+) -> list[ValidationProblem]:
     """Check content plus review, including open/resolved issue field rules."""
     # The response schema refers to the content schema. Register its local copy
     # rather than duplicate all content fields inside the response rules.
+    content_path, response_path, _ = _extraction_schema_paths(schema_version)
     return _validate_structure(
         data,
-        _AGENT_RESPONSE_SCHEMA_PATH,
+        response_path,
         "agent response",
         required_formats=("date",),
-        schema_references=((_CONTENT_SCHEMA_URI, _CONTENT_SCHEMA_PATH),),
+        schema_references=((_CONTENT_SCHEMA_URI, content_path),),
     )
 
 
@@ -144,14 +177,18 @@ def validate_run_record_structure(data: object) -> list[ValidationProblem]:
     Unknown measurements remain null. The schema reuses the content and review
     definitions, including their required fields, without copying those rules.
     """
+    # Invalid or missing versions are checked by the current schema. A valid
+    # version 1 selects the preserved contract before any nested values are read.
+    version = 1 if isinstance(data, dict) and data.get("schema_version") == 1 else 2
+    content_path, response_path, run_path = _extraction_schema_paths(version)
     problems = _validate_structure(
         data,
-        _RUN_SCHEMA_PATH,
+        run_path,
         "run record",
         required_formats=("date", "date-time"),
         schema_references=(
-            (_CONTENT_SCHEMA_URI, _CONTENT_SCHEMA_PATH),
-            (_AGENT_RESPONSE_SCHEMA_URI, _AGENT_RESPONSE_SCHEMA_PATH),
+            (_CONTENT_SCHEMA_URI, content_path),
+            (_AGENT_RESPONSE_SCHEMA_URI, response_path),
         ),
     )
     if problems:
@@ -236,12 +273,22 @@ def validate_run_links(
                 problems.append(ValidationProblem("reference", "$.input_run_id", "Verification requires the selected successful extractor run for the same plan."))
             if input_run["source_path"] != record["source_path"]:
                 problems.append(ValidationProblem("reference", "$.source_path", "Verification must use its extractor's exact saved preparation."))
+            if input_run["schema_version"] != record["schema_version"]:
+                problems.append(ValidationProblem("reference", "$.input_run_id", "Verification must use the same dataset format as its extractor."))
             if input_run["settings"]["document_tools"] != record["settings"]["document_tools"]:
                 problems.append(ValidationProblem("reference", "$.settings.document_tools", "Verification and extraction must use the same shared document-tool settings."))
             if record["purpose"] == "comparison" and input_run["purpose"] != "comparison":
                 # Preserve deliberate exploratory repeats without allowing one
                 # to replace the main comparison extraction through this link.
                 problems.append(ValidationProblem("reference", "$.input_run_id", "A comparison verifier requires a comparison extractor run."))
+            if (
+                record["schema_version"] == input_run["schema_version"] == 2
+                and record["review"] is not None
+                and input_run["review"] is not None
+            ):
+                problems.extend(_validate_verifier_issue_continuity(
+                    record["review"], input_run["review"]
+                ))
     if record["retry_of_run_id"] is not None:
         # Retrying a failed verifier must retain the same extractor baseline.
         # Switching its input would be a different verification attempt, not a
@@ -258,29 +305,72 @@ def validate_run_links(
     return problems
 
 
-def validate_content(data: object, *, page_count: int) -> list[ValidationProblem]:
-    """Check content structure, record IDs, typed links, scope, and PDF page ranges.
+def _validate_verifier_issue_continuity(review: dict, baseline: dict) -> list[ValidationProblem]:
+    """Keep provenance and claimed resolutions tied to the exact saved E answer."""
+    baseline_issues = {issue["issue_id"]: issue for issue in baseline["issues"]}
+    retained_issue_ids = {issue["issue_id"] for issue in review["issues"]}
+    problems = []
+    if not baseline_issues.keys() <= retained_issue_ids:
+        problems.append(ValidationProblem(
+            "reference", "$.review.issues",
+            "Verification must retain every extractor issue ID."
+        ))
+    for index, issue in enumerate(review["issues"]):
+        location = f"$.review.issues[{index}]"
+        previous = baseline_issues.get(issue["issue_id"])
+        expected_origin = previous["issue_origin"] if previous is not None else "verifier"
+        if issue["issue_origin"] != expected_origin:
+            problems.append(ValidationProblem(
+                "reference", location + ".issue_origin",
+                "Continuing issues retain their origin; new verifier issues originate with verifier."
+            ))
+        if issue["resolved_by"] == "extractor" and (
+            previous is None
+            or previous["issue_status"] != "resolved"
+            or previous["resolved_by"] != "extractor"
+            or previous["resolution"] != issue["resolution"]
+        ):
+            problems.append(ValidationProblem(
+                "reference", location + ".resolved_by",
+                "A resolution made during verification must identify verifier."
+            ))
+    return problems
+
+
+def validate_content(
+    data: object, *, page_count: int, schema_version: int = 2
+) -> list[ValidationProblem]:
+    """Check content fields, record IDs, and physical PDF page ranges.
 
     Supply the original PDF's known page count, not a number claimed by the model.
     This shared content check can later be used for expert references too.
     """
-    problems = validate_content_structure(data) + _validate_page_count(page_count)
+    problems = (
+        validate_content_structure(data, schema_version=schema_version)
+        + _validate_page_count(page_count)
+    )
     # List concatenation combines field errors with caller-context errors. Only
     # proceed to nested dictionary/list access after both sets of checks pass.
     if problems:
         return problems
-    return _validate_content_references(data, page_count=page_count, location="$")
+    return _validate_content_references(
+        data, page_count=page_count, location="$", schema_version=schema_version
+    )
 
 
 def validate_agent_response(
-    data: object, *, page_count: int, stage: Literal["extractor", "verifier"]
+    data: object, *, page_count: int, stage: Literal["extractor", "verifier"],
+    schema_version: int = 2,
 ) -> list[ValidationProblem]:
     """Check one complete answer against the source page count and executing role.
 
-    Verification continuity against a saved extractor run belongs to the later
-    verification workflow. Here we check the returned answer's internal consistency.
+    Here we check the answer's internal consistency. validate_run_links checks
+    issue continuity against a saved extractor run when both records are available.
     """
-    problems = validate_agent_response_structure(data) + _validate_page_count(page_count)
+    problems = (
+        validate_agent_response_structure(data, schema_version=schema_version)
+        + _validate_page_count(page_count)
+    )
     if stage not in ("extractor", "verifier"):
         problems.append(ValidationProblem(
             "other", "stage", "Validation requires stage 'extractor' or 'verifier'."
@@ -288,25 +378,69 @@ def validate_agent_response(
     if problems:
         return problems
 
+    return _validate_response_references(
+        data, page_count=page_count, stage=stage, schema_version=schema_version
+    )
+
+
+def validate_curated_dataset(data: object, *, page_count: int) -> list[ValidationProblem]:
+    """Validate an expert-curated answer, including expert-authored resolutions.
+
+    This checks format and references. Expert approval of source meaning remains
+    a research judgment, recorded separately from validation success.
+    """
+    problems = _validate_structure(
+        data, _CURATED_SCHEMA_PATH, "curated dataset", required_formats=("date",),
+        schema_references=(
+            (_CONTENT_SCHEMA_URI, _CONTENT_SCHEMA_PATH),
+            (_AGENT_RESPONSE_SCHEMA_URI, _AGENT_RESPONSE_SCHEMA_PATH),
+        ),
+    ) + _validate_page_count(page_count)
+    if problems:
+        return problems
+    return _validate_response_references(
+        data, page_count=page_count, stage="expert", schema_version=2
+    )
+
+
+def _validate_response_references(
+    data: dict, *, page_count: int, stage: str, schema_version: int
+) -> list[ValidationProblem]:
+    """Apply the shared content and issue checks to a complete answer."""
     content = data["content"]
-    problems = _validate_content_references(content, page_count=page_count, location="$.content")
-    # Collect all five categories' IDs so an issue may refer to any content item.
-    # This does not merge records with similar wording or decide semantic matches.
+    problems = _validate_content_references(
+        content, page_count=page_count, location="$.content", schema_version=schema_version
+    )
     record_ids = {
         record[id_field]
-        for list_name, id_field in _CONTENT_RECORD_LISTS
+        for list_name, id_field in _record_lists(schema_version)
         for record in content[list_name]
     }
-    return problems + _validate_review_references(data["review"], record_ids=record_ids, stage=stage)
+    problems.extend(_validate_review_references(
+        data["review"], record_ids=record_ids, stage=stage, schema_version=schema_version
+    ))
+    if schema_version == 2:
+        linked_issues = {issue["related_action_id"] for issue in data["review"]["issues"]}
+        for index, action in enumerate(content["plan_actions"]):
+            for field in ("action_type", "evidence"):
+                if not action[field] and action["action_id"] not in linked_issues:
+                    problems.append(ValidationProblem(
+                        "reference", f"$.content.plan_actions[{index}].{field}",
+                        f"An empty {field} requires a linked review issue."
+                    ))
+    return problems
 
 
 def _validate_review_references(
-    review: dict, *, record_ids: set[str], stage: str
+    review: dict, *, record_ids: set[str], stage: str, schema_version: int = 2
 ) -> list[ValidationProblem]:
     """Share issue checks between agent responses and nullable failed-run outputs."""
     problems = []
     seen_issue_ids = set()
     affected_record_ids = set()
+    # Share relationship checks while retaining the original names in v1 errors.
+    link_field = "related_record_id" if schema_version == 1 else "related_action_id"
+    origin_field = "origin_stage" if schema_version == 1 else "issue_origin"
     # Separate sets answer separate questions: is this issue ID repeated, and
     # have two issues split the concerns for the same affected content record?
     for index, issue in enumerate(review["issues"]):
@@ -317,18 +451,18 @@ def _validate_review_references(
             ))
         seen_issue_ids.add(issue["issue_id"])
 
-        related_id = issue["related_record_id"]
+        related_id = issue[link_field]
         if related_id is not None:
             # Null links are deliberately exempt from one-issue-per-record:
             # distinct omissions or source gaps may each need an unlinked issue.
             if related_id not in record_ids:
                 problems.append(ValidationProblem(
-                    "reference", location + ".related_record_id",
+                    "reference", location + "." + link_field,
                     f"Related record ID {related_id!r} does not identify a content record."
                 ))
             if related_id in affected_record_ids:
                 problems.append(ValidationProblem(
-                    "reference", location + ".related_record_id",
+                    "reference", location + "." + link_field,
                     "Group problems for one affected record in a single issue."
                 ))
             affected_record_ids.add(related_id)
@@ -336,14 +470,15 @@ def _validate_review_references(
         # The extractor cannot create verifier issues or claim verifier repairs.
         # A verifier-origin issue likewise cannot have been resolved earlier by
         # the extractor. These checks do not judge whether a resolution is sound.
-        if stage == "extractor" and issue["origin_stage"] != "extractor":
+        if stage == "extractor" and issue[origin_field] != "extractor":
             problems.append(ValidationProblem(
-                "reference", location + ".origin_stage",
+                "reference", location + "." + origin_field,
                 "An extractor response can contain only extractor-origin issues."
             ))
         if (
             (stage == "extractor" and issue["resolved_by"] == "verifier")
-            or (issue["origin_stage"] == "verifier" and issue["resolved_by"] == "extractor")
+            or (issue[origin_field] == "verifier" and issue["resolved_by"] == "extractor")
+            or (stage != "expert" and issue["resolved_by"] == "expert")
         ):
             problems.append(ValidationProblem(
                 "reference", location + ".resolved_by",
@@ -411,19 +546,30 @@ def validate_run_record(
             ))
     problems.extend(_validate_run_record_paths(data))
 
-    record_ids = set()
+    schema_version = data["schema_version"]
+    if data["content"] is not None and data["review"] is not None:
+        # Complete outputs use the same checks as standalone model answers.
+        return problems + _validate_response_references(
+            data, page_count=page_count, stage=data["stage"], schema_version=schema_version
+        )
     # A failed run can retain independently valid content or review. Without
-    # retained content, an issue may describe an unlinked gap, but cannot resolve
-    # a related_record_id against records that are absent from this output.
+    # content, an issue may describe an unlinked gap but cannot link to a record.
+    record_ids = set()
     if data["content"] is not None:
-        problems.extend(_validate_content_references(data["content"], page_count=page_count, location="$.content"))
+        problems.extend(_validate_content_references(
+            data["content"], page_count=page_count, location="$.content",
+            schema_version=schema_version,
+        ))
         record_ids = {
             record[id_field]
-            for list_name, id_field in _CONTENT_RECORD_LISTS
+            for list_name, id_field in _record_lists(schema_version)
             for record in data["content"][list_name]
         }
     if data["review"] is not None:
-        problems.extend(_validate_review_references(data["review"], record_ids=record_ids, stage=data["stage"]))
+        problems.extend(_validate_review_references(
+            data["review"], record_ids=record_ids, stage=data["stage"],
+            schema_version=schema_version,
+        ))
     return problems
 
 
@@ -603,16 +749,21 @@ def parse_pages_json(
 
 
 def parse_content_json(
-    text: str, *, page_count: int
+    text: str, *, page_count: int, schema_version: int = 2
 ) -> tuple[dict | None, list[ValidationProblem]]:
     """Parse strict content JSON and withhold data if field or reference checks fail."""
     # The lambda is a small function retaining this call's source page count.
     # _parse_and_validate invokes it only after JSON syntax has been read safely.
-    return _parse_and_validate(text, lambda data: validate_content(data, page_count=page_count))
+    return _parse_and_validate(
+        text, lambda data: validate_content(
+            data, page_count=page_count, schema_version=schema_version
+        )
+    )
 
 
 def parse_agent_response_json(
-    text: str, *, page_count: int, stage: Literal["extractor", "verifier"]
+    text: str, *, page_count: int, stage: Literal["extractor", "verifier"],
+    schema_version: int = 2,
 ) -> tuple[dict | None, list[ValidationProblem]]:
     """Parse a final answer without repairs, preserving the raw text for its caller.
 
@@ -620,7 +771,9 @@ def parse_agent_response_json(
     validate_and_repair_agent_response for completion checks and permitted repairs.
     """
     return _parse_and_validate(
-        text, lambda data: validate_agent_response(data, page_count=page_count, stage=stage)
+        text, lambda data: validate_agent_response(
+            data, page_count=page_count, stage=stage, schema_version=schema_version
+        )
     )
 
 
@@ -631,6 +784,7 @@ def validate_and_repair_agent_response(
     stage: Literal["extractor", "verifier"],
     completion_status: CompletionStatus,
     raw_response_path: str,
+    schema_version: int = 2,
 ) -> FinalResponseValidation:
     """Check completion, validate, apply permitted repairs, and validate again.
 
@@ -656,7 +810,9 @@ def validate_and_repair_agent_response(
         initial_errors = remaining_errors = [ValidationProblem("other", None, message)]
         response, candidate, repairs = None, text, []
     else:
-        response, initial_errors = parse_agent_response_json(text, page_count=page_count, stage=stage)
+        response, initial_errors = parse_agent_response_json(
+            text, page_count=page_count, stage=stage, schema_version=schema_version
+        )
         candidate, repairs = text, []
         remaining_errors = initial_errors
         if initial_errors:
@@ -666,7 +822,7 @@ def validate_and_repair_agent_response(
             # Run the SAME strict syntax, structure, ID/link, issue, and page
             # checks. Formatting repairs never bypass a reference error.
             response, remaining_errors = parse_agent_response_json(
-                candidate, page_count=page_count, stage=stage
+                candidate, page_count=page_count, stage=stage, schema_version=schema_version
             )
 
     report = {
@@ -799,6 +955,32 @@ def _validate_page_count(page_count: object) -> list[ValidationProblem]:
 
 
 def _validate_content_references(
+    content: dict, *, page_count: int, location: str, schema_version: int = 2
+) -> list[ValidationProblem]:
+    """Validate IDs/pages using the selected format, without interpreting claims."""
+    if schema_version == 1:
+        return _validate_legacy_content_references(content, page_count=page_count, location=location)
+    problems = []
+    seen_ids = set()
+    for index, action in enumerate(content["plan_actions"]):
+        action_location = f"{location}.plan_actions[{index}]"
+        if action["action_id"] in seen_ids:
+            problems.append(ValidationProblem(
+                "reference", action_location + ".action_id",
+                "Action IDs must be unique within the plan."
+            ))
+        seen_ids.add(action["action_id"])
+        for evidence_index, evidence in enumerate(action["evidence"]):
+            for page_index, page_number in enumerate(evidence["page_numbers"]):
+                if page_number > page_count:
+                    problems.append(ValidationProblem(
+                        "reference", f"{action_location}.evidence[{evidence_index}].page_numbers[{page_index}]",
+                        f"Page number {page_number} is outside the range 1 to {page_count}."
+                    ))
+    return problems
+
+
+def _validate_legacy_content_references(
     content: dict, *, page_count: int, location: str
 ) -> list[ValidationProblem]:
     """Check relationships only after all content fields have passed their schema."""
@@ -809,7 +991,7 @@ def _validate_content_references(
     # Set comprehensions collect the existing targets before checking links.
     # A goal can be linked even if its list appears elsewhere in the JSON object;
     # order of object fields is not a meaningful extraction relationship.
-    for list_name, id_field in _CONTENT_RECORD_LISTS:
+    for list_name, id_field in _LEGACY_CONTENT_RECORD_LISTS:
         for index, record in enumerate(content[list_name]):
             record_location = f"{location}.{list_name}[{index}]"
             record_id = record[id_field]

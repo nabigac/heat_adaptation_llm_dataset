@@ -1,143 +1,82 @@
-# Content and review field definitions
+# Plan dataset fields
 
-Return one JSON object with exactly `content` and `review`. These definitions
-follow DESIGN.md Appendices B and C. Every field listed is required unless
-explicitly marked optional. Unknown fields are not allowed. Do not include run
-metadata, settings, measurements, or validation reports in the agent answer.
+Return one JSON object containing exactly content and review. Every field below
+is required except issue_type. Unknown fields are not allowed. Python records
+run IDs, settings, measurements, and validation reports separately.
 
-## Content and plan information
+## Content
 
-`content` contains exactly `plan_info`, `plan_goals`, `plan_actions`,
-`plan_mon_eval`, `plan_benefits`, and `plan_costs`. Each of the five record
-categories is a list; use an empty list when no records are established after
-checking the source and retain any uncertainty in `review.issues`.
+content contains exactly plan_info and plan_actions. plan_actions is a list of
+action objects. An empty list follows a completed search for eligible activities,
+with any unresolved source gap retained as an issue.
 
-`plan_info` contains:
+plan_info has these fields.
 
-- `plan_title`: string or null if unavailable.
-- `jurisdiction_name`: string or null if unavailable.
-- `country`: string or null if unavailable.
-- `plan_scale`: `city`, `county`, `region`, `state`, `country`, or null.
-- `plan_type`: `heat_specific_plan`, `broader_climate_plan`, or null.
-- `publication_year`: integer or null if unavailable.
-- `lead_agencies`: list of agency-name strings; empty if none are established.
-- `source_url`: the exact supplied collection source URL.
-- `date_accessed`: the exact supplied collection date, in `YYYY-MM-DD` format.
-- `language`: `English`.
+- plan_title: nonblank string or null, as stated in the plan.
+- jurisdiction_name: nonblank string or null, the covered jurisdiction.
+- country: nonblank string or null, supported by the source.
+- plan_scale: city, county, region, state, country, or null.
+- plan_type: heat_specific_plan, broader_climate_plan, or null.
+- publication_year: integer or null, for the selected document version.
+- lead_agencies: list of nonblank agency names, empty if unknown.
+- source_url: exact URL supplied in the selected preparation's collection metadata.
+- date_accessed: exact supplied collection date in YYYY-MM-DD format.
+- language: English.
 
-Read other metadata from the source without guessing. Strings must be nonblank
-where a string is required; use null only for explicitly nullable fields.
+Each plan_actions object has exactly these nine fields.
 
-## Evidence and record IDs
+- action_id: stable nonblank local ID, such as action_0001, unique within the plan.
+- action: nonblank description of one specific activity across the plan, retaining
+  quantities, implementers, dates, conditions, and local or phase-specific details.
+- action_type: list of unique values from infrastructural, institutional,
+  behavioral/cultural, and nature-based. Empty if none is justified, with an issue.
+- action_status: planned, underway, completed, or unspecified.
+- action_location: nonblank string containing all stated places or coverage, or null.
+- action_recipient: nonblank string containing intended populations or groups, or null.
+- action_cost: nonblank description of stated amounts, units, periods, and cost
+  character with the relevant location or phase associations, or null.
+- action_benefit: nonblank description of stated outcomes and qualifications,
+  preserving whether expected, modelled, or observed, or null.
+- evidence: list of supporting evidence objects, empty only with a linked issue.
 
-Every content record has an `evidence` list. Each evidence object has exactly:
+Action types have these meanings.
 
-- `quote`: one exact continuous passage, a nonblank string.
-- `page_numbers`: a nonempty list of unique positive integers identifying the
-  physical PDF pages containing that passage, counted from 1. Numbers must not
-  exceed the supplied source page count.
+- infrastructural: changes to built assets, equipment, or physical services.
+- institutional: policies, governance, planning, financing, coordination, or formal
+  service and monitoring systems.
+- behavioral/cultural: changes to knowledge, practices, routines, or social norms.
+- nature-based: vegetation, ecosystems, or ecological processes linked to heat.
 
-Separate passages use separate evidence objects. Evidence must support the
-record's stated details, status, and links. If supporting evidence cannot be
-established, do not invent a quotation: retain an empty evidence list and flag
-the missing or unsupported evidence in an issue for review.
+Each evidence object contains exactly quote and page_numbers. quote is a nonblank
+exact continuous passage. page_numbers is a nonempty list of unique positive
+integers within the physical original PDF page range. A passage may span pages.
+Together, quotations support the activity and all its recorded substantive details.
 
-Use unique record ID strings across all five content lists, for example
-`goal_0001`, `action_0001`, `mon_eval_0001`, `benefit_0001`, and `cost_0001`.
-Every linked ID must identify an existing record of the appropriate category.
-Do not create a relationship merely because two records concern a similar topic.
+## Review
 
-## Goals
+review contains exactly issues, a list that may be empty. Each issue has these
+fields, with concerns about the same action grouped into one issue.
 
-Each `plan_goals` entry has exactly:
+- issue_id: nonblank issue ID unique in the list, such as issue_0001.
+- related_action_id: existing affected action_id, or null for an omission, source
+  or plan-level problem, or a removed action. At most one issue links each action.
+- issue_description: nonblank explanation of all grouped concerns and relevant pages.
+- issue_type: optional. unclear_meaning, conflicting_evidence, source_issue,
+  extraction_process_issue, no_records_found, or null.
+- issue_origin: extractor or verifier, identifying who first raised the issue.
+- issue_status: open or resolved.
+- resolved_by: extractor or verifier when resolved, null while open.
+- resolution: nonblank explanation addressing every concern when resolved,
+  null while open.
 
-- `goal_id`: unique record ID string.
-- `goal`: a nonblank description of the stated goal, including relevant
-  population and geography.
-- `targets`: a list of objects, each containing `target` (nonblank string) and
-  `deadline` (nonblank string or null). Pair each target with its own deadline.
-  Targets may be qualitative. Preserve quantities, units, baselines, and the
-  source's timing precision. Use an empty list if no target is established.
-- `evidence`: evidence objects supporting this record.
+Issue types have these meanings.
 
-Do not infer a goal solely from actions or benefits.
+- unclear_meaning: wording or context permits multiple interpretations.
+- conflicting_evidence: incompatible source statements need reconciliation.
+- source_issue: missing, unreadable, or unreliable source text limits checking.
+- extraction_process_issue: extraction, tool use, or coding problems affect accuracy
+  or completeness.
+- no_records_found: no eligible activities were found and that finding needs review.
 
-## Actions
-
-Each `plan_actions` entry has exactly:
-
-- `action_id`: unique record ID string.
-- `action`: a nonblank description beginning with an action verb. Include stated
-  implementers, populations, locations, quantities, and timing.
-- `action_status`: one of `planned`, `in_progress`, `completed`, `discontinued`,
-  or `not_specified`.
-- `related_goal_ids`: a list of explicitly associated existing goal IDs; empty
-  when the source establishes no such relationship.
-- `evidence`: evidence objects supporting this record, including status and links.
-
-`planned` means proposed or committed without evidence work has begun;
-`in_progress` means underway or functioning; `completed` means finished;
-`discontinued` means stopped or withdrawn. Use `not_specified` when the source
-does not establish status. A past deadline does not establish completion.
-
-## Monitoring and evaluation, benefits, and costs
-
-Each entry contains an ID and description specific to its list:
-
-- `plan_mon_eval`: `mon_eval_id` and `mon_eval`. Describe stated indicators,
-  methods, frequency, responsibility, and reporting.
-- `plan_benefits`: `benefit_id` and `benefit`. Describe stated outcomes, quantities,
-  affected groups, comparisons, timing, and qualifications, including adverse
-  impacts. Preserve whether outcomes are expected, modelled, or observed.
-- `plan_costs`: `cost_id` and `cost`. Describe stated amounts, currency or other
-  units, periods, and recurring or one-off character. Distinguish estimates,
-  allocations, expenditure, and needs.
-
-All IDs and descriptions are nonblank strings. Every entry also has exactly
-`scope`, `related_goal_ids`, `related_action_ids`, and `evidence`:
-
-- `scope`: `linked` when at least one explicit goal or action link is present;
-  `plan_wide` for an explicitly overall plan/programme statement without specific
-  links; `unspecified` when scope is unclear and both link lists are empty.
-- `related_goal_ids`: list of explicitly associated existing goal IDs.
-- `related_action_ids`: list of explicitly associated existing action IDs.
-- `evidence`: evidence objects supporting the description, scope, and links.
-
-Scope and link lists must agree:
-
-| `scope` | `related_goal_ids` and `related_action_ids` | Source requirement |
-| --- | --- | --- |
-| `linked` | At least one of the two lists is nonempty. | The source explicitly associates the record with those goals or actions. |
-| `plan_wide` | Both lists are empty. | The source explicitly describes an overall plan/programme statement. |
-| `unspecified` | Both lists are empty. | The source does not establish the scope. |
-
-Never combine `plan_wide` or `unspecified` with a nonempty link list. Scope
-describes the record's association with goals or actions, not its geographic
-reach: a city-wide benefit can still be `linked` to a specific action. Choose
-scope and links from the source together; do not invent or remove a relationship
-merely to satisfy this consistency rule.
-
-Unspecified scope alone does not create an issue. Record shared budgets once
-and link applicable actions; do not invent allocations or convert currencies.
-
-## Review and issues
-
-`review` contains exactly `issues`, a list. Each issue has:
-
-- `issue_id`: an issue ID string unique within the list, such as `issue_0001`.
-- `related_record_id`: the affected content record ID, or null for an omission,
-  category, source problem, or removed record without a current record.
-- `description`: a nonblank description of the grouped concerns. Identify
-  categories and pages for problems without a record.
-- `type`: optional; if supplied, `unclear_meaning`, `conflicting_evidence`,
-  `source_issue`, `extraction_process_issue`, `no_records_found`, or null.
-- `origin_stage`: `extractor` or `verifier`.
-- `status`: `open` or `resolved`.
-- `resolved_by`: `extractor`, `verifier`, or null while open.
-- `resolution`: a nonblank explanation when resolved, or null while open.
-
-Group multiple concerns for the same affected record in one issue. An open
-issue must have null `resolved_by` and `resolution`. A resolved issue requires
-both fields. Keep IDs and origin stages stable across verification, retain
-baseline issues, and assign new IDs to new issues. Reopening an issue retains
-its identity. Resolution requires all grouped concerns to be addressed.
+The value expert for resolved_by is reserved for later expert-curated copies.
+A model answer must never claim that an expert performed a resolution.

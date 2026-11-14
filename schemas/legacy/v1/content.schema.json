@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:content",
+  "title": "Heat adaptation extracted content",
+  "description": "Shared content structure for agents and expert references, from DESIGN.md Appendix B.",
+  "$comment": "Python checks unique record IDs, links, scope consistency, and original PDF page ranges. Neither schema validation nor a quotation match establishes source support or completeness. Empty evidence lists preserve missing-evidence cases for review.",
+  "type": "object",
+  "required": ["plan_info", "plan_goals", "plan_actions", "plan_mon_eval", "plan_benefits", "plan_costs"],
+  "additionalProperties": false,
+  "properties": {
+    "plan_info": {"$ref": "#/$defs/plan_info"},
+    "plan_goals": {"type": "array", "items": {"$ref": "#/$defs/goal"}},
+    "plan_actions": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+    "plan_mon_eval": {"type": "array", "items": {"$ref": "#/$defs/mon_eval"}},
+    "plan_benefits": {"type": "array", "items": {"$ref": "#/$defs/benefit"}},
+    "plan_costs": {"type": "array", "items": {"$ref": "#/$defs/cost"}}
+  },
+  "$defs": {
+    "text": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "Nonblank text, preserved without trimming or rewriting."
+    },
+    "nullable_text": {"type": ["string", "null"], "pattern": "\\S"},
+    "record_id": {
+      "$ref": "#/$defs/text",
+      "description": "A local record ID; examples such as goal_0001 are not mandatory naming patterns."
+    },
+    "record_links": {"type": "array", "items": {"$ref": "#/$defs/record_id"}},
+    "scope": {"type": "string", "enum": ["linked", "plan_wide", "unspecified"]},
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["quote", "page_numbers"],
+        "additionalProperties": false,
+        "properties": {
+          "quote": {
+            "$ref": "#/$defs/text",
+            "description": "One exact continuous passage. Separate passages use separate evidence objects."
+          },
+          "page_numbers": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "integer", "minimum": 1},
+            "description": "Physical PDF positions starting at 1, regardless of printed labels."
+          }
+        }
+      }
+    },
+    "plan_info": {
+      "type": "object",
+      "required": [
+        "plan_title", "jurisdiction_name", "country", "plan_scale", "plan_type",
+        "publication_year", "lead_agencies", "source_url", "date_accessed", "language"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "plan_title": {"$ref": "#/$defs/nullable_text"},
+        "jurisdiction_name": {"$ref": "#/$defs/nullable_text"},
+        "country": {"$ref": "#/$defs/nullable_text"},
+        "plan_scale": {"type": ["string", "null"], "enum": ["city", "county", "region", "state", "country", null]},
+        "plan_type": {"type": ["string", "null"], "enum": ["heat_specific_plan", "broader_climate_plan", null]},
+        "publication_year": {"type": ["integer", "null"]},
+        "lead_agencies": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+        "source_url": {
+          "$ref": "#/$defs/text",
+          "description": "Copy the source URL from collection metadata; run setup must check that copy against its saved input."
+        },
+        "date_accessed": {"type": "string", "format": "date"},
+        "language": {"type": "string", "const": "English"}
+      }
+    },
+    "goal": {
+      "type": "object",
+      "required": ["goal_id", "goal", "targets", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "goal_id": {"$ref": "#/$defs/record_id"},
+        "goal": {"$ref": "#/$defs/text"},
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["target", "deadline"],
+            "additionalProperties": false,
+            "properties": {
+              "target": {"$ref": "#/$defs/text"},
+              "deadline": {
+                "$ref": "#/$defs/nullable_text",
+                "description": "Preserve the stated timing and precision; a deadline need not be a calendar date."
+              }
+            }
+          }
+        },
+        "evidence": {"$ref": "#/$defs/evidence"}
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["action_id", "action", "action_status", "related_goal_ids", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {"$ref": "#/$defs/record_id"},
+        "action": {"$ref": "#/$defs/text"},
+        "action_status": {
+          "type": "string",
+          "enum": ["planned", "in_progress", "completed", "discontinued", "not_specified"]
+        },
+        "related_goal_ids": {"$ref": "#/$defs/record_links"},
+        "evidence": {"$ref": "#/$defs/evidence"}
+      }
+    },
+    "mon_eval": {
+      "type": "object",
+      "required": ["mon_eval_id", "mon_eval", "scope", "related_goal_ids", "related_action_ids", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "mon_eval_id": {"$ref": "#/$defs/record_id"},
+        "mon_eval": {"$ref": "#/$defs/text"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "related_goal_ids": {"$ref": "#/$defs/record_links"},
+        "related_action_ids": {"$ref": "#/$defs/record_links"},
+        "evidence": {"$ref": "#/$defs/evidence"}
+      }
+    },
+    "benefit": {
+      "type": "object",
+      "required": ["benefit_id", "benefit", "scope", "related_goal_ids", "related_action_ids", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "benefit_id": {"$ref": "#/$defs/record_id"},
+        "benefit": {"$ref": "#/$defs/text"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "related_goal_ids": {"$ref": "#/$defs/record_links"},
+        "related_action_ids": {"$ref": "#/$defs/record_links"},
+        "evidence": {"$ref": "#/$defs/evidence"}
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["cost_id", "cost", "scope", "related_goal_ids", "related_action_ids", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "cost_id": {"$ref": "#/$defs/record_id"},
+        "cost": {"$ref": "#/$defs/text"},
+        "scope": {"$ref": "#/$defs/scope"},
+        "related_goal_ids": {"$ref": "#/$defs/record_links"},
+        "related_action_ids": {"$ref": "#/$defs/record_links"},
+        "evidence": {"$ref": "#/$defs/evidence"}
+      }
+    }
+  }
+}

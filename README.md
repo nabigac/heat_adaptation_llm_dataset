@@ -1,20 +1,20 @@
 # heat adaptation LLM dataset
 
-this study pairs open-weight large language models (LLMs) with heat adaptation experts to extract documented actions from government plans, with source evidence and any stated costs and benefits. it examines how a verifier changes action quality, supporting evidence, unresolved issues, and computational requirements, while documenting where expert intervention is needed.
+this project develops and evaluates a pipeline pairing open-weight large language models (LLMs) with heat adaptation experts to build an instruction dataset for future fine-tuning. it documents how plans become structured, source-supported action records and compares an extractor alone with the same extractor followed by a different open-weight verifier.
 
 eligible plans span city, county, regional, state, and national governments, with particular interest in city plans. broader plans can address heat adaptation across their jurisdiction without a specific urban focus.
 
 ## project documents
 
-- [design document](DESIGN.md): context and problem, research aims and questions, methods, evaluation, plan dataset fields, and coding rules.
-- [implementation document](IMPLEMENTATION.MD): research requirements, workflow architecture and execution, saved runs and settings, assessment calculations, development evidence, and supporting file formats.
+- [design document](DESIGN.md): context and problem, research objectives, methods, plan dataset fields, coding rules, and evaluation formulas.
+- [implementation document](IMPLEMENTATION.MD): workflow execution, source recovery, saved runs and settings, expert-file processing, instruction dataset assembly, development evidence, and supporting file formats.
 - [structured change log](CHANGELOG.md): decisions, changes, and lessons learned during the study.
 
 ## current progress
 
 part 1, document registration and preparation, is implemented. part 2 now has a working local extraction command: Python loads the selected preparation, prompts, and profile; coordinates Ollama and MCP document tools; checks token budgets and responses; and preserves the run, measurements, and evidence as work proceeds. the tools provide saved page text, exact quotation lookup, and fresh page OCR when enabled.
 
-the latest recorded full suite passed 1,804 tests. live fictional examples completed saved extraction and OCR through real Ollama and MCP. the first full Freetown attempt ran but failed final validation; no accepted full real-plan extraction exists yet. the agreed action-focused design has not been migrated into the current five-category schemas and prompts. verification, expert files, and analysis remain planned. see the [development checkpoint](IMPLEMENTATION.MD#current-development-checkpoint) for evidence and limitations.
+the latest recorded full suite passed 1,804 tests. live fictional examples completed saved extraction and OCR through real Ollama and MCP. the first full Freetown attempt ran but failed final validation; no accepted full real-plan extraction exists yet. the agreed action-focused design has not been migrated into the current five-category schemas and prompts. verification, expert files, analysis, and instruction dataset assembly remain planned. see the [development checkpoint](IMPLEMENTATION.MD#current-development-checkpoint) for evidence and limitations.
 
 ## command line interface
 

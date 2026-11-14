@@ -2,20 +2,22 @@
 
 **Technical implementation · updated 2026-11-14**
 
-This document explains how the software supports the study in [DESIGN.md](DESIGN.md), from preparing source documents to preserving model outputs and calculating expert-assessed results. It describes working components, planned stages, and the evidence available for each. [README.md](README.md) explains available commands.
+This document describes the pipeline for preparing government plans, extracting and verifying heat adaptation records, supporting expert assessment, and assembling an instruction dataset for future fine-tuning. It supports the two objectives in [DESIGN.md](DESIGN.md): documenting the process and comparing E with E+V. Working components and planned stages are distinguished throughout; [README.md](README.md) explains available commands.
 
 ## 1. Purpose and research requirements
 
-The implementation must make the extraction process inspectable and support a consistent comparison between extraction alone (E) and extraction followed by verification (E+V). Software checks test whether the workflow follows specified rules; experts assess the meaning, source support, and correctness of the extracted information.
+The pipeline preserves enough evidence to explain how each output was produced and where expert intervention was needed. It also supports a consistent comparison between extraction alone (E) and the same extraction followed by a different open-weight verifier (E+V). Software checks test execution and format rules; experts assess meaning, source support, and correctness.
 
 | Research need | Implementation requirement |
 | --- | --- |
+| Document the process | Preserved run artifacts and development notes record consequential choices, revisions, failures, and expert interventions. |
 | Trace claims to their source | Preserve the original PDF, selected preparation, page references, quotations, and any additional OCR readings. |
 | Compare E and E+V consistently | Use the same saved extraction and source for each pair; record model settings, prompts, tools, and failed attempts. |
 | Protect independent expert judgment | Keep model outputs hidden during initial reference preparation and preserve references separately from model runs. |
 | Reproduce the analysis | Save measurements and completed assessments, select analysis inputs explicitly, and calculate measures through shared code. |
+| Build instruction examples | Pair extraction instructions and supporting source inputs with expert-curated structured answers after assessment. |
 
-**Implementation status:** the working extractor still uses five content lists: goals, actions, monitoring/evaluation, benefits, and costs. The action-focused format specified in the design document has not yet been implemented. Existing prompts, schemas, code, and saved runs have not been migrated. Verification, expert files, and analysis below describe planned behavior.
+**Implementation status:** the working extractor still uses five content lists: goals, actions, monitoring/evaluation, benefits, and costs. The action-focused format specified in the design document has not yet been implemented. Existing prompts, schemas, code, and saved runs have not been migrated. Verification, expert files, analysis, and instruction-example assembly below describe planned behavior.
 
 ## 2. System architecture and responsibilities
 
@@ -40,7 +42,7 @@ The MCP SDK builds the tool catalogue from function descriptions and argument/re
 
 ## 3. Document collection and preparation
 
-The workflow accepts prescreened government or public-agency plans at city, county, regional, state, and national levels. The particular research interest in city plans informs sample selection; the same registration and preparation workflow applies at every level. Record the document's administrative level in `plan_info.plan_scale`, using `country` for national plans.
+The workflow accepts government or public-agency plans screened against the [study's eligibility criteria](DESIGN.md#eligible-plans).
 
 Registration preserves `data/raw/<plan_id>.pdf` and records its SHA-256 checksum, a fingerprint of the file's bytes. Identical bytes reuse the document; revised bytes receive a new ID. Never replace a registered PDF with different content.
 
@@ -63,6 +65,10 @@ This screening rule can include photographs and miss small charts or images with
 Each attempt gets a new folder. Publish images and page data before its preparation record; validate linked PNGs and crop dimensions when loading. Include every known PDF page once. If neither reader can identify pages, save null page count and an empty page list where possible. Identity, validation, or storage failures may prevent a complete preparation record.
 
 Preserve version 2 readability; new preparations use version 3 with image paths, image regions, and mixed text. Missing old fields are not invented. Preparation status is derived from the explicitly linked record, not duplicated in the registry.
+
+### OCR evidence and source gaps
+
+OCR (optical character recognition) converts image text into machine-readable text and may misread words or numbers. During assessment, experts check recovered quotations against the original PDF, including wording, quantities, and table or chart context. Unreadable material remains a source gap rather than evidence that information is absent. A model's description of a chart does not qualify as a source quotation.
 
 ### Document tools
 
@@ -218,44 +224,45 @@ The saved run combines metadata, content, and review. Expert files use the same 
 
 Track code, tests, dependency settings, schemas, prompts, profiles, registry metadata, and project documents in Git. `AGENTS.md` stays local. Credentials, PDFs, prepared text, runs, model assets, and local diagnostic artifacts are ignored; back up research files separately. Ollama manages its model assets outside this repository. No extra source, batch, review, or artifact IDs are needed.
 
-## 6. Expert assessment and analysis
+## 6. Expert assessment, analysis, and dataset assembly
+
+These stages remain planned. The measures and formulas are specified once in [DESIGN.md appendix F](DESIGN.md#f-evaluation-measures-and-calculations); this section describes the files and checks needed to calculate them and prepare instruction examples.
 
 ### Expert files and measurement
 
-These stages remain planned. Require saved successful E and E+V outputs, linked to each other and the same preparation, before generating or accepting a comparison reference. Generate a blank content template with collection metadata; do not prefill model actions or issues. Experts work from the original PDF without seeing outputs.
+Comparison reference preparation requires saved successful E and E+V outputs linked to the same extraction and preparation. The initial template contains collection metadata and empty content fields, without model actions or issues. Experts complete it from the original PDF before seeing outputs.
 
-After saving the initial reference, create E and E+V assessment templates containing known run links, quotations, pages, and relevant issues. Experts supply semantic matches and judgments. Review additions relative to the initial reference, group duplicate/split descriptions once, and save one shared final reference with evidence and reasons for revisions. Score both outputs against it.
+After the initial reference is saved, separate E and E+V assessment templates contain the known run links, quotations, pages, and relevant issues. Experts supply matches and judgments, review additions, and document corrections in one shared final reference. Both model outputs are assessed against that reference.
 
-Preserve initial references and completed assessments. Later revisions need new named files and explicit analysis selection; both assessments must use the same final reference. Validate coverage before marking complete: every final reference action, supplied quotation/page, distinct addition, and claimed initial issue resolution must be reviewed. Null judgments and undetermined support are pending.
+Completed assessments cover every final reference action, supplied quotation and cited page, distinct addition, and claimed initial issue resolution. A supported quotation must faithfully match the original PDF and justify all fields assigned to it, including the OCR checks described above. Null judgments and undetermined support remain pending.
 
-#### Calculations
+The initial reference and completed files are preserved. Revisions receive new named files, and analysis uses explicitly selected assessments linked to the same final reference. The planned assessment format contains matches, scores, reasons, quotation checks, and resolution judgments needed for the paired review.
 
-All content denominators in the action-focused design count **actions only**. Plan metadata, evidence entries, and issues are not extra actions.
+### Measurement capture and calculation
 
-| Measure | Calculation and interpretation |
+Before expert assessment, Python will calculate operational and issue measures from saved runs. After assessment, it will calculate quality measures from completed expert files. Each E/E+V pair shares one extractor run: its time and tokens are included in both configurations, and verifier usage is added for E+V.
+
+Stage duration includes setup/loading, model and tool requests, evidence saving, validation, repairs, and cleanup. Failed attempts retain their measurements separately. For example, E taking 100 seconds, a failed V attempt taking 30 seconds, and a successful V retry taking 60 seconds yield successful runtimes of 100 seconds for E and 160 seconds for E+V, with one verifier failure reported.
+
+Token totals use provider-reported generation usage rather than preflight estimates. Current EasyOCR contributes runtime but no LLM tokens; any future LLM-based OCR must include its generation usage. Missing required observations make the corresponding total unavailable. The planned `metrics.py` module will apply the design's formulas consistently for CLI and notebook analysis.
+
+### Instruction dataset assembly — planned
+
+After assessment, expert curation will produce the structured answers used in instruction examples. Original E and E+V outputs remain unchanged so that training-data curation cannot alter the comparison results.
+
+| Part of an instruction example | Source |
 | --- | --- |
-| Fully correct action percentage | Final reference actions scored 1 ÷ all final reference actions × 100. |
-| Partial-credit action percentage | Sum of final reference action scores ÷ final reference action count × 100. This is a rubric score, not a probability of correctness. |
-| Additional actions and support | Count distinct additions relative to the initial reference and report supported ÷ all additions × 100. Always accompany reference-based scores with these results because unsupported additions do not lower those scores. |
-| Actions with quotations | Count output actions with at least one nonempty quotation, once per action; also show total actions. Presence does not establish support. |
-| Valid quotation percentage | Quotation uses faithful to the PDF and supporting all assigned claims ÷ all supplied quotation uses × 100. Check OCR visually. Reuse across actions counts as separate uses. |
-| Page-reference correctness | Correct cited pages ÷ all cited pages across quotation uses × 100. Check each cited page separately. |
-| Successful processing runtime | E duration; E+V equals that same duration plus successful V duration. Includes setup/loading, models, tools, saving checkpoints, validation, repair, and cleanup. |
-| Tokens | Sum provider-reported input and output tokens across generation calls in selected successful stages; report input/output separately. Missing required usage makes the relevant total null. |
-| Failures | Count distinct failed comparison attempts by stage, including retries. Count shared extraction failures once and retain their measurements separately. |
-| Issue diagnostics | Count initially open E issues, those V marks resolved, those experts confirm resolved, all open issues in each output, and new V issue IDs, including newly resolved ones. |
+| Task instructions | The extraction instructions and field definitions used for the task. |
+| Source input | The corresponding plan text and any reviewed text recovery needed to support the answer. Relevant source versions and page links remain traceable. |
+| Target answer | The expert-curated plan dataset containing plan information, actions, evidence, and reviewed issues. |
 
-For ten reference actions with six full, two partial, and two omitted, scores are 60% fully correct and 70% partial credit. A correct action with incorrect status receives partial credit. Matching by meaning allows many-to-many matches; duplicates earn no extra credit.
-
-If E takes 100 seconds, V fails after 30 seconds, and its successful retry takes 60 seconds, successful runtimes are E = 100 and E+V = 160 seconds. Report the failure and its measurements separately; these runtimes do not describe total effort. Preparation and human review are excluded. Current EasyOCR adds runtime but no model tokens; any future LLM-based OCR must count its generation usage.
-
-Keep pairs together by plan and report underlying counts and the plan's administrative level. Missing required observations make a total unavailable; zero denominators are not applicable. The proposed aggregate is the mean of valid per-plan percentages with the number of contributing plans; confirm during the development assessment. Do not infer expert review time from issue counts.
-
-An expert marks a quotation supported only when its wording/numbers faithfully match the original PDF and all assigned claims are supported. Missing evidence remains a separate extraction problem: percentages over supplied quotes cannot detect absent quotations by themselves. Issue resolutions are model claims until confirmed by experts.
+An output becomes a training target only after expert review; passing JSON validation alone is insufficient. Unsupported content is corrected or excluded, and any recovered source information needed for the target is included in its input. Assessment records preserve the reasons for corrections. The export format will be specified during the curation pilot; model fine-tuning is a future use of the resulting dataset.
 
 ## 7. Development evidence and remaining work
 
-The results below describe engineering checks and development observations. They do not constitute the study's expert evaluation or establish extraction accuracy.
+The process account will draw on preparation notes, preserved model/tool evidence, expert assessments, and concise development notes about choices, revisions, failures, and their consequences. Proposed improvements remain distinct from observed results.
+
+The checkpoint below reports engineering checks and development observations, not the completed expert evaluation.
 
 ### Current development checkpoint
 
@@ -269,7 +276,7 @@ The results below describe engineering checks and development observations. They
 | First full Freetown attempt | `run_extract_0001` ended as failed after 1,156.61 seconds. Five model requests completed normally, ten page-text tools were called, and final generation used 12,575 output tokens. Two scope/link contradictions in the earlier content format failed validation. Accepted content and review remain null. |
 | Diagnostic source review | Of 51 candidate quotation uses, 27 matched prepared text on other pages, consistently one page earlier than cited; 24 need further source review, and ten contain ellipses. These are diagnostic text checks, not expert quality scores. |
 | Subsequent prompt clarification | Existing five-category prompts were clarified for source-supported links, physical PDF page citations, and continuous quotations. 436 targeted tests passed; effects on model behavior are **Not yet tested**. |
-| Later stages | No accepted full real-plan extraction, verifier run, expert reference, assessment, or comparison result exists yet. The second development plan remains outstanding. |
+| Later stages | No accepted full real-plan extraction, verifier run, expert reference, assessment, comparison result, or curated instruction dataset exists yet. The second development plan remains outstanding. |
 
 The [change log](CHANGELOG.md) preserves dated results and limitations. Local evidence includes the Part 1 and Part 2 handoffs and `artifacts/freetown_run_extract_0001_review_2026-11-14/`; these ignored files are absent from a fresh clone. Historical diagnostic scripts may generate new answers and are not automatically portable replays.
 
@@ -283,6 +290,7 @@ Earlier capacity checks demonstrated a 54,013-token input with 1,525 output toke
 4. **Implement verification.** Test a verifier model, profile, prompt, and runner against the exact saved extraction and source. Preserve continuing action/issue IDs and review unflagged content and omissions.
 5. **Pilot expert files and calculations.** Work through coding and assessment examples before freezing comparison settings. Implement only the agreed measures.
 6. **Run the fixed comparison.** Select the five plans and preserve independent references, paired outputs, assessments, failures, and analysis inputs.
+7. **Assemble the instruction dataset.** After assessment, curate supported targets and pair them with task instructions and sufficient source inputs; define and check the export format.
 
 A related reproducibility gap needs attention before comparison: completed-run loading validates the linked preparation, PDF, and images, but does not compare the loaded page text against the startup fingerprint saved in `artifacts/extractor_input.json`. During-run fingerprint checks exist. File preservation by the normal workflow does not protect against later manual edits to prepared text. Address this explicitly when implementing source-integrity checks.
 
@@ -290,7 +298,7 @@ Direct image delivery, hosted providers, richer status listing, broader datasets
 
 ## Appendix: supporting JSON files
 
-These tables describe the workflow's saved files alongside the [plan dataset specification](DESIGN.md#appendix-plan-dataset-and-coding-rules). Operational file formats are implemented; the action-focused run format and expert-file formats remain **planned**. Existing version 1 runs retain their earlier five-category content.
+These tables describe the workflow's saved files alongside the [plan dataset specification](DESIGN.md#appendix-dataset-coding-rules-and-evaluation). Operational file formats are implemented; the action-focused run format and expert-file formats remain **planned**. Existing version 1 runs retain their earlier five-category content.
 
 All fields are required unless stated otherwise. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are project-relative. Types and null conventions follow DESIGN.md. “Evidence object” and “content” refer to its appendix; saved runs and expert files will use the action-focused content after migration.
 

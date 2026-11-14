@@ -2,6 +2,8 @@
 
 this study pairs open-weight large language models (LLMs) with heat adaptation experts to extract documented actions from government plans, with source evidence and any stated costs and benefits. it examines how a verifier changes action quality, supporting evidence, unresolved issues, and computational requirements, while documenting where expert intervention is needed.
 
+eligible plans span city, county, regional, state, and national governments, with particular interest in city plans. broader plans can address heat adaptation across their jurisdiction without a specific urban focus.
+
 ## project documents
 
 - [design document](DESIGN.md): context and problem, research aims and questions, methods, evaluation, and full output field tables.

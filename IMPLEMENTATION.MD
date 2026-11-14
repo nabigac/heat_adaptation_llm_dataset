@@ -40,6 +40,8 @@ The MCP SDK builds the tool catalogue from function descriptions and argument/re
 
 ## 3. Document collection and preparation
 
+The workflow accepts prescreened government or public-agency plans at city, county, regional, state, and national levels. The particular research interest in city plans informs sample selection; the same registration and preparation workflow applies at every level. Record the document's administrative level in `plan_info.plan_scale`, using `country` for national plans.
+
 Registration preserves `data/raw/<plan_id>.pdf` and records its SHA-256 checksum, a fingerprint of the file's bytes. Identical bytes reuse the document; revised bytes receive a new ID. Never replace a registered PDF with different content.
 
 `update` changes only explicitly supplied title, source URL, access date, or study set after validating the complete proposed entry. Omitted values remain unchanged; an unchanged update writes nothing. Development assignments stay fixed. Other study-set changes are permitted only before model work is saved. Each preparation snapshots the then-current source URL and access date; later corrections do not rewrite completed work.
@@ -245,7 +247,7 @@ For ten reference actions with six full, two partial, and two omitted, scores ar
 
 If E takes 100 seconds, V fails after 30 seconds, and its successful retry takes 60 seconds, successful runtimes are E = 100 and E+V = 160 seconds. Report the failure and its measurements separately; these runtimes do not describe total effort. Preparation and human review are excluded. Current EasyOCR adds runtime but no model tokens; any future LLM-based OCR must count its generation usage.
 
-Keep pairs together by plan and report underlying counts. Missing required observations make a total unavailable; zero denominators are not applicable. The proposed aggregate is the mean of valid per-plan percentages with the number of contributing plans; confirm during the development assessment. Do not infer expert review time from issue counts.
+Keep pairs together by plan and report underlying counts and the plan's administrative level. Missing required observations make a total unavailable; zero denominators are not applicable. The proposed aggregate is the mean of valid per-plan percentages with the number of contributing plans; confirm during the development assessment. Do not infer expert review time from issue counts.
 
 An expert marks a quotation supported only when its wording/numbers faithfully match the original PDF and all assigned claims are supported. Missing evidence remains a separate extraction problem: percentages over supplied quotes cannot detect absent quotations by themselves. Issue resolutions are model claims until confirmed by experts.
 

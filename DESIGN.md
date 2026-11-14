@@ -1,21 +1,23 @@
-# Heat adaptation: an expert–LLM extraction workflow
+# Design Doc: Heat Adaptation LLM Dataset
 
 **Research design · updated 2026-11-14**
 
-This study will evaluate a workflow in which large language models (LLMs) extract documented heat adaptation actions and experts assess their quality. The main contribution is an evaluated expert–LLM workflow: what it gets right, where it fails, and what expert intervention is needed. A source-linked action dataset is a study output.
+## 1. Context and problem
 
-**Agreed scope:** plan information, action records, and review issues. There are no separate goal, monitoring/evaluation, benefit, or cost records. Costs and benefits belong to the action they describe. `action_type` allows multiple categories.
+To compare how cities address heat, we need a consistent account of the actions their plans describe. Producing that account requires interpreting text and tables, combining repeated descriptions, and preserving details such as implementation status, recipients, costs, and expected benefits. An extraction can be well structured yet omit an action, misstate a detail, or cite evidence that does not support its claims.
 
-**Implementation status:** registration, document preparation, and a local extractor exist. The current schemas and prompts still use the earlier five-category design; the action-focused specification below has not been implemented. Verification, expert assessment, and analysis remain planned. See [IMPLEMENTATION.MD](IMPLEMENTATION.MD) for technical details and observed development results; [README.md](README.md) explains available commands.
+The substantive question is **what cities document doing or planning to do about heat, and how they describe those actions**. Plans provide evidence of stated intentions and reported implementation. They do not independently establish what happened on the ground or whether an action reduced heat risk.
 
-## 1. Research questions and scope
+Large language models (LLMs) could help organize this evidence, but their outputs need to be checked against source documents and expert judgments.
+
+## 2. Research aim and questions
+
+This study will evaluate a workflow in which LLMs extract documented heat adaptation actions and experts assess their quality. The main contribution is an evaluated expert–LLM workflow: what it gets right, where it fails, and what expert intervention is needed. A source-linked heat adaptation action dataset is a study output.
 
 1. How reliably can the workflow identify and describe heat adaptation actions documented in public plans?
 2. How does adding an LLM verifier change action quality, supporting evidence, unresolved issues, and computational requirements?
 
-The substantive question is **what cities document doing or planning to do about heat, and how they describe those actions**. Plans provide evidence of stated intentions and reported implementation. They do not independently establish what happened on the ground or whether an action reduced heat risk.
-
-The extraction unit is one distinct action in one plan. Repeated mentions do not create new actions. Counts describe documented actions under our coding rules, not adaptation effort, investment, or effectiveness. Document length, detail, and the way actions are separated affect counts; do not rank cities by counts alone.
+## 3. Methods
 
 ### Eligible plans
 
@@ -23,7 +25,21 @@ Experts screen final, publicly available government or public-agency plans in En
 
 The intended interpretation is city heat adaptation. Before selecting comparison plans, fix whether broader county, regional, state, or national plans are eligible when they address cities. The metadata can represent these scales; supporting a value in software does not make it part of the study sample.
 
-## 2. What counts as an action
+### Study sample
+
+| Study set | Planned size | Purpose |
+| --- | --- | --- |
+| Development | 2 plans | Inspect outputs openly, refine coding and software, and pilot expert assessment. |
+| Comparison | 5 separate plans | Compare extraction with and without verification against independent expert work. |
+| Expansion | Deferred | Build a larger dataset after the evaluated workflow works. |
+
+The comparison size is based on workload, not a statistical power calculation. Select varied lengths, layouts, and plan types; avoid near copies. Keep development plans out of comparison and fix the comparison selection before model runs.
+
+### Extraction unit and action coding
+
+The extraction unit is one distinct action in one plan. Repeated mentions do not create new actions. Counts describe documented actions under our coding rules, not adaptation effort, investment, or effectiveness. Document length, detail, and the way actions are separated affect counts; do not rank cities by counts alone.
+
+Each output contains plan information, action records with supporting evidence, and issues requiring review. Costs and benefits are recorded with the action they describe. The appendix specifies the complete output format.
 
 Coding means assigning source information to defined fields and categories. Include a specific intervention or activity explicitly connected to reducing heat risks or enabling heat adaptation. A heat-specific heading can establish this connection. Do not infer heat relevance from a general climate, greening, or health measure.
 
@@ -60,17 +76,9 @@ OCR (optical character recognition) converts image text into machine-readable te
 
 Issues identify problems needing review. Bundle concerns about the same action into one issue; use an unlinked issue for an omission or source gap. Ordinary unstated details do not automatically need issues. A verifier retains existing issue IDs, may add issues, and explains any claimed resolution. Expert assessment determines whether that resolution is justified. Exclude unresolved unsupported material from a curated release.
 
-## 3. Study and workflow
+### Workflow and comparison
 
 Use open-weight models, whose trained parameters are available for download. An agent is a model in a loop that can request tools before answering. Model Context Protocol (MCP) is the interface used here to connect that loop to document tools; it is an implementation choice, not a separate experimental treatment.
-
-| Study set | Planned size | Purpose |
-| --- | --- | --- |
-| Development | 2 plans | Inspect outputs openly, refine coding and software, and pilot expert assessment. |
-| Comparison | 5 separate plans | Compare extraction with and without verification against independent expert work. |
-| Expansion | Deferred | Build a larger dataset after the evaluated workflow works. |
-
-The comparison size is based on workload, not a statistical power calculation. Select varied lengths, layouts, and plan types; avoid near copies. Keep development plans out of comparison and fix the comparison selection before model runs.
 
 | Step | Work and saved result |
 | --- | --- |
@@ -85,7 +93,11 @@ Use the first successful comparison extractor run and the first successful verif
 
 Fix models, prompts, preparation, tools, coding rules, and scoring before comparison. Document any later revision and do not silently combine different study setups. Both configurations share the same extraction; the comparison evaluates the tested model pair and workflow, not the isolated effect of MCP, open weights, or model family.
 
-## 4. Expert assessment and interpretation
+The action-focused protocol remains under development. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) distinguishes working software from planned stages and records the development evidence; [README.md](README.md) explains available commands.
+
+## 4. Evaluation
+
+### Expert reference and scoring
 
 The expert reference is an independently coded comparison dataset, not an assumption of infallible ground truth. Preserve initial matches, review supported additions, and record corrections in one shared final reference. Assess both saved outputs before making expert corrections to them.
 
@@ -99,12 +111,16 @@ Match actions by meaning. Several output records may cover one reference action,
 
 Action type, status, location, recipients, costs, benefits, and relevant detail in the description are assessed under the same coding rules. Correctly recording an unstated detail does not reduce the score. Assess quotations and page citations separately; plan metadata and issues are not additional actions.
 
+### Evaluation outcomes
+
 | Outcome | How it is assessed |
 | --- | --- |
 | Action coverage and correctness | Report the fully correct reference-action percentage and partial-credit score percentage. Always accompany them with counts and support judgments for distinct additions beyond the initial reference; unsupported additions do not lower a reference-based score. |
 | Evidence quality | Report actions with quotations, the percentage of supplied quotation uses that faithfully support their assigned claims, and the percentage of cited pages that are correct. Missing evidence must remain visible. |
 | Computational requirements | Report successful processing time, input/output tokens, and failed attempts. E+V includes the shared extractor plus verifier. Successful-run time excludes preparation, human review, and failed-attempt time; report failures separately. |
 | Issues and expert intervention | Report open issues, claimed and expert-confirmed resolutions, and concrete examples of needed corrections. Issue counts do not measure expert review time. |
+
+### Analysis and limitations
 
 Detailed calculations and expert-file definitions are in [IMPLEMENTATION.MD](IMPLEMENTATION.MD#expert-files-and-measurement). Pending judgments remain pending, not zero. A percentage with a zero denominator is not applicable. Report per-plan counts and paired changes; summaries are descriptive given the small, selected sample.
 
@@ -114,7 +130,7 @@ Before comparison, pilot the action definitions and scoring with experts, resolv
 
 A **schema** defines an object's fields, types, and permitted values. An **object** groups named fields; a **list** holds zero or more items; an **enum** limits a value to named choices. `null` means unavailable, not zero.
 
-This appendix defines the complete intended model answer and saved run object, including nested fields. It is the **action-focused target**, not the contract currently enforced by `schemas/`. Operational files and expert assessment files are documented in [IMPLEMENTATION.MD](IMPLEMENTATION.MD#supporting-json-files). The code migration must version the changed format and preserve earlier five-category runs.
+This appendix defines the complete intended model answer and saved run object, including nested fields. It is the **action-focused target**, not the contract currently enforced by `schemas/`. Operational files and expert assessment files are documented in [IMPLEMENTATION.MD](IMPLEMENTATION.MD#appendix-supporting-json-files). The code migration must version the changed format and preserve earlier five-category runs.
 
 All fields are required unless marked optional. Text is nonblank unless stated otherwise. Dates use `YYYY-MM-DD`; timestamps use UTC; paths are project-relative; durations are seconds. IDs must resolve within the relevant document/run, and cited pages must be within the original PDF.
 
@@ -156,7 +172,7 @@ Within `content`:
 | `action_id` | string | Stable local ID, such as `action_0001`. |
 | `action` | string | Description of one distinct action, including stated implementers, quantities, timing, conditions, and other relevant details. |
 | `action_type` | list of unique enum values | Any supported combination of `infrastructural`, `institutional`, `behavioral/cultural`, and `nature-based`. Use `[]` if no type can be justified and flag the classification uncertainty. |
-| `action_status` | enum | `planned`, `underway`, `completed`, or `unspecified`, as defined in section 2. |
+| `action_status` | enum | `planned`, `underway`, `completed`, or `unspecified`, as defined in section 3. |
 | `action_location` | string or null | Stated places or geographic coverage; preserve multiple locations in the description. |
 | `action_recipient` | string or null | Stated intended recipients, populations, or affected groups; preserve multiple groups in the description. |
 | `action_cost` | string or null | Source-linked description of amounts, currency/units, periods, cost character, and qualifications. Explicitly identify shared amounts. |

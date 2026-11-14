@@ -1,43 +1,23 @@
-# Implementation reference
+# Implementation Doc: Heat Adaptation LLM Dataset
 
-**Technical reference · updated 2026-11-14**
+**Technical implementation · updated 2026-11-14**
 
-[DESIGN.md](DESIGN.md) defines the research questions, action coding rules, comparison procedure, and full intended output JSON. [README.md](README.md) explains available commands. This document explains how the software works, what has been tested, and what remains to build.
+This document explains how the software supports the study in [DESIGN.md](DESIGN.md), from preparing source documents to preserving model outputs and calculating expert-assessed results. It describes working components, planned stages, and the evidence available for each. [README.md](README.md) explains available commands.
 
-**Current versus intended:** the working extractor still uses five content lists: goals, actions, monitoring/evaluation, benefits, and costs. The agreed action-focused format is documentation only. Existing prompts, schemas, code, and saved runs have not been migrated. Verification, expert files, and analysis below describe planned behavior.
+## 1. Purpose and research requirements
 
-## Current development checkpoint
+The implementation must make the extraction process inspectable and support a consistent comparison between extraction alone (E) and extraction followed by verification (E+V). Software checks test whether the workflow follows specified rules; experts assess the meaning, source support, and correctness of the extracted information.
 
-| Area | Observed status |
+| Research need | Implementation requirement |
 | --- | --- |
-| Registration and preparation | Implemented. Freetown `plan_0001/preparation_02` contains 46 pages: 34 native and 12 mixed, with 19 candidate image regions on 14 pages. It remains `ready_with_gaps`. |
-| Saved local extraction | Implemented: complete input assembly, model/tool loop, request limits, response validation, incremental evidence saving, and CLI. |
-| Automated checks | The latest recorded full suite passed 1,804 tests with 11 dependency warnings. Most model replies are controlled fixtures; tests do not establish extraction accuracy. |
-| Live integration examples | Fictional prepared-text and image-only runs completed through real Ollama and MCP. The image example recovered “OPEN 3 COOLING CENTRES BY 2028” through OCR, but also raised a goal/action coding question under the earlier format. |
-| Runtime compatibility | Local token accounting has been checked for Ollama 0.40.14 and 0.40.16 with the supported Qwen setup. A 0.40.16 fictional run succeeded in 193.92 seconds with matching counted/reported inputs; an oversized request was blocked. |
-| First full Freetown attempt | `run_extract_0001` ended as failed after 1,156.61 seconds. Five model requests completed normally, ten page-text tools were called, and final generation used 12,575 output tokens. Two scope/link contradictions in the earlier content format failed validation. Accepted content and review remain null. |
-| Diagnostic source review | Of 51 candidate quotation uses, 27 matched prepared text on other pages, consistently one page earlier than cited; 24 need further source review, and ten contain ellipses. These are diagnostic text checks, not expert quality scores. |
-| Subsequent prompt clarification | Existing five-category prompts were clarified for source-supported links, physical PDF page citations, and continuous quotations. 436 targeted tests passed; effects on model behavior are **Not yet tested**. |
-| Later stages | No accepted full real-plan extraction, verifier run, expert reference, assessment, or comparison result exists yet. The second development plan remains outstanding. |
+| Trace claims to their source | Preserve the original PDF, selected preparation, page references, quotations, and any additional OCR readings. |
+| Compare E and E+V consistently | Use the same saved extraction and source for each pair; record model settings, prompts, tools, and failed attempts. |
+| Protect independent expert judgment | Keep model outputs hidden during initial reference preparation and preserve references separately from model runs. |
+| Reproduce the analysis | Save measurements and completed assessments, select analysis inputs explicitly, and calculate measures through shared code. |
 
-The [change log](CHANGELOG.md) preserves dated results and limitations. Local evidence includes the Part 1 and Part 2 handoffs and `artifacts/freetown_run_extract_0001_review_2026-11-14/`; these ignored files are absent from a fresh clone. Historical diagnostic scripts may generate new answers and are not automatically portable replays.
+**Implementation status:** the working extractor still uses five content lists: goals, actions, monitoring/evaluation, benefits, and costs. The action-focused format specified in the design document has not yet been implemented. Existing prompts, schemas, code, and saved runs have not been migrated. Verification, expert files, and analysis below describe planned behavior.
 
-Earlier capacity checks demonstrated a 54,013-token input with 1,525 output tokens at a 65,536-token context setting. Generation at the current full 73,728-context and 16,384-output limits is **Not yet tested**. Small-fixture success and token fit are not complete capacity or accuracy benchmarks.
-
-## Next implementation steps
-
-1. **Migrate the extraction contract together.** Update content/run schemas, shared field definitions, prompts, validation, fixtures, and tests for plan information, actions, and issues. Use exactly the nine agreed action fields; `action_type` is a list of unique categories. Remove goal links and separate goal/monitoring/benefit/cost lists from new outputs. Version the changed format and preserve the interpretation and readability of earlier saved runs.
-2. **Check a small action-focused example.** Exercise overlapping types, repeated actions, unstated fields, shared costs, expected versus reported benefits, quotations, and physical page citations. Check source meaning as well as JSON validity.
-3. **Complete development extraction.** Start separately identified real-plan runs, retain earlier failures, and inspect results against the PDF. Continue with the second development plan and focused OCR checks.
-4. **Implement verification.** Test a verifier model, profile, prompt, and runner against the exact saved extraction and source. Preserve continuing action/issue IDs and review unflagged content and omissions.
-5. **Pilot expert files and calculations.** Work through coding and assessment examples before freezing comparison settings. Implement only the agreed measures.
-6. **Run the fixed comparison.** Select the five plans and preserve independent references, paired outputs, assessments, failures, and analysis inputs.
-
-A related reproducibility gap needs attention before comparison: completed-run loading validates the linked preparation, PDF, and images, but does not compare the loaded page text against the startup fingerprint saved in `artifacts/extractor_input.json`. During-run fingerprint checks exist. File preservation by the normal workflow does not protect against later manual edits to prepared text. Address this explicitly when implementing source-integrity checks.
-
-Direct image delivery, hosted providers, richer status listing, broader datasets, publication packaging, and fine-tuning are deferred. They are not prerequisites for establishing a useful action-extraction baseline.
-
-## System responsibilities
+## 2. System architecture and responsibilities
 
 Python owns file identity, orchestration, validation, measurements, and saving. Models interpret source material and request tools; experts establish source support and correctness. A module is a Python file grouping related functions.
 
@@ -58,7 +38,7 @@ The extractor acts as the MCP client, starting `document_tools.py` as a local su
 
 The MCP SDK builds the tool catalogue from function descriptions and argument/result types. Python converts it into Ollama's tool format and validates requests before execution. Tools accept page numbers or quotations, not arbitrary paths, URLs, or executable instructions. Source text is evidence, never agent instructions. Expert files stay outside agent access, including on reruns.
 
-## Registration and document preparation
+## 3. Document collection and preparation
 
 Registration preserves `data/raw/<plan_id>.pdf` and records its SHA-256 checksum, a fingerprint of the file's bytes. Identical bytes reuse the document; revised bytes receive a new ID. Never replace a registered PDF with different content.
 
@@ -94,7 +74,9 @@ The server checks PDF identity and preparation/page fingerprints at startup. A f
 
 A failed reading can return a recoverable error to the model. Timeout, protocol failure, or inability to preserve evidence stops the run. Full-page tool OCR exists; direct model image delivery and tool-requested regional OCR remain unimplemented. Preparation already supports regional OCR. A literal quotation match does not establish support for a claim.
 
-## Models and profiles
+## 4. Model configuration and execution
+
+### Models and profiles
 
 The current local development profile is `qwen35_27b_extractor_development`, using `qwen3.5:27b` at `http://localhost:11434`. The recorded development machine is an Apple M5 Pro with 64 GB memory. Actual run metadata records observed hardware rather than assuming these specifications.
 
@@ -116,7 +98,7 @@ The installed weights use the safetensors/MLX serving path (weight storage and m
 
 Future hosted APIs would change the model connection while tools and saved files stay local. Hosting is a development option, not an additional experimental configuration. Capability and token-counting support require validation before use.
 
-## Prompts, response schema, and token budgeting
+### Prompts, response schema, and token budgeting
 
 Prompts explain meaning and coding rules. The ordered extractor files are `shared_coding.md`, `field_definitions.md`, and `extractor.md`. The current files retain the earlier five-category instructions. The loader preserves each exact text; input assembly joins them with two newlines into one system message. Collection metadata, physical page numbers, preparation notes, and every prepared page go in a user message. The runner adds tool/final-phase instructions separately.
 
@@ -126,7 +108,7 @@ A JSON Schema specifies machine-readable structure. Final Ollama requests send m
 
 `prepare_ollama_response_schema()` derives a fresh provider copy from authoritative content and response schemas. It expands known local references and rewrites the nonblank-string pattern into an equivalent whole-string form tested with Ollama. Unsupported conversions fail rather than dropping constraints. Preserve the exact sent schema; do not maintain an independently edited provider contract.
 
-### Before every model request
+#### Before every model request
 
 1. Render the complete request with the validated Ollama render-only facility, which returns the prompt without generating an answer.
 2. Count it with the matching installed tokenizer, the software that converts text into token IDs. Verify runtime version, model identity, and tokenizer fingerprints.
@@ -142,7 +124,7 @@ Use the same body for rendering and generation. On the tested path, the final sc
 
 If capacity is exceeded or reliable counting is unavailable, stop before generation. Do not silently truncate, reduce the output reservation, or switch to document chunks. No-truncation options and usage checks are additional safeguards. Preflight evidence includes counts, remaining capacity, request/rendered-prompt checksums, runtime/model/tokenizer identities, errors, and HTTP bodies. These counts are not provider usage and do not fill missing `model_calls` token values. Metadata and render-only operations are not extra research generation calls.
 
-## Extractor control
+### Extractor control
 
 1. Assemble the complete source and prompts and discover the source-bound MCP tools.
 2. Count and send a tool-phase request. Accept validated tool calls or `READY_FOR_FINAL_RESPONSE` with optional outer whitespace. Other control text or premature final JSON fails rather than triggering an automatic correction.
@@ -155,7 +137,9 @@ The loop returns execution evidence; the saved wrapper adds checkpoints and fina
 
 This two-phase approach follows a development observation: imposing the final schema during tool selection suppressed a needed tool request in one synthetic example. Later fixtures worked with separate phases. This does not establish universal behavior for other models or runtimes.
 
-## Saved extractor execution
+## 5. Run records and reproducibility
+
+### Saved extractor execution
 
 Before execution, the saved wrapper freezes the selected input/settings and observes local hardware, software versions, and Git state. It then allocates a new run folder and creates `output.json` with status `running`. Ollama's loaded-model list is checked before render-only operations can load the model; model details supply quantization when disclosed. Missing optional observations remain null rather than being inferred from user-reported specifications. Original metadata response bodies and observation errors are retained.
 
@@ -230,7 +214,9 @@ The saved run combines metadata, content, and review. Expert files use the same 
 
 Track code, tests, dependency settings, schemas, prompts, profiles, registry metadata, and project documents in Git. `AGENTS.md` stays local. Credentials, PDFs, prepared text, runs, model assets, and local diagnostic artifacts are ignored; back up research files separately. Ollama manages its model assets outside this repository. No extra source, batch, review, or artifact IDs are needed.
 
-## Expert files and measurement
+## 6. Expert assessment and analysis
+
+### Expert files and measurement
 
 These stages remain planned. Require saved successful E and E+V outputs, linked to each other and the same preparation, before generating or accepting a comparison reference. Generate a blank content template with collection metadata; do not prefill model actions or issues. Experts work from the original PDF without seeing outputs.
 
@@ -238,7 +224,7 @@ After saving the initial reference, create E and E+V assessment templates contai
 
 Preserve initial references and completed assessments. Later revisions need new named files and explicit analysis selection; both assessments must use the same final reference. Validate coverage before marking complete: every final reference action, supplied quotation/page, distinct addition, and claimed initial issue resolution must be reviewed. Null judgments and undetermined support are pending.
 
-### Calculations
+#### Calculations
 
 All content denominators in the action-focused design count **actions only**. Plan metadata, evidence entries, and issues are not extra actions.
 
@@ -263,7 +249,42 @@ Keep pairs together by plan and report underlying counts. Missing required obser
 
 An expert marks a quotation supported only when its wording/numbers faithfully match the original PDF and all assigned claims are supported. Missing evidence remains a separate extraction problem: percentages over supplied quotes cannot detect absent quotations by themselves. Issue resolutions are model claims until confirmed by experts.
 
-## Supporting JSON files
+## 7. Development evidence and remaining work
+
+The results below describe engineering checks and development observations. They do not constitute the study's expert evaluation or establish extraction accuracy.
+
+### Current development checkpoint
+
+| Area | Observed status |
+| --- | --- |
+| Registration and preparation | Implemented. Freetown `plan_0001/preparation_02` contains 46 pages: 34 native and 12 mixed, with 19 candidate image regions on 14 pages. It remains `ready_with_gaps`. |
+| Saved local extraction | Implemented: complete input assembly, model/tool loop, request limits, response validation, incremental evidence saving, and CLI. |
+| Automated checks | The latest recorded full suite passed 1,804 tests with 11 dependency warnings. Most model replies are controlled fixtures; tests do not establish extraction accuracy. |
+| Live integration examples | Fictional prepared-text and image-only runs completed through real Ollama and MCP. The image example recovered “OPEN 3 COOLING CENTRES BY 2028” through OCR, but also raised a goal/action coding question under the earlier format. |
+| Runtime compatibility | Local token accounting has been checked for Ollama 0.40.14 and 0.40.16 with the supported Qwen setup. A 0.40.16 fictional run succeeded in 193.92 seconds with matching counted/reported inputs; an oversized request was blocked. |
+| First full Freetown attempt | `run_extract_0001` ended as failed after 1,156.61 seconds. Five model requests completed normally, ten page-text tools were called, and final generation used 12,575 output tokens. Two scope/link contradictions in the earlier content format failed validation. Accepted content and review remain null. |
+| Diagnostic source review | Of 51 candidate quotation uses, 27 matched prepared text on other pages, consistently one page earlier than cited; 24 need further source review, and ten contain ellipses. These are diagnostic text checks, not expert quality scores. |
+| Subsequent prompt clarification | Existing five-category prompts were clarified for source-supported links, physical PDF page citations, and continuous quotations. 436 targeted tests passed; effects on model behavior are **Not yet tested**. |
+| Later stages | No accepted full real-plan extraction, verifier run, expert reference, assessment, or comparison result exists yet. The second development plan remains outstanding. |
+
+The [change log](CHANGELOG.md) preserves dated results and limitations. Local evidence includes the Part 1 and Part 2 handoffs and `artifacts/freetown_run_extract_0001_review_2026-11-14/`; these ignored files are absent from a fresh clone. Historical diagnostic scripts may generate new answers and are not automatically portable replays.
+
+Earlier capacity checks demonstrated a 54,013-token input with 1,525 output tokens at a 65,536-token context setting. Generation at the current full 73,728-context and 16,384-output limits is **Not yet tested**. Small-fixture success and token fit are not complete capacity or accuracy benchmarks.
+
+### Next implementation steps
+
+1. **Migrate the extraction contract together.** Update content/run schemas, shared field definitions, prompts, validation, fixtures, and tests for plan information, actions, and issues. Use exactly the nine agreed action fields; `action_type` is a list of unique categories. Remove goal links and separate goal/monitoring/benefit/cost lists from new outputs. Version the changed format and preserve the interpretation and readability of earlier saved runs.
+2. **Check a small action-focused example.** Exercise overlapping types, repeated actions, unstated fields, shared costs, expected versus reported benefits, quotations, and physical page citations. Check source meaning as well as JSON validity.
+3. **Complete development extraction.** Start separately identified real-plan runs, retain earlier failures, and inspect results against the PDF. Continue with the second development plan and focused OCR checks.
+4. **Implement verification.** Test a verifier model, profile, prompt, and runner against the exact saved extraction and source. Preserve continuing action/issue IDs and review unflagged content and omissions.
+5. **Pilot expert files and calculations.** Work through coding and assessment examples before freezing comparison settings. Implement only the agreed measures.
+6. **Run the fixed comparison.** Select the five plans and preserve independent references, paired outputs, assessments, failures, and analysis inputs.
+
+A related reproducibility gap needs attention before comparison: completed-run loading validates the linked preparation, PDF, and images, but does not compare the loaded page text against the startup fingerprint saved in `artifacts/extractor_input.json`. During-run fingerprint checks exist. File preservation by the normal workflow does not protect against later manual edits to prepared text. Address this explicitly when implementing source-integrity checks.
+
+Direct image delivery, hosted providers, richer status listing, broader datasets, publication packaging, and fine-tuning are deferred. They are not prerequisites for establishing a useful action-extraction baseline.
+
+## Appendix: supporting JSON files
 
 These tables complete the file reference alongside the [full output specification](DESIGN.md#appendix-full-output-json-specification). They describe implemented operational formats and **planned** expert formats. All fields are required unless stated otherwise. Types, dates, paths, and null conventions follow DESIGN.md. “Evidence object” and “content” refer to its appendix; expert content will use the action-focused format after migration.
 

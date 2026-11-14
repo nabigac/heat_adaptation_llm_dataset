@@ -4,8 +4,8 @@ this study pairs open-weight large language models (LLMs) with heat adaptation e
 
 ## project documents
 
-- [research design](DESIGN.md): action-focused scope, coding rules, study workflow, evaluation, and full output field tables.
-- [implementation reference](IMPLEMENTATION.MD): software behavior, settings, supporting files, development evidence, and remaining work.
+- [design document](DESIGN.md): context and problem, research aims and questions, methods, evaluation, and full output field tables.
+- [implementation document](IMPLEMENTATION.MD): research requirements, system architecture, document and model processing, reproducibility, assessment, development evidence, and supporting files.
 - [structured change log](CHANGELOG.md): decisions, changes, and lessons learned during the study.
 
 ## current progress

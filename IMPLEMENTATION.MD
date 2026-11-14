@@ -6,11 +6,11 @@ This document specifies how to implement the study in [DESIGN.md](DESIGN.md). It
 
 ## 1. Purpose and research requirements
 
-The pipeline must preserve how each output was produced and support a paired comparison of extraction alone (E) with that same extraction revised by a different model (E+V). Software validates structure and execution. Experts assess source meaning, correctness, and evidence.
+The pipeline supports iterative work between heat adaptation experts and LLMs. Preserved examples of model outputs, expert judgments, revisions, and observed outcomes will support practical lessons about building the workflow. It also supports a paired comparison of extraction alone (E) with that same extraction revised by a different model (E+V). Software validates structure and execution, while experts assess source meaning, correctness, and evidence.
 
 | Research need | Implementation requirement |
 | --- | --- |
-| Document development | Preserve consequential decisions, failures, tool activity, and expert interventions. |
+| Explain how the workflow was built | Preserve examples linking expert judgments and model outputs to decisions, revisions, failures, and lessons learned. |
 | Trace claims | Preserve PDFs, selected page text, quotations, page references, and additional OCR readings. |
 | Compare paired outputs | Link V to the exact successful E run and source, with frozen settings and retained failures. |
 | Protect expert reference preparation | Hide model outputs until the independent initial reference has been completed and validated. |
@@ -20,11 +20,13 @@ The pipeline must preserve how each output was produced and support a paired com
 | Component | Status |
 | --- | --- |
 | Registration, preparation, and saved local extraction | Implemented. |
-| Action-focused format and grouping | Planned migration. Current prompts, schemas, validation, and saved runs use five content lists. |
+| Action and issue formats | Planned migration. Current prompts, schemas, validation, and saved runs use five content lists and the earlier issue field names. |
 | Verifier | Planned, including compatibility work for a different model. |
 | Expert files, measures, and instruction export | Planned using the streamlined evaluation in DESIGN.md. |
 
-The target answer contains `content.plan_info`, `content.plan_actions`, and `review.issues`. Each action groups one specific activity across the plan, including its different neighborhoods and phases. New work must follow the [action coding rules](DESIGN.md#e-action-coding-rules) and the nine specified action fields.
+The target answer contains `content.plan_info`, `content.plan_actions`, and `review.issues`. Each action groups one specific activity across the plan, including its different neighborhoods and phases. New work follows the nine action fields, [category definitions](DESIGN.md#e-category-definitions), and [coding rules](DESIGN.md#f-action-coding-rules).
+
+Each issue uses `issue_id`, `related_action_id`, `issue_description`, `issue_type`, `issue_origin`, `issue_status`, `resolved_by`, and `resolution`, as defined in [DESIGN.md appendix D](DESIGN.md#d-review-and-issues). The shared target format permits `resolved_by` values of `extractor`, `verifier`, or `expert`, with role checks for model outputs and expert-curated copies.
 
 ## 2. System architecture and responsibilities
 
@@ -49,7 +51,7 @@ The MCP SDK derives tool definitions from function descriptions and types. Pytho
 
 ## 3. Document collection and preparation
 
-The workflow accepts government or public-agency plans screened against the [study's eligibility criteria](DESIGN.md#eligible-plans).
+The workflow accepts plans from governments or public agencies screened against the [study's eligibility criteria](DESIGN.md#eligible-plans).
 
 Registration saves `data/raw/<plan_id>.pdf` and its SHA-256 checksum, a fingerprint of the bytes. Identical PDFs reuse a document ID, while revised PDFs receive a new ID.
 
@@ -103,17 +105,17 @@ The current development profile is `qwen35_27b_extractor_development`, using loc
 | Output reservation | 16,384 tokens, including model thinking where applicable. |
 | Capacity for all input | 57,344 tokens shared by instructions, source, tools, and history. |
 | Complete model-request timeout | 1,800 seconds. |
-| Submitted document-tool calls | At most 10, including failed submitted calls. |
+| Submitted document tool calls | At most 10, including failed submitted calls. |
 | Shared OCR and rendering | EasyOCR, English, CPU, cached models; 150 DPI. |
 | Complete tool-request timeout | 120 seconds. |
 | Direct image input | Disabled. |
 | Temperature, top-p, seed | Null, using model defaults. Record this choice when reporting variability. |
 
-`configs/profiles.json` contains shared `document_tools` and named `profiles`. Select a profile and stage explicitly, then save the selected values and ordered prompt texts at startup. Both stages use the same document-tool settings. Hosted-provider support is deferred.
+`configs/profiles.json` contains shared `document_tools` and named `profiles`. Select a profile and stage explicitly, then save the selected values and ordered prompt texts at startup. Both stages use the same document tool settings. Hosted-provider support is deferred.
 
 ### Prompts, response schema, and token budgeting
 
-The ordered extractor prompt files are `shared_coding.md`, `field_definitions.md`, and `extractor.md`. They currently contain five-category instructions. Migration must update the prompts, schemas, validation, and fixtures together.
+The ordered extractor prompt files are `shared_coding.md`, `field_definitions.md`, and `extractor.md`. They currently contain five-category instructions and the earlier issue field names. Migration must update the prompts, schemas, validation, and fixtures together.
 
 The target prompts require reading the complete plan, grouping by specific activity, retaining all neighborhood and phase details, applying the nine fields, and flagging unresolved problems. For mixed phase statuses without an overall source status, use `unspecified` and retain each phase's status in `action`. Keep costs and benefits attached to their stated locations or phases.
 
@@ -153,10 +155,10 @@ The two-phase approach followed a synthetic development example in which imposin
 ### Verifier control — planned
 
 1. Select the exact successful action-focused E run and load its saved preparation, answer, and issues. Check its preserved source fingerprint against the loaded text.
-2. Load a different model with validated request, token-counting, schema, and tool support. Copy the shared document-tool settings from the selected E run.
+2. Load a different model with validated request, token-counting, schema, and tool support. Copy the shared document tool settings from the selected E run.
 3. Supply the whole source, shared coding rules, saved E answer, and a verifier-specific task. Check all action fields, unflagged content, possible omissions, grouping, and source evidence.
 4. Use a bounded investigation phase and return a complete revised `content`/`review` dataset. Preserve continuing action IDs and allocate new IDs for new activities.
-5. Retain every existing issue ID and origin stage. Add new issues as needed and explain each claimed resolution. When removing or merging records, keep issue links valid and describe retired targets where a link becomes null.
+5. Retain every existing `issue_id` and `issue_origin`. Add new issues as needed. An initially open issue resolved by V has `issue_status` set to `resolved`, `resolved_by` set to `verifier`, and a `resolution` addressing all grouped concerns. When removing or merging actions, update `related_action_id` and explain retired targets in `issue_description` where a link becomes null.
 6. Save a separate verifier run with `input_run_id` pointing to E. Validate source identity, tool settings, issue continuity, output structure, and successful publication. A failed V attempt links a V retry to the same E run.
 
 Finalize the verifier prompt and compatibility checks during development, then freeze them with the comparison settings.
@@ -215,6 +217,8 @@ Check completion before repairing JSON. Classify errors as `syntax`, `structure`
 
 Save the raw answer and repaired candidate separately, then repeat all checks. Limit repairs to the four formatting cases above. Any remaining error fails the run. Repairs belong to the same run and require no additional generation. Source interpretation and correctness are expert judgments.
 
+Planned issue validation will check the renamed fields, unique IDs, valid `related_action_id` links, and one linked issue per affected action. An open `issue_status` requires null `resolved_by` and `resolution`. A resolved issue requires a permitted resolver and a nonblank explanation. Extractor answers use `extractor` as `issue_origin` and as the resolver of any issue they resolve. Verification retains existing origins and can retain or reopen earlier issues. New verifier issues use `issue_origin` set to `verifier`, and a resolution made during verification uses `resolved_by` set to `verifier`. The value `expert` is permitted for resolutions in expert-curated copies. Model output validation will reject claims that an expert resolved an issue.
+
 ### Files and identifiers
 
 | Path | Purpose |
@@ -234,13 +238,13 @@ Save the raw answer and repaired candidate separately, then repeat all checks. L
 | `artifacts/` | Local diagnostic evidence and historical handoffs. |
 | `.cache/easyocr/`, `.venv/` | Local OCR models and Python environment. |
 
-`plan_id` identifies a document version and `run_id` identifies an execution. Action and issue IDs are local to linked outputs. Preserve continuing IDs through verification and use new IDs for additions. For removed targets, use a null issue link and identify the target in the description. An issue concerning several actions links one and names the others.
+`plan_id` identifies a document version and `run_id` identifies an execution. Action and issue IDs are local to linked outputs. Preserve continuing IDs through verification and expert curation, and use new IDs for additions. For removed actions, set `related_action_id` to null and identify the target in `issue_description`. An issue concerning several actions links one and names the others in that description.
 
 Expert references use the shared content schema in separate files. Track code, tests, dependencies, schemas, prompts, profiles, registry metadata, and project documents in Git. Back up ignored PDFs, prepared text, runs, model assets, and diagnostic artifacts separately. `AGENTS.md` and credentials stay local, and Ollama manages weights outside the repository.
 
 ## 6. Expert assessment, analysis, and dataset assembly
 
-These stages are planned. Implement the three quality measures, two issue measures, and supporting execution information in [DESIGN.md appendix F](DESIGN.md#f-evaluation-measures-and-calculations). The appendix below defines the required expert-file fields.
+These stages are planned. Implement the three quality measures, two issue measures, and supporting execution information in [DESIGN.md appendix G](DESIGN.md#g-evaluation-measures-and-calculations). The appendix below defines the required expert-file fields.
 
 ### Expert files and measurement
 
@@ -248,7 +252,7 @@ These stages are planned. Implement the three quality measures, two issue measur
 2. **Reconcile the reference.** Experts inspect both outputs for supported activities or details missing from the initial reference. Record accepted corrections in one shared final reference with source evidence and reasons. Retain the independent initial file.
 3. **Score reference activities.** For each output, match its content to every final reference activity and assign 0, 0.5, or 1 with an explanation. Combine split or duplicate records during assessment and retain conflicting claims when scoring.
 4. **Assess output activities.** Group each output's content by specific activity. For every group, record its raw record IDs, source support, final-reference link when supported, and one evidence judgment. Check all supplied quotations, physical pages, and coverage of the recorded details against the original PDF. Explain failures in the group judgment.
-5. **Check claimed issue resolutions.** For each initially open E issue marked resolved in E+V, record whether source review confirms that all grouped concerns were addressed. E assessments have an empty resolution-check list.
+5. **Check claimed issue resolutions.** Select issues with `issue_status` set to `open` in E and set to `resolved` with `resolved_by` set to `verifier` in the saved E+V output. Record whether source review confirms that all grouped concerns were addressed. E assessments have an empty resolution-check list. A later expert fix is recorded during curation.
 6. **Complete and preserve assessments.** Record assessors and relevant review notes. Require coverage of every reference activity, every output activity, and every claimed initial resolution. Save revisions as new named files, and use explicitly selected completed files for analysis.
 
 An output record can contribute to several activity groups if it bundles distinct activities. An invented activity or one outside the heat adaptation inclusion rules is unsupported and has no final-reference link. Wrong details within a supported activity affect its action score and evidence judgment. Source-support judgments of `undetermined` and null scores remain pending.
@@ -259,7 +263,7 @@ During the development pilot, record reviewer numbers, expertise, and roles, and
 
 `metrics.py` will calculate all measures from validated selected files. Before expert assessment, it can calculate open issues, runtime, provider-reported tokens, and failed-run counts. After assessment, it adds action scores, unsupported activity counts, adequate-evidence percentages, and confirmed/claimed verifier resolutions.
 
-Count each reference activity once for the action score and each distinct output activity once for evidence and unsupported-action counts. The expert's grouping supplies these units. Validate links and coverage before calculation, including supported activities added to the shared final reference. Read issue statuses from the saved outputs and resolution judgments from the E+V assessment.
+Count each reference activity once for the action score and each distinct output activity once for evidence and unsupported-action counts. The expert's grouping supplies these units. Validate links and coverage before calculation, including supported activities added to the shared final reference. Count open issues using `issue_status` in the saved model outputs. Use `issue_id` to match claimed verifier resolutions to the E+V assessment. Expert fixes in curated copies are recorded separately from these comparison measures.
 
 Each pair shares E. Add V duration and tokens for E+V. For example, E taking 100 seconds, a failed V attempt taking 30 seconds, and a successful V retry taking 60 seconds produce successful-processing times of 100 and 160 seconds, with one V failure and its measurements reported separately.
 
@@ -268,6 +272,8 @@ Use provider-reported generation usage for token totals. Current EasyOCR contrib
 ### Instruction dataset assembly — planned
 
 After assessing the saved outputs, experts curate supported answers in separate files. Each example uses the shared plan dataset format.
+
+When an expert fixes an issue, retain its `issue_id` and `issue_origin`, set `issue_status` to `resolved` and `resolved_by` to `expert`, and explain the fix and supporting evidence in `resolution`. Update `related_action_id` if the action was removed or regrouped. Confirming an adequate verifier resolution belongs in `resolution_checks`; authorship of a subsequent expert fix belongs in the curated issue object. Preserve the assessed model outputs as the comparison evidence.
 
 | Part of an instruction example | Source |
 | --- | --- |
@@ -279,7 +285,7 @@ Require expert review and schema validation for each target. Correct or exclude 
 
 ## 7. Development evidence and remaining work
 
-Use preparation notes, preserved run evidence, expert assessments, and concise development records to explain consequential decisions and failures. The checkpoint below records development observations. Research quality results require completed expert assessment.
+Use preparation notes, preserved run evidence, expert assessments, and concise development records to show how expert knowledge and model outputs shaped the workflow. Link practical lessons to the problems encountered, revisions made, and outcomes observed. The checkpoint below records development observations. Research quality results require completed expert assessment.
 
 ### Current development checkpoint
 
@@ -291,7 +297,7 @@ Use preparation notes, preserved run evidence, expert assessments, and concise d
 | First Freetown attempt | `run_extract_0001` failed after 1,156.61 seconds. Five model requests and ten page-text calls completed. Final generation used 12,575 output tokens, but two five-category scope/link contradictions failed validation. Accepted output is null. |
 | Diagnostic source review | Of 51 candidate quotation uses, 27 matched prepared text one physical page earlier than cited, 24 required further source review, and ten contained ellipses. These findings require expert interpretation. |
 | Prompt clarification | Five-category prompts were clarified for source links, physical pages, and continuous quotations. 436 targeted tests passed. Effects on model behavior are **Not yet tested**. |
-| Revised study protocol | Activity grouping, rubric examples, and streamlined evaluation are documented. Their implementation and development-pilot results are **Not yet tested**. |
+| Revised study protocol | Activity grouping, renamed issue fields, expert resolutions, category definitions, rubric examples, and streamlined evaluation are documented. Their implementation and development-pilot results are **Not yet tested**. |
 | Remaining research stages | Accepted full real-plan extraction, the second development plan, verification, expert assessment, comparison, and instruction assembly are pending. |
 
 The [change log](CHANGELOG.md) preserves dated evidence. Local handoffs and `artifacts/freetown_run_extract_0001_review_2026-11-14/` provide additional diagnostics and require separate backup. Historical diagnostic scripts can generate new answers.
@@ -300,13 +306,25 @@ An earlier capacity check used 54,013 input tokens and 1,525 output tokens at a 
 
 ### Next implementation steps
 
-1. **Migrate the extraction format.** Update content/run schemas, prompts, validation, response-schema conversion checks, fixtures, and relevant tests together. Use the nine action fields, activity grouping, and four status values in DESIGN.md. Assign a new run-format version and support loading earlier version 1 files with their original interpretation.
+1. **Migrate the extraction format.** Update content/run schemas, prompts, validation, response-schema conversion checks, fixtures, and relevant tests together. Apply the nine action fields, eight issue fields, category options in DESIGN.md appendix E, and coding rules in appendix F. Validate expert resolutions in curated copies and model-stage resolutions in saved runs. Assign a new run-format version and support loading earlier version 1 files with their original field names and interpretation.
 2. **Check a small example.** Include tree planting across neighborhoods and phases, differing statuses, overlapping categories, shared costs, unstated fields, expected benefits, quotations, and physical pages. Inspect source meaning and format acceptance.
 3. **Complete development extraction.** Obtain and inspect accepted action-focused outputs for both development plans. Retain earlier failures and investigate source-recovery problems that affect extraction.
 4. **Implement verification.** Validate the different model's request and token-accounting path, then implement its profile, prompt, loop, input links, and continuity checks. Test corrections, omissions, unflagged errors, and failed V retries.
-5. **Pilot assessment and measures.** Implement templates and validation for the streamlined files below. Work through coding, grouping, rubric, evidence, and resolution examples. Check calculations against hand-worked cases and settle reviewer procedures before freezing comparison settings.
+5. **Pilot assessment and measures.** Implement templates and validation for the streamlined files below. Work through coding, grouping, rubric, evidence, and resolution examples, including expert fixes after assessment. Check the appendix G calculations against hand-worked cases and settle reviewer procedures before freezing comparison settings.
 6. **Run the comparison.** Select the five plans and preserve independent references, the first successful paired outputs, assessments, failed attempts, and analysis inputs. Report the agreed measures and explanatory examples.
-7. **Assemble instruction examples.** Pilot the export format, curate supported answers, include sufficient source inputs, and check example counts and source links.
+7. **Assemble instruction examples.** Pilot the export format, curate supported answers and issue resolutions, include sufficient source inputs, and check example counts and source links.
+
+Issue field migration applies within each issue object.
+
+| Current field | Target field |
+| --- | --- |
+| `related_record_id` | `related_action_id` |
+| `description` | `issue_description` |
+| `type` | `issue_type` |
+| `origin_stage` | `issue_origin` |
+| `status` | `issue_status` |
+
+The fields `issue_id`, `resolved_by`, and `resolution` keep their names. The target `resolved_by` options add `expert` for fixes in curated datasets. Existing saved runs retain their original field values and model settings.
 
 Before comparison, also close the saved-source loading gap. Current loading validates the linked preparation, PDF, and images, but does not compare page text with the startup fingerprint in `artifacts/extractor_input.json`. Add that comparison when loading runs for verification or assessment, so later text edits are detected. During-run fingerprint checks already exist.
 
@@ -431,10 +449,10 @@ Python saves this outer object in `output.json`. The action-focused migration ne
 | `generation` | object | Answer-generation controls described below. |
 | `context_limit` | positive integer | Maximum tokens available to input and generated output together. A token is a unit of text processed by the model. |
 | `prompt_paths` | nonempty list of strings | Ordered instruction-file paths. |
-| `max_tool_calls` | positive integer | Maximum submitted document-tool calls within this run. |
+| `max_tool_calls` | positive integer | Maximum submitted document tool calls within this run. |
 | `model_timeout_seconds` | positive number | Time limit for one complete model request. |
 | `image_input_enabled` | Boolean | Whether direct model image input is enabled; currently unsupported. |
-| `document_tools` | object | Shared document-tool settings described below. |
+| `document_tools` | object | Shared document tool settings described below. |
 | `prompt_texts` | nonempty list of strings | Exact instruction-file contents in the same order as `prompt_paths`. |
 | `environment` | object | Observed execution environment described below. |
 
@@ -562,7 +580,7 @@ Each file assesses one saved output. Completion requires a shared final referenc
 | `assessed_by` | nonempty list of strings | Names or study codes identifying the experts assessing this output. |
 | `record_scores` | list of score objects | One per final reference action. |
 | `output_groups` | list of objects | Each distinct output activity, its source support, and its combined evidence judgment. |
-| `resolution_checks` | list of resolution-check objects | Initially open E issues marked resolved by V; empty for E. |
+| `resolution_checks` | list of resolution-check objects | Initially open E issues with `issue_status` set to `resolved` and `resolved_by` set to `verifier` in saved E+V. Empty for E. |
 | `review_notes` | list of strings | Explanatory examples and observations, including useful corrections or issue behavior. Empty when none are needed. |
 
 Each record score applies the rubric in DESIGN.md.
@@ -587,7 +605,7 @@ Each output group represents one specific activity. Combine split or duplicate r
 
 Every raw output action must appear in an assessed group. Supported groups must link to unique final reference activities, with score matches agreeing with those groups. An omitted reference activity has an empty match list and score 0 once assessed. An unsupported group requires a null reference link and `evidence_adequate` false. Record source passages and page references in the explanation when needed to substantiate judgments.
 
-Each resolution check assesses an initially open E issue that V marked resolved.
+Each resolution check assesses an initially open E issue that V marked resolved in its saved output, before expert curation.
 
 | Field | Type | Meaning |
 | --- | --- | --- |

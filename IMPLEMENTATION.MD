@@ -141,6 +141,8 @@ This two-phase approach follows a development observation: imposing the final sc
 
 ## 5. Run records and reproducibility
 
+The appendix defines the fields in the [saved run](#saved-run), [saved settings](#saved-settings-and-nested-objects), and [model-call entries](#model-call-entry).
+
 ### Saved extractor execution
 
 Before execution, the saved wrapper freezes the selected input/settings and observes local hardware, software versions, and Git state. It then allocates a new run folder and creates `output.json` with status `running`. Ollama's loaded-model list is checked before render-only operations can load the model; model details supply quantization when disclosed. Missing optional observations remain null rather than being inferred from user-reported specifications. Original metadata response bodies and observation errors are retained.
@@ -288,7 +290,9 @@ Direct image delivery, hosted providers, richer status listing, broader datasets
 
 ## Appendix: supporting JSON files
 
-These tables complete the file reference alongside the [full output specification](DESIGN.md#appendix-full-output-json-specification). They describe implemented operational formats and **planned** expert formats. All fields are required unless stated otherwise. Types, dates, paths, and null conventions follow DESIGN.md. “Evidence object” and “content” refer to its appendix; expert content will use the action-focused format after migration.
+These tables describe the workflow's saved files alongside the [plan dataset specification](DESIGN.md#appendix-plan-dataset-and-coding-rules). Operational file formats are implemented; the action-focused run format and expert-file formats remain **planned**. Existing version 1 runs retain their earlier five-category content.
+
+All fields are required unless stated otherwise. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are project-relative. Types and null conventions follow DESIGN.md. “Evidence object” and “content” refer to its appendix; saved runs and expert files will use the action-focused content after migration.
 
 ### Registry
 
@@ -363,10 +367,109 @@ OCR/mixed text requires enabled preparation OCR. Empty OCR output does not estab
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `schema_version` | integer | Profile-file version, currently 1. |
-| `document_tools` | object | Shared tool fields from DESIGN.md appendix F. |
-| `profiles` | list of profile objects | Unique named profiles. Each uses appendix F's `name`, `stage`, `model`, `generation`, `context_limit`, `prompt_paths`, `max_tool_calls`, `model_timeout_seconds`, and `image_input_enabled`. |
+| `document_tools` | object | Shared tool fields defined under [Saved settings and nested objects](#saved-settings-and-nested-objects). |
+| `profiles` | list of profile objects | Unique named profiles. Each uses the `name`, `stage`, `model`, `generation`, `context_limit`, `prompt_paths`, `max_tool_calls`, `model_timeout_seconds`, and `image_input_enabled` fields defined under [Saved settings and nested objects](#saved-settings-and-nested-objects). |
 
 Run-only `prompt_texts` and `environment` are observed/snapshotted at execution, not editable profile fields. Runs add the shared tool configuration to their saved settings.
+
+### Saved run
+
+Python saves this outer object in `output.json`. The action-focused migration needs a new format version; existing version 1 runs retain their original meaning.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | positive integer | Saved-format version assigned during the coordinated schema migration. |
+| `plan_id` | string | Registered document version. |
+| `run_id` | string | One execution, such as `run_extract_0001`. |
+| `stage` | enum | `extractor` or `verifier`. |
+| `purpose` | enum | `development`, `comparison`, or `exploratory`. |
+| `input_run_id` | string or null | Successful extractor run used by verification; null for extraction. |
+| `retry_of_run_id` | string or null | Failed run retried by this attempt. |
+| `source_path` | string | Exact preserved `preparation.json` used. |
+| `status` | enum | `running`, `succeeded`, or `failed`. |
+| `started_at` | timestamp string | Observed execution start. |
+| `ended_at` | timestamp string or null | Observed end; null if not recorded. |
+| `elapsed_seconds` | nonnegative number or null | Measured stage duration; null if unavailable. |
+| `settings` | object | Complete frozen settings, defined under [Saved settings and nested objects](#saved-settings-and-nested-objects). |
+| `model_calls` | list of model-call objects | Ordered generation attempts and available usage, defined under [Model-call entry](#model-call-entry). |
+| `tool_log_path` | string or null | Saved ordered tool log, when present. |
+| `content` | object or null | The [plan dataset's content](DESIGN.md#a-plan-dataset-and-content) on success; null without an accepted final answer. |
+| `review` | object or null | The [review object](DESIGN.md#d-review-and-issues) on success; null without an accepted final answer. |
+| `error` | string or null | Failure explanation when available. |
+
+### Saved settings and nested objects
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Selected profile name; a profile is a named group of settings. |
+| `stage` | enum | `extractor` or `verifier`, matching the run. |
+| `model` | object | Model connection described below. |
+| `generation` | object | Answer-generation controls described below. |
+| `context_limit` | positive integer | Maximum tokens available to input and generated output together. A token is a unit of text processed by the model. |
+| `prompt_paths` | nonempty list of strings | Ordered instruction-file paths. |
+| `max_tool_calls` | positive integer | Maximum submitted document-tool calls within this run. |
+| `model_timeout_seconds` | positive number | Time limit for one complete model request. |
+| `image_input_enabled` | Boolean | Whether direct model image input is enabled; currently unsupported. |
+| `document_tools` | object | Shared document-tool settings described below. |
+| `prompt_texts` | nonempty list of strings | Exact instruction-file contents in the same order as `prompt_paths`. |
+| `environment` | object | Observed execution environment described below. |
+
+Within `model`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Model identifier used by the serving service. |
+| `execution_mode` | enum | `local` or `hosted_api`; only local execution is implemented. |
+| `endpoint` | string | Model service address. |
+| `api_service` | string or null | Hosted API service, if applicable; an API is a software interface for requests. |
+| `provider` | string or null | Hosting provider, if applicable. |
+
+Within `generation`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `temperature` | nonnegative number or null | Sampling control affecting randomness; null uses the model default. |
+| `top_p` | number greater than 0 and at most 1, or null | Sampling control limiting the candidate-token probability mass; null uses the default. |
+| `seed` | integer or null | Random seed when supported; does not alone establish reproducibility. |
+| `max_output_tokens` | positive integer | Reserved answer capacity, including model thinking where applicable. |
+
+Within `document_tools`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `ocr_enabled` | Boolean | Whether tool-requested OCR is available. |
+| `ocr_engine` | string or null | OCR software; null when disabled. |
+| `ocr_language` | string or null | OCR language setting; null when disabled. |
+| `image_render_dpi` | positive integer | Render resolution in dots per inch (DPI). |
+| `tool_timeout_seconds` | positive number | Time limit for one complete tool request. |
+
+Within `environment`; unavailable nullable observations remain null:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `model_revision` | string or null | Observed model version or content identifier. |
+| `runtime` | string or null | Software serving the model. |
+| `runtime_version` | string or null | Serving-software version. |
+| `quantization` | string or null | Reported reduced-precision weight format. |
+| `hardware` | string or null | Observed hardware description. |
+| `code_commit` | string or null | Git revision identifying application code. |
+| `code_dirty` | Boolean | Whether the application working tree has uncommitted changes. Formal comparison requires clean code. |
+| `python_version` | string or null | Python interpreter version. |
+| `model_client_version` | string or null | Version of the model-request client. |
+| `preparation_version` | string or null | Preparation format/version observed. |
+| `tools_version` | string or null | Document-tool implementation version. |
+| `ocr_version` | string or null | Installed OCR package version. |
+| `model_loaded_at_start` | Boolean or null | Whether the model was already loaded before the run's preflight requests. |
+
+### Model-call entry
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `input_tokens` | nonnegative integer or null | Provider-reported input usage; unavailable is not zero. |
+| `output_tokens` | nonnegative integer or null | Provider-reported output usage. |
+| `finish_reason` | string or null | Provider-reported reason generation ended. |
+| `truncated` | Boolean or null | Whether output was cut off; reported truncation fails the run. |
+| `response_path` | string or null | Preserved response location, when available. |
 
 ### Tool log and validation report
 

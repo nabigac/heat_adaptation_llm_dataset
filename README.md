@@ -6,8 +6,8 @@ eligible plans span city, county, regional, state, and national governments, wit
 
 ## project documents
 
-- [design document](DESIGN.md): context and problem, research aims and questions, methods, evaluation, and full output field tables.
-- [implementation document](IMPLEMENTATION.MD): research requirements, system architecture, document and model processing, reproducibility, assessment, development evidence, and supporting files.
+- [design document](DESIGN.md): context and problem, research aims and questions, methods, evaluation, plan dataset fields, and coding rules.
+- [implementation document](IMPLEMENTATION.MD): research requirements, workflow architecture and execution, saved runs and settings, assessment calculations, development evidence, and supporting file formats.
 - [structured change log](CHANGELOG.md): decisions, changes, and lessons learned during the study.
 
 ## current progress

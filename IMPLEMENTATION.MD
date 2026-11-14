@@ -2,26 +2,33 @@
 
 **Technical implementation · updated 2026-11-14**
 
-This document describes the pipeline for preparing government plans, extracting and verifying heat adaptation records, supporting expert assessment, and assembling an instruction dataset for future fine-tuning. It supports the two objectives in [DESIGN.md](DESIGN.md): documenting the process and comparing E with E+V. Working components and planned stages are distinguished throughout; [README.md](README.md) explains available commands.
+This document specifies how to implement the study in [DESIGN.md](DESIGN.md). It covers document preparation, extraction, verification, expert assessment, analysis, and instruction examples. DESIGN.md defines the research protocol, coding rules, and evaluation formulas. This document defines software responsibilities, files, execution rules, and remaining work. [README.md](README.md) describes available commands.
 
 ## 1. Purpose and research requirements
 
-The pipeline preserves enough evidence to explain how each output was produced and where expert intervention was needed. It also supports a consistent comparison between extraction alone (E) and the same extraction followed by a different open-weight verifier (E+V). Software checks test execution and format rules; experts assess meaning, source support, and correctness.
+The pipeline must preserve how each output was produced and support a paired comparison of extraction alone (E) with that same extraction revised by a different model (E+V). Software validates structure and execution. Experts assess source meaning, correctness, and evidence.
 
 | Research need | Implementation requirement |
 | --- | --- |
-| Document the process | Preserved run artifacts and development notes record consequential choices, revisions, failures, and expert interventions. |
-| Trace claims to their source | Preserve the original PDF, selected preparation, page references, quotations, and any additional OCR readings. |
-| Compare E and E+V consistently | Use the same saved extraction and source for each pair; record model settings, prompts, tools, and failed attempts. |
-| Protect independent expert judgment | Keep model outputs hidden during initial reference preparation and preserve references separately from model runs. |
-| Reproduce the analysis | Save measurements and completed assessments, select analysis inputs explicitly, and calculate measures through shared code. |
-| Build instruction examples | Pair extraction instructions and supporting source inputs with expert-curated structured answers after assessment. |
+| Document development | Preserve consequential decisions, failures, tool activity, and expert interventions. |
+| Trace claims | Preserve PDFs, selected page text, quotations, page references, and additional OCR readings. |
+| Compare paired outputs | Link V to the exact successful E run and source, with frozen settings and retained failures. |
+| Protect expert reference preparation | Hide model outputs until the independent initial reference has been completed and validated. |
+| Reproduce analysis | Validate completed assessments and calculate the agreed measures from explicitly selected files. |
+| Build instruction examples | Pair task instructions and sufficient source input with expert-curated answers. |
 
-**Implementation status:** the working extractor still uses five content lists: goals, actions, monitoring/evaluation, benefits, and costs. The action-focused format specified in the design document has not yet been implemented. Existing prompts, schemas, code, and saved runs have not been migrated. Verification, expert files, analysis, and instruction-example assembly below describe planned behavior.
+| Component | Status |
+| --- | --- |
+| Registration, preparation, and saved local extraction | Implemented. |
+| Action-focused format and grouping | Planned migration. Current prompts, schemas, validation, and saved runs use five content lists. |
+| Verifier | Planned, including compatibility work for a different model. |
+| Expert files, measures, and instruction export | Planned using the streamlined evaluation in DESIGN.md. |
+
+The target answer contains `content.plan_info`, `content.plan_actions`, and `review.issues`. Each action groups one specific activity across the plan, including its different neighborhoods and phases. New work must follow the [action coding rules](DESIGN.md#e-action-coding-rules) and the nine specified action fields.
 
 ## 2. System architecture and responsibilities
 
-Python owns file identity, orchestration, validation, measurements, and saving. Models interpret source material and request tools; experts establish source support and correctness. A module is a Python file grouping related functions.
+Python controls file identity, execution, validation, measurements, and saving. Models interpret source material and request document tools. Experts prepare references, assess outputs, and curate answers.
 
 | Module | Responsibility and status |
 | --- | --- |
@@ -36,39 +43,39 @@ Python owns file identity, orchestration, validation, measurements, and saving. 
 | `src/expert_files.py` — planned | Reference and assessment templates, completed-file validation/import, and stage prerequisites. |
 | `src/metrics.py` — planned | Shared calculations and exports for the CLI and analysis notebooks. |
 
-The extractor acts as the MCP client, starting `document_tools.py` as a local subprocess (a separate running program). It exchanges messages through standard input/output; no MCP network port is opened. `models.py` calls the separate Ollama HTTP service. Python carries tool requests and results between them; Ollama does not directly access the document server.
+The agent runner starts `document_tools.py` as a local MCP subprocess, communicating through standard input/output. Separately, `models.py` sends HTTP requests to Ollama. Python passes model-requested tool calls to MCP and returns the results to the model.
 
-The MCP SDK builds the tool catalogue from function descriptions and argument/result types. Python converts it into Ollama's tool format and validates requests before execution. Tools accept page numbers or quotations, not arbitrary paths, URLs, or executable instructions. Source text is evidence, never agent instructions. Expert files stay outside agent access, including on reruns.
+The MCP SDK derives tool definitions from function descriptions and types. Python converts them to Ollama's format and validates arguments. Tools operate on the selected source through page numbers and quotations. Treat document text and tool results as source evidence. Keep expert files outside agent inputs and tool access.
 
 ## 3. Document collection and preparation
 
 The workflow accepts government or public-agency plans screened against the [study's eligibility criteria](DESIGN.md#eligible-plans).
 
-Registration preserves `data/raw/<plan_id>.pdf` and records its SHA-256 checksum, a fingerprint of the file's bytes. Identical bytes reuse the document; revised bytes receive a new ID. Never replace a registered PDF with different content.
+Registration saves `data/raw/<plan_id>.pdf` and its SHA-256 checksum, a fingerprint of the bytes. Identical PDFs reuse a document ID, while revised PDFs receive a new ID.
 
-`update` changes only explicitly supplied title, source URL, access date, or study set after validating the complete proposed entry. Omitted values remain unchanged; an unchanged update writes nothing. Development assignments stay fixed. Other study-set changes are permitted only before model work is saved. Each preparation snapshots the then-current source URL and access date; later corrections do not rewrite completed work.
+`update` validates and changes explicitly supplied collection metadata. Development assignments are fixed, and other study-set changes are allowed only before saved model work. Each preparation copies the current source URL and access date so completed work retains its collection context.
 
 ### Prepare text automatically, investigate gaps with tools
 
-Preparation tries native PDF text first, using pypdf; a separate PDFium renderer can recover image access if native reading fails. Known blank pages do not require OCR. Missing or unreliable native text uses full-page OCR when enabled.
+Preparation first extracts native text with pypdf. A PDFium renderer supplies page images, including when native reading fails. Missing or unreliable text receives full-page OCR when enabled. Known blank pages retain that status.
 
-Even on pages with native text, an individual image is a candidate when it occupies at least 10% of the visible page and has no native text within its bounds. Save the page PNG and candidate crops. Append labeled regional OCR to unchanged native text and mark its source `mixed`. The threshold applies to each image, not their combined area.
+Also screen images on pages with native text. An individual image is a candidate if it occupies at least 10% of the visible page and contains no native text within its bounds. Save full-page PNGs and candidate crops. Append labeled regional OCR while preserving native text, and mark the combined source `mixed`.
 
-This screening rule can include photographs and miss small charts or images with partial text layers. It does not fix table reading order. Successful OCR retains review notes because text recognition is not accuracy validation. The present backend is cached English EasyOCR on the CPU, with 150 DPI rendering; DPI means dots per inch. Download models explicitly during setup. Normal operation is offline and loads a reader only when needed. `--no-ocr` retains image screening and preservation.
+The current backend uses cached English EasyOCR models on the CPU and renders at 150 dots per inch (DPI). Setup downloads models explicitly, while normal operation loads them offline when needed. `--no-ocr` retains image screening and preservation. The screening rule can include photographs and miss small charts or partial text layers. Table reading order and OCR accuracy require source review.
 
 | Preparation status | Meaning |
 | --- | --- |
-| `ready` | Automatic checks found no problems or review flags; not a guarantee of completeness. |
-| `ready_with_gaps` | Every page has a usable reading route, but content needs review, including successfully recovered OCR. |
-| `failed` | Page counting or a required reading route failed. Resolve this before model processing. |
+| `ready` | Automatic checks found no problems or review flags. Source accuracy still requires assessment. |
+| `ready_with_gaps` | Every page has a usable reading route, with review notes for gaps or recovered OCR. |
+| `failed` | Page counting or a required reading route failed and requires attention before extraction. |
 
-Each attempt gets a new folder. Publish images and page data before its preparation record; validate linked PNGs and crop dimensions when loading. Include every known PDF page once. If neither reader can identify pages, save null page count and an empty page list where possible. Identity, validation, or storage failures may prevent a complete preparation record.
+Each preparation receives a new folder. Save images and page data before publishing `preparation.json`. Include every known PDF page once, in order, and validate linked PNGs and crop dimensions when loading. If page counting fails, save a null count and empty page list where possible.
 
-Preserve version 2 readability; new preparations use version 3 with image paths, image regions, and mixed text. Missing old fields are not invented. Preparation status is derived from the explicitly linked record, not duplicated in the registry.
+New preparations use version 3 with image paths, regions, and mixed text. Loading also supports version 2 using its original fields. Derive status from the preparation explicitly linked by the registry.
 
 ### OCR evidence and source gaps
 
-OCR (optical character recognition) converts image text into machine-readable text and may misread words or numbers. During assessment, experts check recovered quotations against the original PDF, including wording, quantities, and table or chart context. Unreadable material remains a source gap rather than evidence that information is absent. A model's description of a chart does not qualify as a source quotation.
+OCR converts image text into machine-readable text and can misread words or numbers. Experts check quotations against the original PDF, including table or chart context. Record unreadable material as a source gap. Evidence quotations must reproduce source wording.
 
 ### Document tools
 
@@ -78,43 +85,41 @@ OCR (optical character recognition) converts image text into machine-readable te
 | `find_quote(quote)` | Exact, case-sensitive substring search within each initial page. Report matches and unavailable pages separately. No normalization or cross-page joining. |
 | `run_ocr(page_number)` | Render the original page and return fresh OCR using the active run's frozen settings, with preserved artifacts and source identity. |
 
-The server checks PDF identity and preparation/page fingerprints at startup. A fingerprint detects changes; it does not establish that the underlying text is correct. OCR runs sequentially with a lazily loaded, reused reader. Models cannot override OCR settings. Each request saves separate evidence and never changes preparation text or extends `find_quote` to fresh OCR.
+The server checks PDF identity and preparation/page fingerprints at startup. OCR runs sequentially using the frozen settings and a reused reader. Each request saves separate artifacts, while `find_quote` searches the original preparation text only. Literal matching locates wording and requires subsequent assessment of claim support.
 
-A failed reading can return a recoverable error to the model. Timeout, protocol failure, or inability to preserve evidence stops the run. Full-page tool OCR exists; direct model image delivery and tool-requested regional OCR remain unimplemented. Preparation already supports regional OCR. A literal quotation match does not establish support for a claim.
+Reading errors can be returned to the model for further investigation. Timeouts, protocol failures, or failures to save evidence stop the run. Full-page tool OCR and preparation-time regional OCR are implemented. Direct model image delivery and tool-requested regional OCR are planned extensions.
 
 ## 4. Model configuration and execution
 
 ### Models and profiles
 
-The current local development profile is `qwen35_27b_extractor_development`, using `qwen3.5:27b` at `http://localhost:11434`. The recorded development machine is an Apple M5 Pro with 64 GB memory. Actual run metadata records observed hardware rather than assuming these specifications.
+The current development profile is `qwen35_27b_extractor_development`, using local `qwen3.5:27b` at `http://localhost:11434` through the safetensors/MLX serving setup. The recorded development machine is an Apple M5 Pro with 64 GB memory. Runs record observed hardware and software.
 
-The installed weights use the safetensors/MLX serving path (weight storage and model execution software). The previously proposed `gemma4:31b` verifier remains an untested candidate with no profile or prompt. Test suitability and load models sequentially. Different model families can share errors; their difference alone does not establish independent verification.
+`gemma4:31b` is an untested verifier candidate. The current token checker explicitly supports only the validated Qwen model, runtime versions, and tokenizer assets. A second model therefore needs request, structured-output, tool-use, and token-accounting checks as well as its profile and prompt. Test and load the models sequentially before fixing the comparison pair.
 
 | Setting | Current development value |
 | --- | --- |
 | Context limit | 73,728 tokens. |
 | Output reservation | 16,384 tokens, including model thinking where applicable. |
-| Capacity for all input | 57,344 tokens, before accounting for instructions, source, tools, and history. |
+| Capacity for all input | 57,344 tokens shared by instructions, source, tools, and history. |
 | Complete model-request timeout | 1,800 seconds. |
 | Submitted document-tool calls | At most 10, including failed submitted calls. |
 | Shared OCR and rendering | EasyOCR, English, CPU, cached models; 150 DPI. |
 | Complete tool-request timeout | 120 seconds. |
 | Direct image input | Disabled. |
-| Temperature, top-p, seed | Null, using model defaults; not a claim of deterministic generation. |
+| Temperature, top-p, seed | Null, using model defaults. Record this choice when reporting variability. |
 
-`configs/profiles.json` contains shared `document_tools` and named `profiles`. Select name and stage explicitly. At startup, freeze the selected profile, shared tools, and ordered prompt texts: save their values so later edits do not change the attempt. Both comparison stages must share document-tool settings.
-
-Future hosted APIs would change the model connection while tools and saved files stay local. Hosting is a development option, not an additional experimental configuration. Capability and token-counting support require validation before use.
+`configs/profiles.json` contains shared `document_tools` and named `profiles`. Select a profile and stage explicitly, then save the selected values and ordered prompt texts at startup. Both stages use the same document-tool settings. Hosted-provider support is deferred.
 
 ### Prompts, response schema, and token budgeting
 
-Prompts explain meaning and coding rules. The ordered extractor files are `shared_coding.md`, `field_definitions.md`, and `extractor.md`. The current files retain the earlier five-category instructions. The loader preserves each exact text; input assembly joins them with two newlines into one system message. Collection metadata, physical page numbers, preparation notes, and every prepared page go in a user message. The runner adds tool/final-phase instructions separately.
+The ordered extractor prompt files are `shared_coding.md`, `field_definitions.md`, and `extractor.md`. They currently contain five-category instructions. Migration must update the prompts, schemas, validation, and fixtures together.
 
-`build_extractor_input()` requires a registered plan, named profile, and exact preparation path. Shared source loading checks identity, PDF checksum, readiness, page records, and images. It never substitutes a newer preparation. Building the input itself makes no model calls, counts no tokens, performs no OCR, and creates no run.
+The target prompts require reading the complete plan, grouping by specific activity, retaining all neighborhood and phase details, applying the nine fields, and flagging unresolved problems. For mixed phase statuses without an overall source status, use `unspecified` and retain each phase's status in `action`. Keep costs and benefits attached to their stated locations or phases.
 
-A JSON Schema specifies machine-readable structure. Final Ollama requests send messages in `messages` and the compatible schema in `format`; plain `format: "json"` would not impose the full contract. Tool-phase requests instead send the available `tools` without the final schema. Structure constraints do not replace interpretation instructions. See the [Ollama chat API](https://docs.ollama.com/api/chat).
+`build_extractor_input()` reads the exact selected preparation and checks PDF identity, readiness, pages, and images. It assembles input without running a model or OCR. Join exact prompt texts with two newlines in one system message. Place collection metadata, physical page boundaries, preparation notes, and all page text in a user message. The controller adds investigation and final-answer instructions.
 
-`prepare_ollama_response_schema()` derives a fresh provider copy from authoritative content and response schemas. It expands known local references and rewrites the nonblank-string pattern into an equivalent whole-string form tested with Ollama. Unsupported conversions fail rather than dropping constraints. Preserve the exact sent schema; do not maintain an independently edited provider contract.
+For final generation, send messages in `messages` and the compatible JSON Schema in `format`. During investigation, expose `tools` and apply the tool-selection protocol. `prepare_ollama_response_schema()` derives the provider schema from authoritative local schemas, expands references, and converts the nonblank-string pattern to its tested equivalent. Save the exact sent schema and reject unsupported conversions. The request interface is described in the [Ollama chat API](https://docs.ollama.com/api/chat).
 
 #### Before every model request
 
@@ -124,26 +129,37 @@ A JSON Schema specifies machine-readable structure. Final Ollama requests send m
 4. Save preflight evidence, then generate within the same complete-request timeout.
 5. Compare counted input with provider-reported input when available; a known disagreement fails the run.
 
-Counting includes instructions, source, metadata, chat markers, tools, assistant prefix, and accumulated history. Disable tokenizer truncation and padding and do not add special tokens already supplied by rendering. Later requests resend full history; the application does not rely on Ollama remembering earlier requests.
+Count instructions, source, metadata, chat markers, tools, assistant prefix, and accumulated history. Disable tokenizer truncation and padding and avoid adding tokens already supplied by rendering. Resend the complete history on each request.
 
-The supported path is local Qwen3.5 safetensors/MLX with Ollama 0.40.14 or 0.40.16 and validated tokenizer assets. The private render-only interface is version-specific; validate changes before enabling them. The checker downloads no new assets. Request and renderer details are documented in the versioned [API definitions](https://github.com/ollama/ollama/blob/v0.40.14/api/types.go), [Qwen renderer](https://github.com/ollama/ollama/blob/v0.40.14/model/renderers/qwen35.go), and [chat implementation](https://github.com/ollama/ollama/blob/v0.40.14/server/routes.go).
+The implemented counting path supports local Qwen3.5 safetensors/MLX with Ollama 0.40.14 or 0.40.16 and validated tokenizer assets. Validate changes to this private render-only interface before enabling them. Counting reads installed assets. The versioned [API definitions](https://github.com/ollama/ollama/blob/v0.40.14/api/types.go), [Qwen renderer](https://github.com/ollama/ollama/blob/v0.40.14/model/renderers/qwen35.go), and [chat implementation](https://github.com/ollama/ollama/blob/v0.40.14/server/routes.go) document the tested behavior.
 
-Use the same body for rendering and generation. On the tested path, the final schema constrains generation separately from prompt rendering; do not add a second schema token charge. Schema text explicitly placed in messages is counted. Direct image counting remains unsupported.
+Use the same request body for rendering and generation. On the tested path, schema constraints apply separately from prompt rendering. Count schema text when explicitly included in messages. Direct image counting is unsupported.
 
-If capacity is exceeded or reliable counting is unavailable, stop before generation. Do not silently truncate, reduce the output reservation, or switch to document chunks. No-truncation options and usage checks are additional safeguards. Preflight evidence includes counts, remaining capacity, request/rendered-prompt checksums, runtime/model/tokenizer identities, errors, and HTTP bodies. These counts are not provider usage and do not fill missing `model_calls` token values. Metadata and render-only operations are not extra research generation calls.
+Stop before generation if capacity is exceeded or reliable counting is unavailable. Preserve the whole-document input and selected output reservation. Save counts, remaining capacity, request/prompt checksums, runtime/model/tokenizer identities, errors, and preflight HTTP bodies. Research token totals use provider-reported generation usage. Metadata and render-only operations are setup activity.
 
 ### Extractor control
 
 1. Assemble the complete source and prompts and discover the source-bound MCP tools.
-2. Count and send a tool-phase request. Accept validated tool calls or `READY_FOR_FINAL_RESPONSE` with optional outer whitespace. Other control text or premature final JSON fails rather than triggering an automatic correction.
+2. Count and send a tool-phase request. Accept validated tool calls or `READY_FOR_FINAL_RESPONSE` with optional outer whitespace. Other control text or premature final JSON fails the attempt.
 3. Execute tools sequentially and preserve the full assistant message and ordered results, including thinking and call identifiers where supplied.
 4. Continue until readiness or the tool-call limit. Each submitted call consumes a slot, including failures. Startup/catalogue discovery does not. Excess calls receive logged non-execution errors.
-5. Clear tools and request one complete schema-constrained `content`/`review` answer. This scheduled final turn is not a retry.
+5. Clear tools and request one complete schema-constrained `content`/`review` answer.
 6. Check completion and output, apply only permitted repairs, recheck source/collection details and application snapshots, and stop the MCP subprocess before accepting success.
 
-The loop returns execution evidence; the saved wrapper adds checkpoints and final publication. A readiness signal is a measured model call. The tested Qwen renderer omits tool-result names/identifiers from rendered text, so preserve call/result ordering even when IDs exist.
+The loop returns execution evidence, and the saved wrapper publishes checkpoints and final status. Count the readiness signal as a generation call. Preserve call/result ordering because the tested renderer omits tool-result names and identifiers from rendered text.
 
-This two-phase approach follows a development observation: imposing the final schema during tool selection suppressed a needed tool request in one synthetic example. Later fixtures worked with separate phases. This does not establish universal behavior for other models or runtimes.
+The two-phase approach followed a synthetic development example in which imposing the final schema suppressed a needed tool request. Later fixtures worked with separate phases. Test this behavior for the chosen verifier.
+
+### Verifier control — planned
+
+1. Select the exact successful action-focused E run and load its saved preparation, answer, and issues. Check its preserved source fingerprint against the loaded text.
+2. Load a different model with validated request, token-counting, schema, and tool support. Copy the shared document-tool settings from the selected E run.
+3. Supply the whole source, shared coding rules, saved E answer, and a verifier-specific task. Check all action fields, unflagged content, possible omissions, grouping, and source evidence.
+4. Use a bounded investigation phase and return a complete revised `content`/`review` dataset. Preserve continuing action IDs and allocate new IDs for new activities.
+5. Retain every existing issue ID and origin stage. Add new issues as needed and explain each claimed resolution. When removing or merging records, keep issue links valid and describe retired targets where a link becomes null.
+6. Save a separate verifier run with `input_run_id` pointing to E. Validate source identity, tool settings, issue continuity, output structure, and successful publication. A failed V attempt links a V retry to the same E run.
+
+Finalize the verifier prompt and compatibility checks during development, then freeze them with the comparison settings.
 
 ## 5. Run records and reproducibility
 
@@ -151,9 +167,9 @@ The appendix defines the fields in the [saved run](#saved-run), [saved settings]
 
 ### Saved extractor execution
 
-Before execution, the saved wrapper freezes the selected input/settings and observes local hardware, software versions, and Git state. It then allocates a new run folder and creates `output.json` with status `running`. Ollama's loaded-model list is checked before render-only operations can load the model; model details supply quantization when disclosed. Missing optional observations remain null rather than being inferred from user-reported specifications. Original metadata response bodies and observation errors are retained.
+The saved wrapper freezes inputs and settings, observes hardware/software and Git state, allocates a run folder, and publishes `output.json` as `running`. Check whether the model is loaded before preflight can load it. Preserve reported quantization, raw metadata responses, and observation errors. Use null for unavailable optional observations.
 
-The runner saves evidence at execution checkpoints:
+Save evidence at execution checkpoints.
 
 | Evidence | Saved location within the run |
 | --- | --- |
@@ -163,41 +179,41 @@ The runner saves evidence at execution checkpoints:
 | Exact request before dispatch, token reports, and preflight bodies | `responses/attempt_NN/request.json`, `token_budget.json`, `token_budget_final.json`, and `preflight/` in that attempt folder. |
 | Received response chunks, raw HTTP body, and assistant text/message | `responses/attempt_NN/chunks/`, `responses/response_NN.json`, `responses/response_NN.txt`, and `responses/attempt_NN/assistant_message.json`, when available. |
 | Pending tool requests and completed ordered tool activity | `artifacts/tool_requests/`, `tool_log.json`. |
-| Fresh page OCR | `artifacts/ocr/request_NNNN/`: `request.json`, `page.png`, `ocr.txt`, and `result.json`, as available. |
+| Fresh page OCR | `artifacts/ocr/request_NNNN/` containing `request.json`, `page.png`, `ocr.txt`, and `result.json`, as available. |
 | MCP subprocess stderr and complete message history | `artifacts/mcp_stderr.log`, `artifacts/conversation.json`. |
 | Final checks and any repaired candidate | `validation_report.json`, `responses/repaired_final.txt` when a repair is applied. |
 
-Raw HTTP bodies preserve received bytes after HTTP content decoding; assistant text is saved separately without JSON rewriting. The OCR report records original page/source identity, actual settings/package versions, timestamps, duration, file hashes, and errors. It does not certify recognition accuracy. The MCP diagnostic stream is published after subprocess shutdown; abrupt termination may prevent that log from being saved.
+Save received HTTP bodies after content decoding and assistant text separately. OCR reports include source/page identity, actual settings and versions, timestamps, duration, hashes, and errors. Publish MCP stderr after subprocess shutdown when available.
 
-Only a valid accepted final answer supplies `content` and `review` in a succeeded run. Failed execution retains available evidence and null accepted output. The final record uses observed UTC times and monotonic elapsed duration, including setup/loading, model/tool requests, evidence checkpoints, validation, repairs, and MCP cleanup. Generation attempts are distinguished from blocked preflight; undisclosed usage remains null.
+Accepted `content` and `review` require a valid final answer and successful saving. Failures retain available evidence with null accepted output. Record observed UTC times and measured elapsed duration through setup, execution, saving, checks, and cleanup. Distinguish blocked preflight from generation attempts, and retain null for undisclosed usage.
 
-Supporting files are saved without overwriting earlier evidence. A checkpoint write failure stops execution and triggers best-effort failed finalization without retrying model/tool work. If final publication also fails, the caller receives the last successfully saved record and a persistence error; it must not report saved success based only on the in-memory answer. Existing completed runs stay unchanged.
+Preserve supporting files individually. A checkpoint failure stops execution and triggers best-effort failed finalization. If final publication fails, return the last successfully saved record and persistence error. Report success from the saved record.
 
 ### Selecting runs, failures, and feedback
 
-Process one document at a time. `extract` requires plan ID, exact `--source-path`, `--profile`, and `--purpose`; optional `--config-path` selects another profile file. Development/comparison purposes must match the registry. Formal comparison requires observed, clean committed code; unavailable optional environment facts remain null.
+Process one plan at a time. `extract` requires a plan ID, exact `--source-path`, `--profile`, and `--purpose`. Optional `--config-path` selects another profile file. Development/comparison purposes must match the registry, and formal comparison requires observed, clean committed code.
 
-Every invocation gets a new run ID. Manual retries link a failed run through `--retry-of-run-id`; successful deliberate repeats are exploratory. There are no automatic retries, equivalent-run searches, or automatic preparation substitutions. Future verification selects the exact successful E run and uses its preparation. If verification fails, retain E and retry verification only.
+Each invocation receives a new run ID. Link manual retries with `--retry-of-run-id`. Select the first successful run under fixed settings, retain failures, and label deliberate successful repeats exploratory. The implemented workflow uses explicit preparation selection and manual retries.
 
-`list` reports registration and linked preparation status, not aggregate model-stage status. Missing links show `not_prepared`; damaged linked files raise errors. `extract` reports its actual saved status and report paths.
+`list` displays registration and linked preparation status, while `extract` reports saved run status and report paths. Model/tool timeouts and reported truncation fail the attempt. Extraction returns 0 for saved success, 1 for failure, 2 for invalid syntax, and 130 for cancellation.
 
-A complete model/tool timeout or reported output truncation fails the run even if JSON parses. Preserve available evidence. Ctrl+C requests cancellation and returns 130; saved success returns 0, failure 1, invalid CLI syntax 2. Failed final publication or abrupt termination can leave `running`, partial files, and null end time/duration. Confirm the process stopped before recovery; do not invent duration from a later recovery timestamp. Automatic recovery/resumption is not implemented.
+Abrupt termination or failed publication can leave `running` and partial files. Confirm process termination before recovery and retain unavailable end times/durations as null. Recovery and resumption are manual.
 
-Until an initial expert reference is validated, comparison feedback must hide claims, issues, response snippets, and repair details. The current CLI applies this restriction to every comparison-plan extraction, including exploratory repeats; creating a file named `reference_initial.json` does not unlock it. MCP stderr is retained in the run and client logging is suppressed. These are display restrictions, not filesystem access controls. If troubleshooting exposes outputs, an unexposed expert must prepare the independent reference.
+The current CLI hides claims, issues, snippets, and repair details for all comparison-plan extractions, including exploratory repeats. Validated expert-reference handling must be implemented before enabling output disclosure. The restriction controls display, and research files remain accessible on disk. If troubleshooting exposes model outputs, assign initial reference preparation to an unexposed expert.
 
 ### Validation and permitted repair
 
-Check completion before repairing JSON. Reported truncation fails immediately. Classify errors as `syntax` (unreadable JSON), `structure` (wrong fields/types/values), `reference` (invalid IDs/paths/pages), or `other`; preserve location and explanation.
+Check completion before repairing JSON. Classify errors as `syntax`, `structure`, `reference`, or `other`, retaining location and explanation. Truncation fails the attempt.
 
 | Case | Permitted behavior |
 | --- | --- |
 | Whole-response code fence | Remove only when it encloses one complete JSON answer without surrounding commentary. |
 | Trailing comma | Remove immediately before a closing bracket/brace, outside quoted text. |
-| Missing closing delimiters | Append only after a complete value, with unambiguous nesting and confirmed normal completion. Never complete missing values, unfinished strings, unknown-completion answers, or truncated output. |
+| Missing closing delimiters | Append after a complete value only when nesting is unambiguous and normal completion is confirmed. |
 | Single page number | Convert a positive integer to a one-item `page_numbers` list, then validate range. |
-| Missing field or other error | Leave unchanged and report it. Do not insert nulls, infer facts, alter quotes, drop records/unknown fields, or guess references. |
+| Missing field or other error | Preserve the answer and report the problem for a separately initiated attempt. |
 
-Keep the raw answer, save any repaired candidate separately, and repeat all checks. Repairs do not add a model call or a new run. Any remaining error fails the run. Successful repair does not count as a separate failed execution. A structurally valid answer still needs expert assessment.
+Save the raw answer and repaired candidate separately, then repeat all checks. Limit repairs to the four formatting cases above. Any remaining error fails the run. Repairs belong to the same run and require no additional generation. Source interpretation and correctness are expert judgments.
 
 ### Files and identifiers
 
@@ -218,89 +234,89 @@ Keep the raw answer, save any repaired candidate separately, and repeat all chec
 | `artifacts/` | Local diagnostic evidence and historical handoffs. |
 | `.cache/easyocr/`, `.venv/` | Local OCR models and Python environment. |
 
-`plan_id` identifies a document version; `run_id` identifies one execution. Action and issue IDs are local to linked outputs. Keep continuing IDs through verification and allocate new ones for additions. When removing/splitting an action, update issue links; use null for a removed target and identify it in the description. An issue affecting several resulting actions links one and names the others. Do not invent relationships to repair invalid references.
+`plan_id` identifies a document version and `run_id` identifies an execution. Action and issue IDs are local to linked outputs. Preserve continuing IDs through verification and use new IDs for additions. For removed targets, use a null issue link and identify the target in the description. An issue concerning several actions links one and names the others.
 
-The saved run combines metadata, content, and review. Expert files use the same content format without simulated model runs. Supporting files are preserved individually; saving a run folder is not a single all-or-nothing transaction.
-
-Track code, tests, dependency settings, schemas, prompts, profiles, registry metadata, and project documents in Git. `AGENTS.md` stays local. Credentials, PDFs, prepared text, runs, model assets, and local diagnostic artifacts are ignored; back up research files separately. Ollama manages its model assets outside this repository. No extra source, batch, review, or artifact IDs are needed.
+Expert references use the shared content schema in separate files. Track code, tests, dependencies, schemas, prompts, profiles, registry metadata, and project documents in Git. Back up ignored PDFs, prepared text, runs, model assets, and diagnostic artifacts separately. `AGENTS.md` and credentials stay local, and Ollama manages weights outside the repository.
 
 ## 6. Expert assessment, analysis, and dataset assembly
 
-These stages remain planned. The measures and formulas are specified once in [DESIGN.md appendix F](DESIGN.md#f-evaluation-measures-and-calculations); this section describes the files and checks needed to calculate them and prepare instruction examples.
+These stages are planned. Implement the three quality measures, two issue measures, and supporting execution information in [DESIGN.md appendix F](DESIGN.md#f-evaluation-measures-and-calculations). The appendix below defines the required expert-file fields.
 
 ### Expert files and measurement
 
-Comparison reference preparation requires saved successful E and E+V outputs linked to the same extraction and preparation. The initial template contains collection metadata and empty content fields, without model actions or issues. Experts complete it from the original PDF before seeing outputs.
+1. **Prepare the independent reference.** Require successful E and E+V runs linked to the same extraction and preparation. Generate a template with collection metadata and empty content fields. Experts complete it from the original PDF using the rules for grouping activities, then validate and preserve it before revealing model outputs.
+2. **Reconcile the reference.** Experts inspect both outputs for supported activities or details missing from the initial reference. Record accepted corrections in one shared final reference with source evidence and reasons. Retain the independent initial file.
+3. **Score reference activities.** For each output, match its content to every final reference activity and assign 0, 0.5, or 1 with an explanation. Combine split or duplicate records during assessment and retain conflicting claims when scoring.
+4. **Assess output activities.** Group each output's content by specific activity. For every group, record its raw record IDs, source support, final-reference link when supported, and one evidence judgment. Check all supplied quotations, physical pages, and coverage of the recorded details against the original PDF. Explain failures in the group judgment.
+5. **Check claimed issue resolutions.** For each initially open E issue marked resolved in E+V, record whether source review confirms that all grouped concerns were addressed. E assessments have an empty resolution-check list.
+6. **Complete and preserve assessments.** Record assessors and relevant review notes. Require coverage of every reference activity, every output activity, and every claimed initial resolution. Save revisions as new named files, and use explicitly selected completed files for analysis.
 
-After the initial reference is saved, separate E and E+V assessment templates contain the known run links, quotations, pages, and relevant issues. Experts supply matches and judgments, review additions, and document corrections in one shared final reference. Both model outputs are assessed against that reference.
+An output record can contribute to several activity groups if it bundles distinct activities. An invented activity or one outside the heat adaptation inclusion rules is unsupported and has no final-reference link. Wrong details within a supported activity affect its action score and evidence judgment. Source-support judgments of `undetermined` and null scores remain pending.
 
-Completed assessments cover every final reference action, supplied quotation and cited page, distinct addition, and claimed initial issue resolution. A supported quotation must faithfully match the original PDF and justify all fields assigned to it, including the OCR checks described above. Null judgments and undetermined support remain pending.
-
-The initial reference and completed files are preserved. Revisions receive new named files, and analysis uses explicitly selected assessments linked to the same final reference. The planned assessment format contains matches, scores, reasons, quotation checks, and resolution judgments needed for the paired review.
+During the development pilot, record reviewer numbers, expertise, and roles, and settle how disagreements are resolved. The combined evidence judgment reduces form-filling while still requiring source inspection. Review notes capture useful examples of quotation errors, citation errors, omissions, false flags, and justified or unjustified resolutions.
 
 ### Measurement capture and calculation
 
-Before expert assessment, Python will calculate operational and issue measures from saved runs. After assessment, it will calculate quality measures from completed expert files. Each E/E+V pair shares one extractor run: its time and tokens are included in both configurations, and verifier usage is added for E+V.
+`metrics.py` will calculate all measures from validated selected files. Before expert assessment, it can calculate open issues, runtime, provider-reported tokens, and failed-run counts. After assessment, it adds action scores, unsupported activity counts, adequate-evidence percentages, and confirmed/claimed verifier resolutions.
 
-Stage duration includes setup/loading, model and tool requests, evidence saving, validation, repairs, and cleanup. Failed attempts retain their measurements separately. For example, E taking 100 seconds, a failed V attempt taking 30 seconds, and a successful V retry taking 60 seconds yield successful runtimes of 100 seconds for E and 160 seconds for E+V, with one verifier failure reported.
+Count each reference activity once for the action score and each distinct output activity once for evidence and unsupported-action counts. The expert's grouping supplies these units. Validate links and coverage before calculation, including supported activities added to the shared final reference. Read issue statuses from the saved outputs and resolution judgments from the E+V assessment.
 
-Token totals use provider-reported generation usage rather than preflight estimates. Current EasyOCR contributes runtime but no LLM tokens; any future LLM-based OCR must include its generation usage. Missing required observations make the corresponding total unavailable. The planned `metrics.py` module will apply the design's formulas consistently for CLI and notebook analysis.
+Each pair shares E. Add V duration and tokens for E+V. For example, E taking 100 seconds, a failed V attempt taking 30 seconds, and a successful V retry taking 60 seconds produce successful-processing times of 100 and 160 seconds, with one V failure and its measurements reported separately.
+
+Use provider-reported generation usage for token totals. Current EasyOCR contributes duration. Missing required observations or pending judgments make the corresponding measure unavailable, and zero denominators are not applicable. Export per-plan results, numerators, denominators, and paired changes using the design's formulas. Optional notebooks call the same calculation code.
 
 ### Instruction dataset assembly — planned
 
-After assessment, expert curation will produce the structured answers used in instruction examples. Original E and E+V outputs remain unchanged so that training-data curation cannot alter the comparison results.
+After assessing the saved outputs, experts curate supported answers in separate files. Each example uses the shared plan dataset format.
 
 | Part of an instruction example | Source |
 | --- | --- |
-| Task instructions | The extraction instructions and field definitions used for the task. |
-| Source input | The corresponding plan text and any reviewed text recovery needed to support the answer. Relevant source versions and page links remain traceable. |
-| Target answer | The expert-curated plan dataset containing plan information, actions, evidence, and reviewed issues. |
+| Task instructions | Extraction instructions and field definitions. |
+| Source input | Corresponding plan text, page links, and reviewed text recovery needed to support the answer. |
+| Target answer | Expert-curated plan information, grouped actions, evidence, and reviewed issues. |
 
-An output becomes a training target only after expert review; passing JSON validation alone is insufficient. Unsupported content is corrected or excluded, and any recovered source information needed for the target is included in its input. Assessment records preserve the reasons for corrections. The export format will be specified during the curation pilot; model fine-tuning is a future use of the resulting dataset.
+Require expert review and schema validation for each target. Correct or exclude unsupported content, include any necessary recovered text in the input, and retain source links and correction reasons. Pilot and document the export format before assembly. Report the numbers of source plans, instruction examples, and grouped actions separately. Whole-plan input with one curated answer forms one instruction example. Fine-tuning is future work.
 
 ## 7. Development evidence and remaining work
 
-The process account will draw on preparation notes, preserved model/tool evidence, expert assessments, and concise development notes about choices, revisions, failures, and their consequences. Proposed improvements remain distinct from observed results.
-
-The checkpoint below reports engineering checks and development observations, not the completed expert evaluation.
+Use preparation notes, preserved run evidence, expert assessments, and concise development records to explain consequential decisions and failures. The checkpoint below records development observations. Research quality results require completed expert assessment.
 
 ### Current development checkpoint
 
 | Area | Observed status |
 | --- | --- |
-| Registration and preparation | Implemented. Freetown `plan_0001/preparation_02` contains 46 pages: 34 native and 12 mixed, with 19 candidate image regions on 14 pages. It remains `ready_with_gaps`. |
-| Saved local extraction | Implemented: complete input assembly, model/tool loop, request limits, response validation, incremental evidence saving, and CLI. |
-| Automated checks | The latest recorded full suite passed 1,804 tests with 11 dependency warnings. Most model replies are controlled fixtures; tests do not establish extraction accuracy. |
-| Live integration examples | Fictional prepared-text and image-only runs completed through real Ollama and MCP. The image example recovered “OPEN 3 COOLING CENTRES BY 2028” through OCR, but also raised a goal/action coding question under the earlier format. |
-| Runtime compatibility | Local token accounting has been checked for Ollama 0.40.14 and 0.40.16 with the supported Qwen setup. A 0.40.16 fictional run succeeded in 193.92 seconds with matching counted/reported inputs; an oversized request was blocked. |
-| First full Freetown attempt | `run_extract_0001` ended as failed after 1,156.61 seconds. Five model requests completed normally, ten page-text tools were called, and final generation used 12,575 output tokens. Two scope/link contradictions in the earlier content format failed validation. Accepted content and review remain null. |
-| Diagnostic source review | Of 51 candidate quotation uses, 27 matched prepared text on other pages, consistently one page earlier than cited; 24 need further source review, and ten contain ellipses. These are diagnostic text checks, not expert quality scores. |
-| Subsequent prompt clarification | Existing five-category prompts were clarified for source-supported links, physical PDF page citations, and continuous quotations. 436 targeted tests passed; effects on model behavior are **Not yet tested**. |
-| Later stages | No accepted full real-plan extraction, verifier run, expert reference, assessment, comparison result, or curated instruction dataset exists yet. The second development plan remains outstanding. |
+| Registration and preparation | Freetown `plan_0001/preparation_02` has 46 pages, comprising 34 native and 12 mixed pages, with 19 candidate image regions on 14 pages. Status is `ready_with_gaps`. |
+| Saved extraction and engineering checks | Local execution, tools, limits, validation, saving, and CLI are implemented. The full suite was rerun on 2026-11-14 with 1,804 passes and 11 dependency warnings. Most model replies are controlled fixtures. |
+| Live integration | Fictional prepared-text and image-only runs completed through Ollama and MCP, including OCR recovery. Qwen token accounting was checked with Ollama 0.40.14 and 0.40.16. A 0.40.16 fixture completed in 193.92 seconds with matching counted/reported inputs, and an oversized request was blocked. |
+| First Freetown attempt | `run_extract_0001` failed after 1,156.61 seconds. Five model requests and ten page-text calls completed. Final generation used 12,575 output tokens, but two five-category scope/link contradictions failed validation. Accepted output is null. |
+| Diagnostic source review | Of 51 candidate quotation uses, 27 matched prepared text one physical page earlier than cited, 24 required further source review, and ten contained ellipses. These findings require expert interpretation. |
+| Prompt clarification | Five-category prompts were clarified for source links, physical pages, and continuous quotations. 436 targeted tests passed. Effects on model behavior are **Not yet tested**. |
+| Revised study protocol | Activity grouping, rubric examples, and streamlined evaluation are documented. Their implementation and development-pilot results are **Not yet tested**. |
+| Remaining research stages | Accepted full real-plan extraction, the second development plan, verification, expert assessment, comparison, and instruction assembly are pending. |
 
-The [change log](CHANGELOG.md) preserves dated results and limitations. Local evidence includes the Part 1 and Part 2 handoffs and `artifacts/freetown_run_extract_0001_review_2026-11-14/`; these ignored files are absent from a fresh clone. Historical diagnostic scripts may generate new answers and are not automatically portable replays.
+The [change log](CHANGELOG.md) preserves dated evidence. Local handoffs and `artifacts/freetown_run_extract_0001_review_2026-11-14/` provide additional diagnostics and require separate backup. Historical diagnostic scripts can generate new answers.
 
-Earlier capacity checks demonstrated a 54,013-token input with 1,525 output tokens at a 65,536-token context setting. Generation at the current full 73,728-context and 16,384-output limits is **Not yet tested**. Small-fixture success and token fit are not complete capacity or accuracy benchmarks.
+An earlier capacity check used 54,013 input tokens and 1,525 output tokens at a 65,536-token context setting. Generation at the full configured 73,728-context and 16,384-output limits is **Not yet tested**.
 
 ### Next implementation steps
 
-1. **Migrate the extraction contract together.** Update content/run schemas, shared field definitions, prompts, validation, fixtures, and tests for plan information, actions, and issues. Use exactly the nine agreed action fields; `action_type` is a list of unique categories. Remove goal links and separate goal/monitoring/benefit/cost lists from new outputs. Version the changed format and preserve the interpretation and readability of earlier saved runs.
-2. **Check a small action-focused example.** Exercise overlapping types, repeated actions, unstated fields, shared costs, expected versus reported benefits, quotations, and physical page citations. Check source meaning as well as JSON validity.
-3. **Complete development extraction.** Start separately identified real-plan runs, retain earlier failures, and inspect results against the PDF. Continue with the second development plan and focused OCR checks.
-4. **Implement verification.** Test a verifier model, profile, prompt, and runner against the exact saved extraction and source. Preserve continuing action/issue IDs and review unflagged content and omissions.
-5. **Pilot expert files and calculations.** Work through coding and assessment examples before freezing comparison settings. Implement only the agreed measures.
-6. **Run the fixed comparison.** Select the five plans and preserve independent references, paired outputs, assessments, failures, and analysis inputs.
-7. **Assemble the instruction dataset.** After assessment, curate supported targets and pair them with task instructions and sufficient source inputs; define and check the export format.
+1. **Migrate the extraction format.** Update content/run schemas, prompts, validation, response-schema conversion checks, fixtures, and relevant tests together. Use the nine action fields, activity grouping, and four status values in DESIGN.md. Assign a new run-format version and support loading earlier version 1 files with their original interpretation.
+2. **Check a small example.** Include tree planting across neighborhoods and phases, differing statuses, overlapping categories, shared costs, unstated fields, expected benefits, quotations, and physical pages. Inspect source meaning and format acceptance.
+3. **Complete development extraction.** Obtain and inspect accepted action-focused outputs for both development plans. Retain earlier failures and investigate source-recovery problems that affect extraction.
+4. **Implement verification.** Validate the different model's request and token-accounting path, then implement its profile, prompt, loop, input links, and continuity checks. Test corrections, omissions, unflagged errors, and failed V retries.
+5. **Pilot assessment and measures.** Implement templates and validation for the streamlined files below. Work through coding, grouping, rubric, evidence, and resolution examples. Check calculations against hand-worked cases and settle reviewer procedures before freezing comparison settings.
+6. **Run the comparison.** Select the five plans and preserve independent references, the first successful paired outputs, assessments, failed attempts, and analysis inputs. Report the agreed measures and explanatory examples.
+7. **Assemble instruction examples.** Pilot the export format, curate supported answers, include sufficient source inputs, and check example counts and source links.
 
-A related reproducibility gap needs attention before comparison: completed-run loading validates the linked preparation, PDF, and images, but does not compare the loaded page text against the startup fingerprint saved in `artifacts/extractor_input.json`. During-run fingerprint checks exist. File preservation by the normal workflow does not protect against later manual edits to prepared text. Address this explicitly when implementing source-integrity checks.
+Before comparison, also close the saved-source loading gap. Current loading validates the linked preparation, PDF, and images, but does not compare page text with the startup fingerprint in `artifacts/extractor_input.json`. Add that comparison when loading runs for verification or assessment, so later text edits are detected. During-run fingerprint checks already exist.
 
-Direct image delivery, hosted providers, richer status listing, broader datasets, publication packaging, and fine-tuning are deferred. They are not prerequisites for establishing a useful action-extraction baseline.
+Direct image delivery, hosted providers, richer status listing, broader datasets, publication packaging, and fine-tuning are deferred.
 
 ## Appendix: supporting JSON files
 
-These tables describe the workflow's saved files alongside the [plan dataset specification](DESIGN.md#appendix-dataset-coding-rules-and-evaluation). Operational file formats are implemented; the action-focused run format and expert-file formats remain **planned**. Existing version 1 runs retain their earlier five-category content.
+These tables define workflow files alongside the [plan dataset](DESIGN.md#appendix-dataset-coding-rules-and-evaluation). Registry, preparation, profile, and execution formats are implemented. The migrated action content and expert-file formats are planned. Existing version 1 runs use five-category content.
 
-All fields are required unless stated otherwise. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are project-relative. Types and null conventions follow DESIGN.md. “Evidence object” and “content” refer to its appendix; saved runs and expert files will use the action-focused content after migration.
+Fields are required unless stated otherwise. Dates use `YYYY-MM-DD`, timestamps use UTC, durations use seconds, and paths are project-relative. Content, evidence objects, and missing-value conventions follow DESIGN.md. Apply the migrated content schema to new runs and planned expert files.
 
 ### Registry
 
@@ -336,7 +352,7 @@ The root object has `schema_version` and `plans`; each plan is defined below.
 | `status` | enum | `ready`, `ready_with_gaps`, or `failed`. |
 | `problem` | string or null | Preparation problem/review notes. |
 
-Preparation settings:
+The preparation `settings` object contains the following fields.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -347,7 +363,7 @@ Preparation settings:
 | `image_render_dpi` | positive integer | Rendering resolution, currently 150 DPI. |
 | `candidate_image_min_area` | number greater than 0 and at most 1 | Version 3 only: per-image area threshold, currently 0.10. |
 
-`pages.json` is an ordered list of these objects:
+`pages.json` is an ordered list of page objects.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -360,7 +376,7 @@ Preparation settings:
 | `image_path` | string or null | Version 3: preserved full-page PNG. |
 | `image_regions` | list of region objects | Version 3: candidate regions; empty when none. |
 
-Each region:
+Each image region has the following fields.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -422,7 +438,7 @@ Python saves this outer object in `output.json`. The action-focused migration ne
 | `prompt_texts` | nonempty list of strings | Exact instruction-file contents in the same order as `prompt_paths`. |
 | `environment` | object | Observed execution environment described below. |
 
-Within `model`:
+The `model` object defines the connection.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -432,7 +448,7 @@ Within `model`:
 | `api_service` | string or null | Hosted API service, if applicable; an API is a software interface for requests. |
 | `provider` | string or null | Hosting provider, if applicable. |
 
-Within `generation`:
+The `generation` object defines sampling and output capacity.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -441,7 +457,7 @@ Within `generation`:
 | `seed` | integer or null | Random seed when supported; does not alone establish reproducibility. |
 | `max_output_tokens` | positive integer | Reserved answer capacity, including model thinking where applicable. |
 
-Within `document_tools`:
+The `document_tools` object defines shared tool settings.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -451,7 +467,7 @@ Within `document_tools`:
 | `image_render_dpi` | positive integer | Render resolution in dots per inch (DPI). |
 | `tool_timeout_seconds` | positive number | Time limit for one complete tool request. |
 
-Within `environment`; unavailable nullable observations remain null:
+The `environment` object records observations, using null where a nullable observation is unavailable.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -481,7 +497,7 @@ Within `environment`; unavailable nullable observations remain null:
 
 ### Tool log and validation report
 
-`tool_log.json` is an ordered list:
+`tool_log.json` is an ordered list of tool calls.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -491,7 +507,7 @@ Within `environment`; unavailable nullable observations remain null:
 | `elapsed_seconds` | nonnegative number or null | Measured tool duration. |
 | `error` | string or null | Failure explanation. |
 
-`validation_report.json`:
+`validation_report.json` records final-response checks.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -502,31 +518,36 @@ Within `environment`; unavailable nullable observations remain null:
 | `repairs` | list of repair objects | Ordered formatting changes. |
 | `valid` | Boolean | Whether the final candidate passed validation. |
 
-Nested report entries:
+Error and repair entries contain the following fields.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| Error: `category` | enum | `syntax`, `structure`, `reference`, or `other`. |
-| Error: `location` | string or null | Field path or syntax position where known. |
-| Error: `message` | string | Plain-language explanation. |
-| Repair: `rule` | string | Permitted repair applied. |
-| Repair: `location` | string | Location of change. |
-| Repair: `before` | string | Original text at the changed location. |
-| Repair: `after` | string | Replacement text. |
+| Error `category` | enum | `syntax`, `structure`, `reference`, or `other`. |
+| Error `location` | string or null | Field path or syntax position where known. |
+| Error `message` | string | Plain-language explanation. |
+| Repair `rule` | string | Permitted repair applied. |
+| Repair `location` | string | Location of change. |
+| Repair `before` | string | Original text at the changed location. |
+| Repair `after` | string | Replacement text. |
 
 ### Expert references — planned
+
+Use this format for the independent initial reference and shared final reference. Validate both against the action content schema. Record reviewer roles and disagreement procedures during the pilot.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `schema_version` | positive integer | Expert reference format version. |
 | `plan_id` | string | Registered document. |
+| `prepared_by` | nonempty list of strings | Names or study codes identifying the experts who prepared this version. |
 | `content` | object | Same plan information and actions as DESIGN.md. |
-| `revisions` | list of revision objects | Final reference only; initial reference stays unchanged. |
+| `revisions` | list of revision objects | Empty for the initial reference. The final reference records accepted changes from that initial version. |
 | `revisions[].record_ids` | list of strings | Reference actions affected by the revision. |
 | `revisions[].reason` | string | Why the change/addition is justified. |
 | `revisions[].evidence` | list of evidence objects | Supporting source passages and pages. |
 
 ### Expert assessments — planned
+
+Each file assesses one saved output. Completion requires a shared final reference, non-null judgments, complete activity coverage, and checks for every initially open E issue marked resolved by V. The pair's final-reference paths must agree.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -538,53 +559,35 @@ Nested report entries:
 | `final_reference_path` | string or null | Shared final reference; nullable while draft. |
 | `status` | enum | `draft` or `complete`. |
 | `completed_at` | timestamp string or null | Completion time; null while draft. |
-| `initial_matches` | list of match objects | Matches against the initial reference. |
+| `assessed_by` | nonempty list of strings | Names or study codes identifying the experts assessing this output. |
 | `record_scores` | list of score objects | One per final reference action. |
-| `additional_records` | list of addition objects | Distinct additions relative to the initial reference. |
-| `quotation_checks` | list of quotation-check objects | Every supplied quotation use and cited page. |
+| `output_groups` | list of objects | Each distinct output activity, its source support, and its combined evidence judgment. |
 | `resolution_checks` | list of resolution-check objects | Initially open E issues marked resolved by V; empty for E. |
+| `review_notes` | list of strings | Explanatory examples and observations, including useful corrections or issue behavior. Empty when none are needed. |
 
-Each initial match:
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `reference_record_id` | string | Initial reference action. |
-| `output_record_ids` | list of strings | Semantically matching output actions; empty for omission. |
-
-Each record score:
+Each record score applies the rubric in DESIGN.md.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `reference_record_id` | string | Final reference action. |
 | `output_record_ids` | list of strings | Matching output actions. |
 | `score` | 0, 0.5, 1, or null | Rubric judgment; null while pending. Omission scores 0 once assessed. |
-| `reason` | string | Expert explanation. |
+| `reason` | string | Explanation of the score, including missing, incorrect, or unsupported details. |
 
-Each distinct addition:
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `description` | string | Additional information proposed by the output. |
-| `output_record_ids` | list of strings | Output actions describing this addition. |
-| `support_status` | enum | `supported`, `unsupported`, or `undetermined` while pending. |
-| `final_reference_record_ids` | list of strings | Final reference actions containing supported information. |
-| `reason` | string | Expert explanation. |
-| `evidence` | list of evidence objects | Source support for the judgment. |
-
-Each quotation check:
+Each output group represents one specific activity. Combine split or duplicate records and retain every contributing record ID. A bundled record may contribute to more than one group.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `record_id` | string | Output action using the quote. |
-| `evidence_index` | nonnegative integer | Position in that action's evidence list, starting at 0. |
-| `claim_fields` | nonempty list of strings | Fields this quotation is being used to support, assigned by experts. |
-| `supports_claim` | Boolean or null | True only if faithful to the PDF and supportive of all assigned claims; null while pending. |
-| `page_checks` | list of page-check objects | One per cited page. |
-| `reason` | string | Expert explanation, including OCR concerns. |
-| `page_checks[].page_number` | positive integer | Cited physical PDF page. |
-| `page_checks[].correct` | Boolean or null | Whether the citation is correct; null while pending. |
+| `description` | string | Specific activity represented by the group and the content it covers. |
+| `output_record_ids` | nonempty list of unique strings | Raw output action IDs contributing to this activity. |
+| `reference_record_id` | string or null | Corresponding final reference activity when supported. Null for an unsupported activity or pending match. |
+| `support_status` | enum | Whether the source supports an eligible heat adaptation activity, using `supported`, `unsupported`, or `undetermined` while pending. Detail errors within supported activities affect the action score. |
+| `evidence_adequate` | Boolean or null | True when the group's supplied evidence meets every requirement in DESIGN.md. False for missing or inadequate evidence, null while pending. |
+| `reason` | string | Explanation of activity support and evidence adequacy, identifying important claim, quotation, OCR, or page errors. |
 
-Each resolution check:
+Every raw output action must appear in an assessed group. Supported groups must link to unique final reference activities, with score matches agreeing with those groups. An omitted reference activity has an empty match list and score 0 once assessed. An unsupported group requires a null reference link and `evidence_adequate` false. Record source passages and page references in the explanation when needed to substantiate judgments.
+
+Each resolution check assesses an initially open E issue that V marked resolved.
 
 | Field | Type | Meaning |
 | --- | --- | --- |

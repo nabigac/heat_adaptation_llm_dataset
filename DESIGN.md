@@ -6,7 +6,7 @@
 
 Plans issued by governments and public agencies describe actions to address heat risk. Extracting these actions into a consistent dataset would support comparison across jurisdictions. The work requires reading varied documents, combining descriptions spread across pages, and preserving details such as implementation status, costs, and expected benefits.
 
-Large language models (LLMs) could assist this work, but their outputs require assessment against the source. This study examines a workflow combining open-weight models, document tools, and heat adaptation experts. Open-weight models have downloadable trained parameters and can be run locally. Preserving the source documents, model versions, prompts, settings, and expert judgments supports reproducibility.
+Large language models (LLMs) could assist this work, but their outputs require assessment against the source. This study will examine a workflow combining open-weight models, document tools, and heat adaptation experts. Open-weight models have downloadable trained parameters and can be run locally. Preserving the source documents, model versions, prompts, settings, and expert judgments supports reproducibility.
 
 ## 2. Research aim and objectives
 
@@ -14,8 +14,8 @@ The study will develop and evaluate a workflow pairing heat adaptation experts w
 
 The study has two objectives.
 
-1. **Show how experts and LLMs are paired to build an extraction workflow.** Explain how expert knowledge, model outputs, and successive revisions shape the workflow, and share practical lessons for researchers developing similar workflows.
-2. **Evaluate added verification.** Compare an extractor alone (E) with that same extraction revised by a different open-weight model (E+V). Assess corrected errors, recovered omissions, introduced errors, unresolved issues, and computational requirements.
+1. **To show how experts and LLMs can be paired to build an extraction workflow.** The study will examine how expert knowledge, model outputs, and successive revisions shape the workflow and identify practical lessons for researchers developing similar workflows.
+2. **To evaluate added verification.** The study will compare an extractor alone (E) with that same extraction revised by a different open-weight model (E+V). The comparison will assess corrected errors, recovered omissions, introduced errors, unresolved issues, and computational requirements.
 
 ## 3. Methods
 
@@ -23,27 +23,27 @@ The study has two objectives.
 
 Eligible plans meet all of the following criteria.
 
-- Final, publicly available English plan issued by a government or public agency, published or updated in 2010 or later.
-- Address heat directly, or contain a dedicated heat section with at least one action.
-- Available as a PDF with stable page positions and content readable by a person, including scanned pages.
+- They are final, publicly available English plans issued by governments or public agencies, published or updated in 2010 or later.
+- They address heat directly, or contain a dedicated heat section with at least one action.
+- They are available as PDFs with stable page positions and content readable by a person, including scanned pages.
 
-Experts screen eligibility, preferring recent versions. City, county, regional, state, and national plans are eligible, with particular interest in city plans. Broader plans may cover heat adaptation across their jurisdiction.
+Experts will screen eligibility, with preference for recent versions. City, county, regional, state, and national plans are eligible, with particular interest in city plans. Broader plans may cover heat adaptation across their jurisdiction.
 
 ### Study sample
 
 | Study set | Planned size | Purpose |
 | --- | --- | --- |
-| Development | 2 plans | Refine how experts and LLMs work together, using observed problems and revisions to identify lessons for building the workflow. |
-| Comparison | 5 separate plans | Evaluate E and E+V against independent expert work under fixed settings. |
-| Expansion | Deferred | Extend the dataset after evaluating the workflow. |
+| Development | 2 plans | Refinement of how experts and LLMs work together, with observed problems and revisions informing practical lessons. |
+| Comparison | 5 separate plans | Comparison of E and E+V against independent expert work under fixed settings. |
+| Expansion | Deferred | Possible dataset expansion after evaluation of the workflow. |
 
-Select plans that vary in length, layout, and type, avoiding near-duplicates. Select the comparison set before comparison runs and keep development documents separate. Record the selection rationale and document characteristics.
+Plans will be selected to provide variation in length, layout, and type, with near-duplicates excluded. The comparison set will be selected before comparison runs and will be separate from the development documents. The selection rationale and document characteristics will be recorded.
 
 ### Extracted dataset and action records
 
-Each plan produces one JSON dataset containing plan information, action records, and review issues. JSON stores named fields in objects and lists of objects in arrays.
+Each extraction will produce one JSON dataset for a plan, containing plan information, action records, and review issues. JSON stores named fields in objects and lists of objects in arrays.
 
-Within a plan, group actions by the specific activity undertaken. For example, all tree planting belongs in one action object, including planting in different neighborhoods or phases. Preserve the details associated with each location or phase. Tree planting and drinking fountain installation form separate actions. The broad `action_type` categories classify each activity and may overlap.
+Within a plan, actions are grouped by the specific activity undertaken. For example, all tree planting belongs in one action object, including planting in different neighborhoods or phases. Details associated with each location or phase are preserved. Tree planting and drinking fountain installation form separate actions. The broad `action_type` categories classify each activity and may overlap.
 
 #### Plan dataset components
 
@@ -72,36 +72,36 @@ Costs, benefits, and evidence are attached to the activity they describe. The [a
 
 ### Evidence and issues
 
-Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Keep separate passages in separate evidence entries, including relevant headings or footnotes. Together, quotations must support the activity and its stated details.
+Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Separate passages are represented by separate evidence entries, including relevant headings or footnotes. Adequate evidence collectively supports the activity and its stated details.
 
-Group concerns about one action into one issue. Record omissions and source gaps without an action link when necessary. Ordinary unstated details use the defined missing values. The verifier retains existing issue IDs, may add issues, and explains claimed resolutions for expert assessment. Experts may subsequently resolve issues in curated copies, with `resolved_by` recorded as `expert` and the original issue origin retained. Expert curation corrects or excludes unsupported material.
+Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains existing issue IDs, may add issues, and explains claimed resolutions for expert assessment. Experts may subsequently resolve issues in curated copies, with `resolved_by` recorded as `expert` and the original issue origin retained. Expert curation corrects or excludes unsupported material.
 
 ### Workflow and comparison
 
-During development, models draft action records and flag uncertainties. Experts examine the outputs against the plans and identify changes needed in coding rules, prompts, tools, and review procedures. Preserve examples showing what prompted a revision, how it was addressed, and what was observed afterwards. These examples support the study's account of building the workflow and the lessons drawn from that process.
+During development, models will draft action records and flag uncertainties. Experts will examine the outputs against the plans and identify changes needed in coding rules, prompts, tools, and review procedures. Examples showing what prompted a revision, how it was addressed, and what was observed afterwards will be preserved. These examples will support the study's account of building the workflow and the lessons drawn from that process.
 
-The extractor and verifier use the same source preparation and document tool capabilities through Model Context Protocol (MCP), the interface connecting agents to tools.
+The extractor and verifier will use the same source preparation and document tool capabilities through Model Context Protocol (MCP), the interface connecting agents to tools.
 
 | Stage | Procedure and saved result |
 | --- | --- |
-| 1. Registration and preparation | Preserve the original PDF, collection metadata, page text, and preparation problems. |
-| 2. Extraction (E) | Supply the whole prepared plan. Save the answer, issues, settings, tool activity, and execution records. |
-| 3. Verification (E+V) | A different model checks a copy of that exact extraction, including unflagged content and possible omissions. Save its full revised answer. |
-| 4. Independent reference preparation | After both outputs succeed, experts code the original PDF without seeing model outputs. Preserve this initial reference. |
-| 5. Expert assessment | Match activities by meaning, review possible reference corrections, and assess both outputs against one shared final reference. Preserve revision reasons and source evidence. |
-| 6. Analysis and dataset assembly | Synthesize lessons about pairing experts and LLMs to build the workflow. Compare paired outputs and assemble instruction examples from expert-curated answers and their supporting inputs. |
+| 1. Registration and preparation | The original PDF, collection metadata, page text, and preparation problems will be preserved. |
+| 2. Extraction (E) | The extractor will receive the whole prepared plan. Its answer, issues, settings, tool activity, and execution records will be saved. |
+| 3. Verification (E+V) | A different model will check a copy of that exact extraction, including unflagged content and possible omissions. Its full revised answer will be saved. |
+| 4. Independent reference preparation | After successful E and V runs, experts will code the original PDF before viewing model outputs. This initial reference will be preserved. |
+| 5. Expert assessment | Experts will match activities by meaning, review possible reference corrections, and assess both outputs against one shared final reference. Revisions will be recorded with reasons and source evidence. |
+| 6. Analysis and dataset assembly | Lessons about pairing experts and LLMs to build the workflow will be synthesized. Paired outputs will be compared, and instruction examples will be assembled from expert-curated answers and their supporting inputs. |
 
-Use the first successful E run and the first successful V run linked to it under the fixed settings. Successful execution means format and execution checks passed. Retain failed attempts and link manual retries. Deliberate repeats of successful work are exploratory.
+Each comparison will use the first successful E run and the first successful V run linked to it under the fixed settings. Successful execution means that format and execution checks have passed. Failed attempts will be retained, with manual retries linked to the earlier attempt. Deliberate repeats of successful work will be treated as exploratory.
 
-Fix models, prompts, preparation, tools, coding rules, and scoring before comparison. Document subsequent changes and identify affected runs. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) describes current software and planned work, and [README.md](README.md) provides available commands.
+Models, prompts, preparation, tools, coding rules, and scoring will be fixed before comparison. Any subsequent changes and the affected runs will be documented. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) describes current software and planned work, and [README.md](README.md) provides available commands.
 
 ## 4. Evaluation
 
 ### Expert reference and scoring
 
-Experts use the same rules for grouping activities as the models. After preserving the independent initial reference, review supported additions and other reference corrections from both outputs. Record every revision with its reason and source evidence, then score both saved outputs against the shared final reference.
+Experts will use the same rules for grouping activities as the models. Once the independent initial reference has been preserved, supported additions and other reference corrections identified from both outputs will be reviewed. Every revision will be recorded with its reason and source evidence. Both saved outputs will then be scored against the shared final reference.
 
-Match actions by activity and meaning. Assess split or duplicate records together and count each reference activity once. Preserve conflicting or unsupported details when judging the output. If a record bundles different activities, assess its relevant content against each matching reference activity.
+Actions will be matched by activity and meaning. Split or duplicate records will be assessed together, with each reference activity counted once. All substantive claims in matched records, including conflicting or unsupported details, will be considered in scoring. If a record bundles different activities, its relevant content will be assessed against each matching reference activity.
 
 | Score | Judgment about a reference action and its matched output |
 | --- | --- |
@@ -109,17 +109,9 @@ Match actions by activity and meaning. Assess split or duplicate records togethe
 | 0.5 | Some substantive information about the activity is correct, but a required detail is wrong, omitted, or unsupported. |
 | 0 | The activity is omitted, or the matched content contains no correct substantive information about it. |
 
-Assess the description, classification, status, locations, recipients, costs, and benefits under the coding rules. Required substantive details include stated quantities, implementers, timing, conditions, and differences between neighborhoods or phases. Defined missing values are correct when the source is silent. Experts judge content against the original PDF, with supplied quotations and citations assessed through the evidence measure. Plan information is checked during curation, and issues have their own measures.
+Assessment will cover the description, classification, status, locations, recipients, costs, and benefits under the coding rules. Required substantive details include stated quantities, implementers, timing, conditions, and differences between neighborhoods or phases. Defined missing values are correct when the source is silent. Experts will judge content against the original PDF, with supplied quotations and citations assessed through the evidence measure. Plan information will be checked during curation, and issues will be assessed through their own measures.
 
-For a fictional example, a heat adaptation section reports 100 trees planted in North Ward in 2025 and another 200 planned for South Ward in 2027. The reference contains one action for tree planting, classified as nature-based, with both wards and their associated quantities, dates, and phase statuses. Its overall status is `unspecified` because the source supplies differing phase statuses without an overall status.
-
-| Score | Example output |
-| --- | --- |
-| 1 | Correctly records both planting phases, their wards, quantities, dates, and statuses, and uses the defined missing values for unstated fields. |
-| 0.5 | Correctly records the North Ward planting but omits South Ward, or incorrectly describes all 300 trees as already planted. |
-| 0 | Omits tree planting, or supplies a description with no correct substantive information about that activity. |
-
-This study-specific rubric will be piloted on development plans.
+This study-specific rubric will be piloted on development plans. A worked scoring example appears in [IMPLEMENTATION.MD](IMPLEMENTATION.MD#worked-scoring-example).
 
 ### Evaluation outcomes
 
@@ -194,7 +186,7 @@ Within `content`:
 | `action_recipient` | string or null | All stated intended populations or affected groups, retaining relevant local or phase-specific distinctions. |
 | `action_cost` | string or null | Amounts, currency/units, periods, cost character, and qualifications, with each amount linked in the description to its activity, location, or phase. Shared amounts are identified. |
 | `action_benefit` | string or null | Outcomes, quantities, affected groups, comparisons, timing, and qualifications, including local or phase-specific differences and whether expected, modelled, or observed. |
-| `evidence` | list of evidence objects | Quotations supporting the action and its details. An empty list requires a review issue and is not acceptable for an unqualified curated record. |
+| `evidence` | list of evidence objects | Quotations supporting the action and its details. An empty list is accompanied by a review issue. Acceptance as an unqualified curated record requires supporting evidence. |
 
 Each evidence object:
 
@@ -281,46 +273,46 @@ These rules describe how models and experts interpret the source and organize ac
 | How should other reported states be handled? | States outside the four values, such as withdrawal, are retained in `action`, with `action_status` set to `unspecified` and the coding limitation identified in an issue. |
 | How should costs be recorded? | Amounts retain their original currency or units, periods, qualifications, and whether estimated, allocated, spent, or needed. Each amount retains its association with the relevant phase or location. |
 | How should benefits be recorded? | Outcomes retain quantities, affected groups, comparisons, timing, and qualifications, including stated adverse effects and whether expected, modelled, or observed. |
-| When should shared budgets or outcomes be attached to an action? | The source must establish an activity link. Shared amounts or outcomes retain their scope, and repeated amounts are counted once. General plan-wide statements without an activity link fall outside the action dataset. |
-| How should missing details be recorded? | Unavailable descriptive fields use `null`, unstated overall status uses `unspecified`, and an unjustifiable type uses `[]` with an issue explaining the uncertainty. Missing details alone cannot establish zero cost, no benefit, or absence of an action. |
+| When should shared budgets or outcomes be attached to an action? | Shared budgets or outcomes are attached when the source establishes an activity link. Their scope is retained, and repeated amounts are counted once. General plan-wide statements without an activity link fall outside the action dataset. |
+| How should missing details be recorded? | Unavailable descriptive fields are represented by `null`, and unstated overall status by `unspecified`. When no action type can be justified, the type list is empty (`[]`) and an issue explains the uncertainty. Missing details alone cannot establish zero cost, no benefit, or absence of an action. |
 | How should supporting evidence be recorded? | Exact continuous quotations use physical PDF page numbers counted from 1. Separate passages have separate evidence entries, including necessary headings or footnotes. Together, the evidence supports the activity and its recorded details. |
 
 ### G. Evaluation measures and calculations
 
-Use the selected E and linked E+V outputs. Quality is assessed on each saved output before curation. Runtime and token totals for E+V include the shared extractor and the verifier.
+The selected E and linked E+V outputs form the basis of comparison. Quality is assessed on each saved output before curation. Runtime and token totals for E+V include the shared extractor and the verifier.
 
 #### Before expert assessment
 
 | Measure | Calculation | Comparison |
 | --- | --- | --- |
-| Open issues | Count issues whose `issue_status` is `open` in each output. | E is the initial baseline. E+V includes retained and newly raised open issues. |
-| Successful processing runtime | Sum measured durations of selected successful stages, in seconds. | E uses extractor duration. E+V adds verifier duration. |
-| Tokens used | Sum provider-reported input and output tokens across generation calls, retaining the two components. | E uses extractor calls. E+V adds verifier calls. |
-| Failed executions | Count distinct failed comparison run IDs, including retries. | Report by stage, counting shared extractor failures once. |
+| Open issues | Number of issues whose `issue_status` is `open` in each output. | E is the initial baseline. E+V includes retained and newly raised open issues. |
+| Successful processing runtime | Sum of measured durations of selected successful stages, in seconds. | E uses extractor duration. E+V adds verifier duration. |
+| Tokens used | Sum of provider-reported input and output tokens across generation calls, with the two components retained. | E uses extractor calls. E+V adds verifier calls. |
+| Failed executions | Number of distinct failed comparison run IDs, including retries. | Counts are reported by stage, with shared extractor failures counted once. |
 
-Runtime covers stage setup/loading, model and tool requests, saving, validation, permitted repairs, and cleanup. Report measurements for failed attempts separately from successful processing. Preparation, human review, and gaps between attempts fall outside stage runtime.
+Runtime covers stage setup/loading, model and tool requests, saving, validation, permitted repairs, and cleanup. Measurements for failed attempts are reported separately from successful processing. Preparation, human review, and gaps between attempts fall outside stage runtime.
 
 #### After expert assessment
 
-First reconcile supported additions and corrections into the shared final reference. Group output content by specific activity, combining split or duplicate records while retaining their IDs and all substantive claims. Assess bundled activities separately. Each final reference activity receives one score under section 4.
+Supported additions and corrections are first reconciled into the shared final reference. Output content is grouped by specific activity, with split or duplicate records combined and their IDs and all substantive claims retained. Bundled activities are assessed separately. Each final reference activity receives one score under section 4.
 
 | Measure | Calculation | Interpretation |
 | --- | --- | --- |
 | Action score percentage | Sum of final reference action scores ÷ number of final reference actions × 100. | Main quality measure, combining correctness and completeness with partial credit. |
-| Unsupported action count | Count distinct output activities without source support as eligible heat adaptation actions, alongside total distinct output activities. | Captures invented or ineligible activities outside the reference denominator. Wrong details within a supported activity affect its action score. |
-| Actions with adequate evidence | Number of output activities with adequate evidence ÷ total distinct output activities × 100. | Evidence must collectively support all recorded substantive details. Every supplied quotation must faithfully reproduce the PDF and cite its correct physical pages. Missing evidence and unsupported activities fail this judgment. |
-| Expert-confirmed verifier resolutions | Count initially open E issues with `issue_status` set to `resolved` and `resolved_by` set to `verifier` in E+V that experts judge justifiably resolved. Report as confirmed / claimed resolutions. | Shows whether the verifier's explanations address all grouped concerns. The count of open issues in E supplies the initial issue total. |
+| Unsupported action count | Number of distinct output activities judged unsupported or ineligible under the coding rules, alongside the total number of distinct output activities. | Captures invented or ineligible activities outside the reference denominator. Wrong details within a supported activity affect its action score. |
+| Actions with adequate evidence | Number of output activities with adequate evidence ÷ total distinct output activities × 100. | Evidence is adequate when it collectively supports all recorded substantive details and every supplied quotation faithfully reproduces the PDF and cites its correct physical pages. Missing evidence and unsupported activities fail this judgment. |
+| Expert-confirmed verifier resolutions | Number of initially open E issues with `issue_status` set to `resolved` and `resolved_by` set to `verifier` in E+V that experts judge justifiably resolved, reported as confirmed / claimed resolutions. | Shows whether the verifier's explanations address all grouped concerns. The count of open issues in E supplies the initial issue total. |
 
-For example, six scores of 1, two of 0.5, and two omissions among ten reference activities yield an action score of 70%. If an output also invents two activities, report those in the unsupported action count. Keep the score distribution available in the assessments.
+For example, six scores of 1, two of 0.5, and two omissions among ten reference activities yield an action score of 70%. Two additional invented activities would contribute to the unsupported action count. The score distribution is retained in the assessments.
 
-An activity can receive full content credit while its supplied evidence is inadequate, for example when its description is correct but its page citation is wrong. Experts check all supplied evidence, recording one adequacy judgment and explanation per output activity. Record important quotation, citation, or coverage failures in that explanation.
+An activity can receive full content credit while its supplied evidence is inadequate, for example when its description is correct but its page citation is wrong. Experts check all supplied evidence, recording one adequacy judgment and explanation per output activity. The explanation identifies important quotation, citation, or coverage failures.
 
 For issue assessment, only initially open E issues that V marks resolved require a resolution judgment. A claimed resolution is confirmed when source review shows that every grouped concern was addressed. Comparisons use the saved model outputs before expert curation, while expert fixes are recorded in curated copies. More open issues can reflect improved detection, so counts are interpreted alongside quality scores and examples.
 
 #### Paired comparisons and reporting conventions
 
-Calculate paired changes as E+V minus E, expressing percentage differences in percentage points. Report every plan with counts and denominators. A descriptive overall summary uses the mean of valid per-plan percentages and identifies contributing plans. Retain per-plan results so larger documents do not hide variation.
+Paired changes are calculated as E+V minus E, with percentage differences expressed in percentage points. Results are reported for each plan with counts and denominators. A descriptive overall summary uses the mean of valid per-plan percentages and identifies contributing plans. Results for individual plans allow variation between documents to be examined.
 
-Use `null` for pending judgments or unavailable measurements. Missing required usage or duration makes the corresponding total unavailable. Zero denominators are not applicable. Supported output activities absent from the initial reference enter the shared final reference before scoring. Any activity whose support is still undetermined keeps the relevant quality measures pending.
+The value `null` indicates pending judgments or unavailable measurements. Missing required usage or duration makes the corresponding total unavailable. Zero denominators are not applicable. Supported output activities absent from the initial reference enter the shared final reference before scoring. Any activity whose support is still undetermined keeps the relevant quality measures pending.
 
-The study reports three quality measures and two issue measures. Use review notes for detailed quotation, citation, addition, and issue examples. Formal assessment files contain the judgments required above.
+The study reports three quality measures and two issue measures. Review notes describe detailed quotation, citation, addition, and issue examples. Formal assessment files contain the judgments required above.

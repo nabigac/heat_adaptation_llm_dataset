@@ -259,6 +259,16 @@ An output record can contribute to several activity groups if it bundles distinc
 
 During the development pilot, record reviewer numbers, expertise, and roles, and settle how disagreements are resolved. The combined evidence judgment reduces form-filling while still requiring source inspection. Review notes capture useful examples of quotation errors, citation errors, omissions, false flags, and justified or unjustified resolutions.
 
+#### Worked scoring example
+
+For a fictional example, a heat adaptation section reports 100 trees planted in North Ward in 2025 and another 200 planned for South Ward in 2027. The reference contains one action for tree planting, classified as nature-based, with both wards and their associated quantities, dates, and phase statuses. Its overall status is `unspecified` because the source supplies differing phase statuses without an overall status.
+
+| Score | Example output |
+| --- | --- |
+| 1 | Both planting phases, their wards, quantities, dates, and statuses are recorded correctly, with the defined missing values for unstated fields. |
+| 0.5 | The North Ward planting is recorded correctly but South Ward is omitted, or all 300 trees are incorrectly described as already planted. |
+| 0 | Tree planting is omitted, or the description contains no correct substantive information about that activity. |
+
 ### Measurement capture and calculation
 
 `metrics.py` will calculate all measures from validated selected files. Before expert assessment, it can calculate open issues, runtime, provider-reported tokens, and failed-run counts. After assessment, it adds action scores, unsupported activity counts, adequate-evidence percentages, and confirmed/claimed verifier resolutions.

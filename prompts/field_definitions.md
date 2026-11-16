@@ -1,16 +1,16 @@
 # Plan dataset fields
 
-Return one JSON object containing exactly content and review. Every field below
+Return one JSON object containing exactly plan_data and plan_issues. Every field below
 is required except issue_type. Unknown fields are not allowed. Python records
 run IDs, settings, measurements, and validation reports separately.
 
-## Content
+## Plan data
 
-content contains exactly plan_info and plan_actions. plan_actions is a list of
+plan_data contains exactly metadata and actions. actions is a list of
 action objects. An empty list follows a completed search for eligible activities,
 with any unresolved source gap retained as an issue.
 
-plan_info has these fields.
+metadata has these fields.
 
 - plan_title: nonblank string or null, as stated in the plan.
 - jurisdiction_name: nonblank string or null, the covered jurisdiction.
@@ -23,7 +23,7 @@ plan_info has these fields.
 - date_accessed: exact supplied collection date in YYYY-MM-DD format.
 - language: English.
 
-Each plan_actions object has exactly these nine fields.
+Each actions object has exactly these nine fields.
 
 - action_id: stable nonblank local ID, such as action_0001, unique within the plan.
 - action: nonblank description of one specific activity across the plan, retaining
@@ -52,9 +52,9 @@ exact continuous passage. page_numbers is a nonempty list of unique positive
 integers within the physical original PDF page range. A passage may span pages.
 Together, quotations support the activity and all its recorded substantive details.
 
-## Review
+## Plan issues
 
-review contains exactly issues, a list that may be empty. Each issue has these
+plan_issues contains exactly issues, a list that may be empty. Each issue has these
 fields, with concerns about the same action grouped into one issue.
 
 - issue_id: nonblank issue ID unique in the list, such as issue_0001.

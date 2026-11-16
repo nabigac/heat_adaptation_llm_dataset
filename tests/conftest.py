@@ -1,25 +1,15 @@
-"""Shared fictional run metadata; no models are run and no real measurements are asserted."""
-# Pytest discovers conftest.py automatically. Tests request run_record by argument
-# name; its default fixture scope creates a fresh dictionary for each test. Local
-# fixtures in a test module can override shared fixtures without changing this one.
-
-import copy
+"""Shared fictional run data; tests do not assert real model measurements."""
 
 import pytest
 
 
 @pytest.fixture
-def legacy_run_record() -> dict:
-    """A complete fictional successful extraction with explicitly unknown versions."""
-    # A succeeded label here is synthetic test data, not a completed model run.
-    # Unknown version/hardware values are deliberately None; tests must not invent
-    # actual machine observations or download the fictional model named below.
-    environment = {name: None for name in (
-        "model_revision", "runtime", "runtime_version", "quantization", "hardware",
-        "code_commit", "python_version", "model_client_version", "preparation_version",
-        "tools_version", "ocr_version",
-    )}
-    environment.update(code_dirty=False, model_loaded_at_start=None)
+def run_record() -> dict:
+    """A current-format successful run, copied afresh for each requesting test.
+
+    The status and values are controlled test data. Unknown environment facts
+    remain None, and the fictional model is never downloaded or run.
+    """
     return {
         "schema_version": 1,
         "plan_id": "plan_0099",
@@ -37,70 +27,101 @@ def legacy_run_record() -> dict:
             "name": "fictional_extractor",
             "stage": "extractor",
             "model": {
-                "name": "fictional-model", "execution_mode": "local",
-                "endpoint": "http://localhost:11434", "api_service": None, "provider": None,
+                "name": "fictional-model",
+                "execution_mode": "local",
+                "endpoint": "http://localhost:11434",
+                "api_service": None,
+                "provider": None
             },
-            "generation": {"temperature": 0, "top_p": None, "seed": None, "max_output_tokens": 8192},
+            "generation": {
+                "temperature": 0,
+                "top_p": None,
+                "seed": None,
+                "max_output_tokens": 8192
+            },
             "context_limit": 32768,
-            "prompt_paths": ["prompts/extractor.md", "prompts/shared.md"],
+            "prompt_paths": [
+                "prompts/extractor.md",
+                "prompts/shared.md"
+            ],
             "max_tool_calls": 10,
             "model_timeout_seconds": 600,
             "image_input_enabled": False,
             "document_tools": {
-                "ocr_enabled": False, "ocr_engine": None, "ocr_language": None,
-                "image_render_dpi": 150, "tool_timeout_seconds": 120,
+                "ocr_enabled": False,
+                "ocr_engine": None,
+                "ocr_language": None,
+                "image_render_dpi": 150,
+                "tool_timeout_seconds": 120
             },
-            "prompt_texts": ["Extract heat adaptation records.", "Preserve exact quotations."],
-            "environment": environment,
+            "prompt_texts": [
+                "Extract heat adaptation records.",
+                "Preserve exact quotations."
+            ],
+            "environment": {
+                "model_revision": None,
+                "runtime": None,
+                "runtime_version": None,
+                "quantization": None,
+                "hardware": None,
+                "code_commit": None,
+                "python_version": None,
+                "model_client_version": None,
+                "preparation_version": None,
+                "tools_version": None,
+                "ocr_version": None,
+                "code_dirty": False,
+                "model_loaded_at_start": None
+            }
         },
-        "model_calls": [{
-            "input_tokens": 7, "output_tokens": 9, "finish_reason": "stop", "truncated": False,
-            "response_path": "runs/plan_0099/run_extract_0001/responses/response_01.json",
-        }],
+        "model_calls": [
+            {
+                "input_tokens": 7,
+                "output_tokens": 9,
+                "finish_reason": "stop",
+                "truncated": False,
+                "response_path": "runs/plan_0099/run_extract_0001/responses/response_01.json"
+            }
+        ],
         "tool_log_path": None,
-        "content": {
-            "plan_info": {
-                "plan_title": "Fictional heat plan", "jurisdiction_name": None, "country": None,
-                "plan_scale": None, "plan_type": None, "publication_year": None, "lead_agencies": [],
-                "source_url": "https://example.org/plan.pdf", "date_accessed": "2026-11-03", "language": "English",
-            },
-            "plan_goals": [],
-            "plan_actions": [{
-                "action_id": "action_0001", "action": "Plant 20 trees.",
-                "action_status": "planned", "related_goal_ids": [],
-                "evidence": [{"quote": "We will plant 20 trees.", "page_numbers": [1]}],
-            }],
-            "plan_mon_eval": [], "plan_benefits": [], "plan_costs": [],
-        },
-        "review": {"issues": []},
         "error": None,
+        "plan_data": {
+            "metadata": {
+                "plan_title": "Fictional heat plan",
+                "jurisdiction_name": None,
+                "country": None,
+                "plan_scale": None,
+                "plan_type": None,
+                "publication_year": None,
+                "lead_agencies": [],
+                "source_url": "https://example.org/plan.pdf",
+                "date_accessed": "2026-11-03",
+                "language": "English"
+            },
+            "actions": [
+                {
+                    "action_id": "action_0001",
+                    "action": "Plant 20 trees.",
+                    "action_type": [
+                        "nature-based"
+                    ],
+                    "action_status": "planned",
+                    "action_location": None,
+                    "action_recipient": None,
+                    "action_cost": None,
+                    "action_benefit": None,
+                    "evidence": [
+                        {
+                            "quote": "We will plant 20 trees.",
+                            "page_numbers": [
+                                1
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        "plan_issues": {
+            "issues": []
+        }
     }
-
-
-@pytest.fixture
-def run_record(legacy_run_record) -> dict:
-    """Retain the version 1 contract for historical run and regression checks."""
-    return copy.deepcopy(legacy_run_record)
-
-
-@pytest.fixture
-def action_run_record(legacy_run_record) -> dict:
-    """A version 2 fixture used by current extraction and response-schema checks."""
-    record = copy.deepcopy(legacy_run_record)
-    record["schema_version"] = 2
-    info = record["content"]["plan_info"]
-    record["content"] = {
-        "plan_info": info,
-        "plan_actions": [{
-            "action_id": "action_0001",
-            "action": "Plant 20 trees.",
-            "action_type": ["nature-based"],
-            "action_status": "planned",
-            "action_location": None,
-            "action_recipient": None,
-            "action_cost": None,
-            "action_benefit": None,
-            "evidence": [{"quote": "We will plant 20 trees.", "page_numbers": [1]}],
-        }],
-    }
-    return record

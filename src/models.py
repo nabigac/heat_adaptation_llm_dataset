@@ -35,7 +35,7 @@ from validation import validate_profiles
 _TIMING_FIELDS = ("total_duration", "load_duration", "prompt_eval_duration", "eval_duration")
 _SCHEMA_DIRECTORY = Path(__file__).resolve().parents[1] / "schemas"
 _RESPONSE_SCHEMA_FILES = {
-    "urn:heat-adaptation:content": "content.schema.json",
+    "urn:heat-adaptation:plan-data": "plan_data.schema.json",
     "urn:heat-adaptation:agent-response": "agent_response.schema.json",
 }
 _RESPONSE_SCHEMA_URI = "urn:heat-adaptation:agent-response"
@@ -226,7 +226,7 @@ class OllamaSchemaError(ValueError):
     """Stop schema preparation when a compatible copy cannot be built safely."""
 
 
-def prepare_ollama_response_schema(*, schema_version: int = 2) -> dict:
+def prepare_ollama_response_schema() -> dict:
     """Build a fresh, self-contained provider copy of the response contract.
 
     Resolve only the two local authoritative schemas and rewrite the nonblank
@@ -238,12 +238,9 @@ def prepare_ollama_response_schema(*, schema_version: int = 2) -> dict:
     enforces every keyword. Always use the original Python validators afterward.
     The saved runner preserves the exact sent schema with its request.
     """
-    if type(schema_version) is not int or schema_version not in (1, 2):
-        raise OllamaSchemaError("Choose response schema version 1 or 2.")
-    directory = _SCHEMA_DIRECTORY / "legacy" / "v1" if schema_version == 1 else _SCHEMA_DIRECTORY
     documents = {}
     for uri, filename in _RESPONSE_SCHEMA_FILES.items():
-        path = directory / filename
+        path = _SCHEMA_DIRECTORY / filename
         try:
             document = json.loads(
                 path.read_bytes().decode("utf-8"), object_pairs_hook=_unique_fields,

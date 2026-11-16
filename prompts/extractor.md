@@ -19,6 +19,6 @@ Before submission, check activity grouping, quantities and local associations,
 action types and overall status, exact continuous quotations, physical PDF page
 positions, valid action links, and issues for empty evidence or type lists.
 
-Return exactly one JSON object containing content and review, with every required
+Return exactly one JSON object containing plan_data and plan_issues, with every required
 field and no surrounding Markdown or commentary. Python does not fill missing
 fields or make substantive corrections to your answer.

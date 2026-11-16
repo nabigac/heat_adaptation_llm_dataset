@@ -32,15 +32,11 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 COMMAND = REPOSITORY / ".venv/bin/heat-adaptation-llm-dataset"
 
 
-@pytest.fixture
-def run_record(action_run_record):
-    """Use the current action format throughout the extraction CLI tests."""
-    return action_run_record
 
 
 def arguments(root, **changes):
     values = {"source-path": loop.SOURCE, "profile": loop.PROFILE, "purpose": "development", **changes}
-    return ["extract", loop.PLAN_ID, "--project-root", str(root),
+    return ["run_extract_mode", loop.PLAN_ID, "--project-root", str(root),
             *(value for key, item in values.items() for value in ("--" + key, str(item)))]
 
 
@@ -192,7 +188,7 @@ def test_comparison_feedback_hides_claims_issues_repairs_and_client_logs(project
     facts["code_dirty"] = False
     hidden = "UNSEEN_COMPARISON_MODEL_CLAIM"
     answer = json.loads(loop.answer(run_record))
-    answer["content"]["plan_actions"][0]["action"] = hidden
+    answer["plan_data"]["actions"][0]["action"] = hidden
     scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message("```json\n" + json.dumps(answer) + "\n```")]
     scripted.hooks = [lambda body: logging.getLogger("mcp.test").warning(hidden)]
     # Presence of an arbitrary reference filename must not unlock disclosure.
@@ -205,7 +201,7 @@ def test_comparison_feedback_hides_claims_issues_repairs_and_client_logs(project
     assert hidden not in output.out + output.err and "Repair [" not in output.out
     assert "withheld" in output.out and "Model requests:" not in output.out
     record = json.loads(output_record(project).read_text())
-    assert record["content"]["plan_actions"][0]["action"] == hidden
+    assert record["plan_data"]["actions"][0]["action"] == hidden
 
 
 def test_comparison_failure_hides_validation_values_and_exception_notes(project, scripted, facts, connected_cli, capsys):
@@ -282,11 +278,11 @@ def test_mcp_diagnostic_save_failure_fails_the_stage_after_cleanup(project, scri
     output = capsys.readouterr()
     assert "Status: failed" in output.out and "diagnostic publication failure" in output.err
     assert len(scripted.requests) == 2
-    assert json.loads(output_record(project).read_text())["content"] is None
+    assert json.loads(output_record(project).read_text())["plan_data"] is None
 
 
 def test_installed_command_help_and_bad_profile_exit_status(project):
-    help_result = subprocess.run([str(COMMAND), "extract", "--help"], text=True, capture_output=True, timeout=10)
+    help_result = subprocess.run([str(COMMAND), "run_extract_mode", "--help"], text=True, capture_output=True, timeout=10)
     assert help_result.returncode == 0 and "--source-path" in help_result.stdout and "--retry-of-run-id" in help_result.stdout
     failed = subprocess.run([str(COMMAND), *arguments(project, profile="missing")], text=True, capture_output=True, timeout=10)
     assert failed.returncode == 1 and "No profile named" in failed.stderr and "Traceback" not in failed.stderr

@@ -69,7 +69,7 @@ def test_list_displays_the_saved_status_without_changing_files(
 
     rows = documents.list_documents(project)
     assert rows[0]["preparation_status"] == expected_status
-    assert cli.main(["list", "--project-root", str(project)]) == 0
+    assert cli.main(["list_plans", "--project-root", str(project)]) == 0
     output = capsys.readouterr()
 
     assert expected_status in output.out
@@ -93,7 +93,7 @@ def test_list_uses_the_registry_link_rather_than_the_newest_attempt(
     registry["plans"][0]["prepared_source_path"] = first_path
     storage.save_registry(project, registry)
 
-    assert cli.main(["list", "--project-root", str(project)]) == 0
+    assert cli.main(["list_plans", "--project-root", str(project)]) == 0
     output = capsys.readouterr().out
     assert "ready_with_gaps" not in output
     assert "ready" in output and first_path in output
@@ -116,7 +116,7 @@ def test_list_reports_damaged_linked_inputs_instead_of_inventing_readiness(
         (project / pages[0]["image_path"]).unlink()
     before = file_snapshot(project)
 
-    assert cli.main(["list", "--project-root", str(project)]) == 1
+    assert cli.main(["list_plans", "--project-root", str(project)]) == 1
     output = capsys.readouterr()
     assert output.out == "" and output.err
     assert "Traceback" not in output.err
@@ -240,7 +240,7 @@ def test_saved_model_work_keeps_its_bytes_and_prevents_study_set_changes(project
 
 def test_cli_updates_multiple_fields_and_reports_same_value_updates(project, tmp_path, capsys):
     entry = register_plan(project, tmp_path)
-    arguments = ["update", entry["plan_id"], "--project-root", str(project),
+    arguments = ["update_plan_data", entry["plan_id"], "--project-root", str(project),
                  "--title", "Corrected title", "--source-url", "https://example.org/new.pdf",
                  "--date-accessed", "2026-11-02"]
     assert cli.main(arguments) == 0
@@ -255,9 +255,9 @@ def test_cli_updates_multiple_fields_and_reports_same_value_updates(project, tmp
 
 
 @pytest.mark.parametrize("arguments", [
-    ["update", "plan_0001"], ["update"],
-    ["update", "plan_0001", "--pdf-path", "elsewhere.pdf"],
-    ["update", "plan_0001", "--study-set", "pilot"],
+    ["update_plan_data", "plan_0001"], ["update_plan_data"],
+    ["update_plan_data", "plan_0001", "--pdf-path", "elsewhere.pdf"],
+    ["update_plan_data", "plan_0001", "--study-set", "pilot"],
 ])
 def test_cli_rejects_missing_changes_and_uneditable_fields(project, tmp_path, arguments):
     register_plan(project, tmp_path)
@@ -271,7 +271,7 @@ def test_cli_rejects_missing_changes_and_uneditable_fields(project, tmp_path, ar
 def test_cli_reports_invalid_metadata_without_writing(project, tmp_path, capsys):
     register_plan(project, tmp_path)
     before = file_snapshot(project)
-    assert cli.main(["update", "plan_0001", "--date-accessed", "2026-02-29",
+    assert cli.main(["update_plan_data", "plan_0001", "--date-accessed", "2026-02-29",
                      "--project-root", str(project)]) == 1
     output = capsys.readouterr()
     assert "validation failed" in output.err and "Traceback" not in output.err
@@ -292,7 +292,7 @@ def test_update_save_failure_retains_registry_outcome_and_reports_recovery(
         raise OSError("Simulated metadata-save failure")
 
     monkeypatch.setattr(storage, "save_registry", fail_save)
-    assert cli.main(["update", entry["plan_id"], "--title", "Corrected title",
+    assert cli.main(["update_plan_data", entry["plan_id"], "--title", "Corrected title",
                      "--project-root", str(project)]) == 1
     output = capsys.readouterr()
     assert "Inspect data/registry/plans.json" in output.err
@@ -303,7 +303,7 @@ def test_update_save_failure_retains_registry_outcome_and_reports_recovery(
 
 def test_update_help_lists_editable_fields(capsys):
     with pytest.raises(SystemExit) as caught:
-        cli.main(["update", "--help"])
+        cli.main(["update_plan_data", "--help"])
     assert caught.value.code == 0
     output = capsys.readouterr().out
     for flag in ("--title", "--source-url", "--date-accessed", "--study-set", "--project-root"):

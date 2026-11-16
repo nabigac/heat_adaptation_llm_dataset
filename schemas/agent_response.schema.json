@@ -3,18 +3,18 @@
   "$id": "urn:heat-adaptation:agent-response",
   "title": "Heat adaptation agent final response",
   "description": "Model answer containing plan information, actions, and review issues, defined in DESIGN.md appendices A-D.",
-  "$comment": "Load the content schema into a local schema registry. Python additionally checks IDs, links, page ranges, one issue per affected record, and issue-stage consistency. A resolved status is an agent claim, not expert confirmation.",
+  "$comment": "Load the plan data schema into a local schema registry. Python additionally checks IDs, links, page ranges, one issue per affected record, and issue-stage consistency. A resolved status is an agent claim, not expert confirmation.",
   "type": "object",
   "required": [
-    "content",
-    "review"
+    "plan_data",
+    "plan_issues"
   ],
   "additionalProperties": false,
   "properties": {
-    "content": {
-      "$ref": "urn:heat-adaptation:content"
+    "plan_data": {
+      "$ref": "urn:heat-adaptation:plan-data"
     },
-    "review": {
+    "plan_issues": {
       "type": "object",
       "required": [
         "issues"

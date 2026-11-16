@@ -18,29 +18,25 @@ from validation import validate_agent_response, validate_agent_response_structur
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTENT_URI = "urn:heat-adaptation:content"
+PLAN_DATA_URI = "urn:heat-adaptation:plan-data"
 RESPONSE_URI = "urn:heat-adaptation:agent-response"
 DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
 
-@pytest.fixture
-def run_record(action_run_record):
-    """Compare the provider schema with current action-format responses."""
-    return action_run_record
 
 
 @pytest.fixture
 def response(run_record: dict) -> dict:
     """Populate action details and both issue states with fictional data."""
-    data = copy.deepcopy({key: run_record[key] for key in ("content", "review")})
-    content = data["content"]
+    data = copy.deepcopy({key: run_record[key] for key in ("plan_data", "plan_issues")})
+    content = data["plan_data"]
     evidence = [{"quote": "Fictional source passage.\nContinued here.", "page_numbers": [1, 2]}]
-    content["plan_actions"][0]["evidence"] = copy.deepcopy(evidence)
-    content["plan_actions"][0]["action_cost"] = "Estimated £500,000 for shade."
-    second = copy.deepcopy(content["plan_actions"][0])
+    content["actions"][0]["evidence"] = copy.deepcopy(evidence)
+    content["actions"][0]["action_cost"] = "Estimated £500,000 for shade."
+    second = copy.deepcopy(content["actions"][0])
     second.update(action_id="action_0002", action="Run heat outreach.", action_type=["behavioral/cultural"])
-    content["plan_actions"].append(second)
-    data["review"]["issues"] = [
+    content["actions"].append(second)
+    data["plan_issues"]["issues"] = [
         {"issue_id": "issue_0001", "related_action_id": "action_0001",
          "issue_description": "A fictional chart remains unclear.", "issue_type": "source_issue",
          "issue_origin": "extractor", "issue_status": "open", "resolved_by": None, "resolution": None},
@@ -102,11 +98,11 @@ def test_every_required_field_and_unknown_field_still_rejected(response, prepare
 ])
 def test_nonblank_rule_preserves_multiline_and_unicode_acceptance(response, prepared_validator, text):
     for path in (
-        ("content", "plan_actions", 0, "action"),
-        ("content", "plan_info", "country"),
-        ("content", "plan_actions", 0, "action_cost"),
-        ("content", "plan_actions", 0, "evidence", 0, "quote"),
-        ("review", "issues", 1, "resolution"),
+        ("plan_data", "actions", 0, "action"),
+        ("plan_data", "metadata", "country"),
+        ("plan_data", "actions", 0, "action_cost"),
+        ("plan_data", "actions", 0, "evidence", 0, "quote"),
+        ("plan_issues", "issues", 1, "resolution"),
     ):
         changed = copy.deepcopy(response)
         at(changed, path[:-1])[path[-1]] = text
@@ -114,32 +110,32 @@ def test_nonblank_rule_preserves_multiline_and_unicode_acceptance(response, prep
 
 
 @pytest.mark.parametrize("path,value,expected", [
-    (("content", "plan_info", "country"), None, True),
-    (("content", "plan_info", "country"), 3, False),
-    (("content", "plan_info", "plan_scale"), "city", True),
-    (("content", "plan_info", "plan_scale"), "district", False),
-    (("content", "plan_info", "plan_type"), "broader_climate_plan", True),
-    (("content", "plan_info", "plan_type"), "other", False),
-    (("content", "plan_info", "language"), "French", False),
-    (("content", "plan_info", "publication_year"), True, False),
-    (("content", "plan_info", "publication_year"), 2026, True),
-    (("content", "plan_info", "date_accessed"), "2026-02-30", False),
-    (("content", "plan_info", "date_accessed"), "2024-02-29", True),
-    (("content", "plan_info", "lead_agencies"), [""], False),
-    (("content", "plan_actions", 0, "action_status"), "unspecified", True),
-    (("content", "plan_actions", 0, "action_status"), "unknown", False),
-    (("content", "plan_actions", 0, "action_type"), ["nature-based", "infrastructural"], True),
-    (("content", "plan_actions", 0, "action_type"), ["national"], False),
-    (("content", "plan_actions", 0, "evidence"), [], True),
-    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), [], False),
-    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), [0], False),
-    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), [1, 1], False),
-    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), [True], False),
-    (("content", "plan_actions", 0, "evidence", 0, "page_numbers"), 1, False),
-    (("review", "issues", 0, "issue_type"), None, True),
-    (("review", "issues", 0, "issue_type"), "invented_type", False),
-    (("review", "issues", 0, "issue_origin"), "verifier", True),
-    (("review", "issues", 0, "issue_origin"), "expert", False),
+    (("plan_data", "metadata", "country"), None, True),
+    (("plan_data", "metadata", "country"), 3, False),
+    (("plan_data", "metadata", "plan_scale"), "city", True),
+    (("plan_data", "metadata", "plan_scale"), "district", False),
+    (("plan_data", "metadata", "plan_type"), "broader_climate_plan", True),
+    (("plan_data", "metadata", "plan_type"), "other", False),
+    (("plan_data", "metadata", "language"), "French", False),
+    (("plan_data", "metadata", "publication_year"), True, False),
+    (("plan_data", "metadata", "publication_year"), 2026, True),
+    (("plan_data", "metadata", "date_accessed"), "2026-02-30", False),
+    (("plan_data", "metadata", "date_accessed"), "2024-02-29", True),
+    (("plan_data", "metadata", "lead_agencies"), [""], False),
+    (("plan_data", "actions", 0, "action_status"), "unspecified", True),
+    (("plan_data", "actions", 0, "action_status"), "unknown", False),
+    (("plan_data", "actions", 0, "action_type"), ["nature-based", "infrastructural"], True),
+    (("plan_data", "actions", 0, "action_type"), ["national"], False),
+    (("plan_data", "actions", 0, "evidence"), [], True),
+    (("plan_data", "actions", 0, "evidence", 0, "page_numbers"), [], False),
+    (("plan_data", "actions", 0, "evidence", 0, "page_numbers"), [0], False),
+    (("plan_data", "actions", 0, "evidence", 0, "page_numbers"), [1, 1], False),
+    (("plan_data", "actions", 0, "evidence", 0, "page_numbers"), [True], False),
+    (("plan_data", "actions", 0, "evidence", 0, "page_numbers"), 1, False),
+    (("plan_issues", "issues", 0, "issue_type"), None, True),
+    (("plan_issues", "issues", 0, "issue_type"), "invented_type", False),
+    (("plan_issues", "issues", 0, "issue_origin"), "verifier", True),
+    (("plan_issues", "issues", 0, "issue_origin"), "expert", False),
 ])
 def test_field_types_values_and_bounds_agree(response, prepared_validator, path, value, expected):
     at(response, path[:-1])[path[-1]] = value
@@ -150,7 +146,7 @@ def test_field_types_values_and_bounds_agree(response, prepared_validator, path,
     ("open", "resolved"), (None, "extractor", "verifier", "expert"), (None, "", "Clarified by a footnote.")
 )))
 def test_issue_conditional_rules_are_preserved(response, prepared_validator, status, resolver, resolution):
-    response["review"]["issues"][0].update(issue_status=status, resolved_by=resolver, resolution=resolution)
+    response["plan_issues"]["issues"][0].update(issue_status=status, resolved_by=resolver, resolution=resolution)
     expected = ((resolver is None and resolution is None) if status == "open" else
                 (resolver in ("extractor", "verifier") and bool(resolution)))
     assert_agreement(response, prepared_validator, expected)
@@ -159,13 +155,13 @@ def test_issue_conditional_rules_are_preserved(response, prepared_validator, sta
 @pytest.mark.parametrize("damage", ["duplicate_ids", "unknown_link", "page_outside_document", "wrong_stage"])
 def test_schema_mode_does_not_replace_semantic_validation(response, prepared_validator, damage):
     if damage == "duplicate_ids":
-        response["review"]["issues"][1]["issue_id"] = "issue_0001"
+        response["plan_issues"]["issues"][1]["issue_id"] = "issue_0001"
     elif damage == "unknown_link":
-        response["review"]["issues"][0]["related_action_id"] = "missing_action"
+        response["plan_issues"]["issues"][0]["related_action_id"] = "missing_action"
     elif damage == "page_outside_document":
-        response["content"]["plan_actions"][0]["evidence"][0]["page_numbers"] = [6]
+        response["plan_data"]["actions"][0]["evidence"][0]["page_numbers"] = [6]
     else:
-        response["review"]["issues"][0]["issue_origin"] = "verifier"
+        response["plan_issues"]["issues"][0]["issue_origin"] = "verifier"
     assert_agreement(response, prepared_validator, True)
     assert validate_agent_response(response, page_count=5, stage="extractor")
 
@@ -184,7 +180,7 @@ def test_prepared_copy_is_self_contained_fresh_and_explicit(run_record):
     _, body, _ = models.build_ollama_request(settings, messages, response_format=first)
     assert body["format"] == first
     body["format"]["properties"].clear()
-    first["properties"]["content"]["properties"].clear()
+    first["properties"]["plan_data"]["properties"].clear()
     assert second == models.prepare_ollama_response_schema()
     assert "format" not in models.build_ollama_request(settings, messages)[1]
 
@@ -196,9 +192,9 @@ def schema_files(tmp_path, monkeypatch):
 
     def write(content=None, response=None):
         documents = {
-            "content.schema.json": {"$schema": DIALECT, "$id": CONTENT_URI, **(content or {})},
+            "plan_data.schema.json": {"$schema": DIALECT, "$id": PLAN_DATA_URI, **(content or {})},
             "agent_response.schema.json": {"$schema": DIALECT, "$id": RESPONSE_URI,
-                **(response if response is not None else {"type": "object", "properties": {"content": {"$ref": CONTENT_URI}}})},
+                **(response if response is not None else {"type": "object", "properties": {"plan_data": {"$ref": PLAN_DATA_URI}}})},
         }
         for filename, document in documents.items():
             (tmp_path / filename).write_text(json.dumps(document), encoding="utf-8")
@@ -210,7 +206,7 @@ def schema_files(tmp_path, monkeypatch):
 @pytest.mark.parametrize("damage", ["missing", "invalid_utf8", "invalid_json", "duplicate", "nan", "invalid_schema", "wrong_id", "wrong_dialect"])
 def test_bad_source_files_fail_visibly(schema_files, damage):
     folder = schema_files()
-    path = folder / "content.schema.json"
+    path = folder / "plan_data.schema.json"
     if damage == "missing":
         path.unlink()
     elif damage == "invalid_utf8":
@@ -218,9 +214,9 @@ def test_bad_source_files_fail_visibly(schema_files, damage):
     elif damage == "invalid_json":
         path.write_text("{unfinished")
     elif damage == "duplicate":
-        path.write_text('{"$id":"' + CONTENT_URI + '","type":"object","type":"string"}')
+        path.write_text('{"$id":"' + PLAN_DATA_URI + '","type":"object","type":"string"}')
     elif damage == "nan":
-        path.write_text('{"$id":"' + CONTENT_URI + '","default":NaN}')
+        path.write_text('{"$id":"' + PLAN_DATA_URI + '","default":NaN}')
     elif damage == "invalid_schema":
         schema_files(content={"type": 42})
     elif damage == "wrong_id":
@@ -248,8 +244,8 @@ def test_recursive_references_fail_instead_of_recursing_forever(schema_files, cr
     target = RESPONSE_URI + "#/$defs/back" if cross_document else "#/$defs/loop"
     schema_files(content={"$defs": {"loop": {"$ref": target}},
                           "properties": {"value": {"$ref": "#/$defs/loop"}}},
-                 response={"$defs": {"back": {"$ref": CONTENT_URI + "#/$defs/loop"}},
-                           "properties": {"content": {"$ref": CONTENT_URI}}})
+                 response={"$defs": {"back": {"$ref": PLAN_DATA_URI + "#/$defs/loop"}},
+                           "properties": {"plan_data": {"$ref": PLAN_DATA_URI}}})
     with pytest.raises(models.OllamaSchemaError, match="Recursive"):
         models.prepare_ollama_response_schema()
 
@@ -279,7 +275,7 @@ def test_pointer_escapes_array_targets_and_repeated_refs(schema_files):
             "array_target": {"$ref": "#/allOf/0"},
         },
     })
-    properties = models.prepare_ollama_response_schema()["properties"]["content"]["properties"]
+    properties = models.prepare_ollama_response_schema()["properties"]["plan_data"]["properties"]
     assert properties["first"]["description"] == "Original wording.\nAdditional guidance."
     assert properties["second"]["description"] == "Original wording."
     assert properties["array_target"] == {"type": "object"}
@@ -293,7 +289,7 @@ def test_literal_values_and_property_names_are_never_treated_as_schema_keywords(
         name: {"const": literal, "examples": [literal], "default": literal}
         for name in ("$ref", "$id", "$schema", "$defs", "pattern")
     }})
-    properties = models.prepare_ollama_response_schema()["properties"]["content"]["properties"]
+    properties = models.prepare_ollama_response_schema()["properties"]["plan_data"]["properties"]
     assert set(properties) == {"$ref", "$id", "$schema", "$defs", "pattern"}
     assert all(value == {"const": literal, "examples": [literal], "default": literal} for value in properties.values())
 
@@ -306,7 +302,7 @@ def test_compositions_and_boolean_schemas_keep_their_constraints(schema_files):
                "anyOf": [{"minItems": 2}, {"maxItems": 0}],
                "oneOf": [{"uniqueItems": True}, False]}
     schema_files(content=content)
-    prepared = models.prepare_ollama_response_schema()["properties"]["content"]
+    prepared = models.prepare_ollama_response_schema()["properties"]["plan_data"]
     original = Draft202012Validator(content)
     converted = Draft202012Validator(prepared)
     for value in ([], ["text"], [1, "text"], [None, "text"], None):

@@ -30,26 +30,26 @@ def main(argv: list[str] | None = None) -> int:
     # argparse returns a Namespace: named attributes such as args.command and
     # args.plan_id hold the values supplied in the terminal or a test's list.
     args = parser.parse_args(argv)
-    if args.command == "update" and all(
+    if args.command == "update_plan_data" and all(
         getattr(args, field) is None for field in ("title", "source_url", "date_accessed", "study_set")
     ):
-        parser.error("update requires --title, --source-url, --date-accessed, or --study-set.")
+        parser.error("update_plan_data requires --title, --source-url, --date-accessed, or --study-set.")
     try:
         # expanduser handles a leading ~; resolve makes later paths independent
         # of relative spelling. The document functions check the project itself.
         root = args.project_root.expanduser().resolve()
-        if args.command == "add":
-            _add_document(root, args)
-        elif args.command == "update":
-            _update_document(root, args)
-        elif args.command == "prepare":
+        if args.command == "add_plan":
+            _add_plan(root, args)
+        elif args.command == "update_plan_data":
+            _update_plan_data(root, args)
+        elif args.command == "prepare_plan":
             # A failed attempt can be saved successfully. Return its operation
             # status instead of treating every completed function call as success.
-            return _prepare_document(root, args.plan_id, ocr_enabled=args.ocr_enabled)
-        elif args.command == "extract":
-            return _extract_document(root, args)
-        else:
-            _list_documents(root)
+            return _prepare_plan(root, args.plan_id, ocr_enabled=args.ocr_enabled)
+        elif args.command == "run_extract_mode":
+            return _run_extract_mode(root, args)
+        elif args.command == "list_plans":
+            _list_plans(root)
     except (OSError, ValueError) as error:
         # Expected file and data failures become readable terminal messages.
         # Unexpected programming errors still raise, making them visible in development.
@@ -69,57 +69,73 @@ def _build_parser() -> argparse.ArgumentParser:
     # meaning as more commands/options are added to the project.
     # Subcommands select an operation; a required subcommand avoids an ambiguous run.
     commands = parser.add_subparsers(dest="command", required=True)
-    add = commands.add_parser(
-        "add", help="Register a prescreened local PDF.", allow_abbrev=False
+    add_plan_parser = commands.add_parser(
+        "add_plan", help="Register a prescreened local PDF.", allow_abbrev=False
     )
-    add.add_argument("pdf", type=Path, help="Path to the supplied local PDF.")
-    add.add_argument("--title", required=True, help="Collected plan title.")
-    add.add_argument("--source-url", required=True, help="Official source URL.")
-    add.add_argument("--date-accessed", required=True, help="Access date as YYYY-MM-DD.")
-    add.add_argument(
+    add_plan_parser.add_argument("pdf", type=Path, help="Path to the supplied local PDF.")
+    add_plan_parser.add_argument("--title", required=True, help="Collected plan title.")
+    add_plan_parser.add_argument("--source-url", required=True, help="Official source URL.")
+    add_plan_parser.add_argument("--date-accessed", required=True, help="Access date as YYYY-MM-DD.")
+    add_plan_parser.add_argument(
         "--study-set", required=True, choices=["development", "comparison", "expansion"]
     )
-    _add_project_argument(add)
+    _add_project_argument(add_plan_parser)
 
-    update = commands.add_parser(
-        "update", help="Update collection metadata for a registered document.", allow_abbrev=False
+    update_plan_data_parser = commands.add_parser(
+        "update_plan_data", help="Update collection metadata for a registered plan.",
+        allow_abbrev=False,
     )
-    update.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
-    update.add_argument("--title", help="Corrected plan title.")
-    update.add_argument("--source-url", help="Corrected official source URL.")
-    update.add_argument("--date-accessed", help="Corrected access date as YYYY-MM-DD.")
-    update.add_argument(
+    update_plan_data_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
+    update_plan_data_parser.add_argument("--title", help="Corrected plan title.")
+    update_plan_data_parser.add_argument("--source-url", help="Corrected official source URL.")
+    update_plan_data_parser.add_argument("--date-accessed", help="Corrected access date as YYYY-MM-DD.")
+    update_plan_data_parser.add_argument(
         "--study-set", choices=["development", "comparison", "expansion"],
         help="Study set; development assignments and sets with saved model work are fixed.",
     )
-    _add_project_argument(update)
+    _add_project_argument(update_plan_data_parser)
 
-    preparation = commands.add_parser(
-        "prepare", help="Prepare native page text for a registered PDF.", allow_abbrev=False
+    prepare_plan_parser = commands.add_parser(
+        "prepare_plan", help="Prepare native page text for a registered PDF.", allow_abbrev=False
     )
-    preparation.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
-    preparation.add_argument(
+    prepare_plan_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
+    prepare_plan_parser.add_argument(
         "--no-ocr",
         dest="ocr_enabled",
         action="store_false",
         help="Skip automatic OCR fallback; retain native text and image checks.",
     )
-    _add_project_argument(preparation)
+    _add_project_argument(prepare_plan_parser)
 
-    extraction = commands.add_parser("extract", help="Run and save one extractor attempt using local Ollama and MCP.", allow_abbrev=False)
-    extraction.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
-    extraction.add_argument("--source-path", required=True, help="Project-relative path to the exact saved preparation.json.")
-    extraction.add_argument("--profile", required=True, help="Exact extractor profile name in the configuration.")
-    extraction.add_argument("--purpose", required=True, choices=["development", "comparison", "exploratory"],
-                            help="Reason for this attempt; development/comparison must match the registered study set.")
-    extraction.add_argument("--retry-of-run-id", help="Failed extractor run being manually retried; never resumes or overwrites it.")
-    extraction.add_argument("--config-path", default="configs/profiles.json", help="Project-relative profile configuration (default: configs/profiles.json).")
-    _add_project_argument(extraction)
-
-    listing = commands.add_parser(
-        "list", help="List registered documents, saved preparation status, and links.", allow_abbrev=False
+    run_extract_mode_parser = commands.add_parser(
+        "run_extract_mode",
+        help="Run and save one extractor attempt using local Ollama and MCP.",
+        allow_abbrev=False,
     )
-    _add_project_argument(listing)
+    run_extract_mode_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
+    run_extract_mode_parser.add_argument(
+        "--source-path", required=True,
+        help="Project-relative path to the exact saved preparation.json.",
+    )
+    run_extract_mode_parser.add_argument("--profile", required=True, help="Exact extractor profile name in the configuration.")
+    run_extract_mode_parser.add_argument(
+        "--purpose", required=True, choices=["development", "comparison", "exploratory"],
+        help="Reason for this attempt; development/comparison must match the registered study set.",
+    )
+    run_extract_mode_parser.add_argument(
+        "--retry-of-run-id",
+        help="Failed extractor run being manually retried; never resumes or overwrites it.",
+    )
+    run_extract_mode_parser.add_argument(
+        "--config-path", default="configs/profiles.json",
+        help="Project-relative profile configuration (default: configs/profiles.json).",
+    )
+    _add_project_argument(run_extract_mode_parser)
+
+    list_plans_parser = commands.add_parser(
+        "list_plans", help="List registered documents, saved preparation status, and links.", allow_abbrev=False
+    )
+    _add_project_argument(list_plans_parser)
     return parser
 
 
@@ -162,7 +178,7 @@ def _error_categories(error: Exception) -> list[str]:
     return sorted(categories & allowed) or ["other"]
 
 
-def _extract_document(root: Path, args: argparse.Namespace) -> int:
+def _run_extract_mode(root: Path, args: argparse.Namespace) -> int:
     """Bridge the synchronous terminal to one asynchronous saved run.
 
     Comparison plans stay blind even for exploratory repeats. The future expert
@@ -240,7 +256,7 @@ def _extract_document(root: Path, args: argparse.Namespace) -> int:
     return 130 if cancelled else (0 if record["status"] == "succeeded" and not saved.persistence_error else 1)
 
 
-def _add_document(root: Path, args: argparse.Namespace) -> None:
+def _add_plan(root: Path, args: argparse.Namespace) -> None:
     """Pass collected arguments to registration and show its saved result."""
     # Tuple unpacking gives names to both returned values: the registry entry
     # and whether this call created it or reused an identical registered PDF.
@@ -263,7 +279,7 @@ def _add_document(root: Path, args: argparse.Namespace) -> None:
     print(f"Preparation: {entry['prepared_source_path'] or 'not_prepared'}")
 
 
-def _prepare_document(root: Path, plan_id: str, *, ocr_enabled: bool = True) -> int:
+def _prepare_plan(root: Path, plan_id: str, *, ocr_enabled: bool = True) -> int:
     """Run preparation, display its saved outcome, and return the stage exit status."""
     preparation, record_path = documents.prepare_document(root, plan_id, ocr_enabled=ocr_enabled)
     # Report paths returned by the workflow, rather than guessing which numbered
@@ -286,7 +302,7 @@ def _prepare_document(root: Path, plan_id: str, *, ocr_enabled: bool = True) -> 
         # Retrying is manual and creates a new attempt; this command never retries itself.
         retry_command = shlex.join(
             [
-                "uv", "run", "--locked", "heat-adaptation-llm-dataset", "prepare", plan_id,
+                "uv", "run", "--locked", "heat-adaptation-llm-dataset", "prepare_plan", plan_id,
                 "--project-root", str(root),
             ]
         )
@@ -299,7 +315,7 @@ def _prepare_document(root: Path, plan_id: str, *, ocr_enabled: bool = True) -> 
     return 0
 
 
-def _update_document(root: Path, args: argparse.Namespace) -> None:
+def _update_plan_data(root: Path, args: argparse.Namespace) -> None:
     """Apply only supplied fields, then show the saved collection details."""
     entry, changed = documents.update_document_metadata(
         root, args.plan_id, plan_title=args.title, source_url=args.source_url,
@@ -316,7 +332,7 @@ def _update_document(root: Path, args: argparse.Namespace) -> None:
     print("Registry: data/registry/plans.json")
 
 
-def _list_documents(root: Path) -> None:
+def _list_plans(root: Path) -> None:
     """Display records without creating files or inventing preparation readiness."""
     entries = documents.list_documents(root)
     if not entries:

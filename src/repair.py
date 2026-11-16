@@ -18,11 +18,6 @@ from typing import Literal
 CompletionStatus = Literal["normal", "unknown", "truncated", "failed"]
 COMPLETION_STATUSES = ("normal", "unknown", "truncated", "failed")
 _JSON_WHITESPACE = " \t\r\n"
-# Page-number repairs support current actions and preserved version 1 records.
-# Full schema validation afterward rejects fields outside the selected format.
-_RECORD_LISTS = {
-    "plan_goals", "plan_actions", "plan_mon_eval", "plan_benefits", "plan_costs",
-}
 _FENCE = re.compile(
     r"[ \t\r\n]*```(?:json)?[ \t]*\r?\n(?P<body>.*?)\r?\n```[ \t\r\n]*",
     re.DOTALL | re.IGNORECASE,
@@ -207,7 +202,7 @@ def _is_strict_json(text: str) -> bool:
 
 
 def _single_page_number_edits(text: str) -> list[_TextEdit]:
-    """Find positive integer values only at content record evidence paths.
+    """Find positive integer values only at action evidence paths.
 
     This walk runs only after a strict syntax check. raw_decode returns each
     value and the position just after it, letting us retain original text spans.
@@ -245,14 +240,14 @@ def _single_page_number_edits(text: str) -> list[_TextEdit]:
 
         value, end = decoder.raw_decode(text, index)
         is_evidence_page = (
-            len(path) == 6 and path[0] == "content" and path[1] in _RECORD_LISTS
+            len(path) == 6 and path[0] == "plan_data" and path[1] == "actions"
             and isinstance(path[2], int) and path[3] == "evidence"
             and isinstance(path[4], int) and path[5] == "page_numbers"
         )
         # bool is a subclass of int in Python, so use exact type equality. Text,
         # floats, zero, negatives, and unknown fields must not be interpreted.
         if is_evidence_page and type(value) is int and value > 0:
-            location = f"$.content.{path[1]}[{path[2]}].evidence[{path[4]}].page_numbers"
+            location = f"$.{path[0]}.{path[1]}[{path[2]}].evidence[{path[4]}].page_numbers"
             edits.append(_TextEdit(index, end, f"[{text[index:end]}]", location))
         return end
 

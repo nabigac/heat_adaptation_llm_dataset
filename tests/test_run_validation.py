@@ -1,8 +1,8 @@
 """Exercise fictional run records without starting models or saving research runs.
 
 These tests establish format and internal consistency. Checking that linked files
-exist, selecting linked runs, and protecting completed files belong to the later
-storage/workflow increment. All measurements and model names below are fixtures.
+exist, selecting linked runs, and protecting completed files belong to storage.
+All measurements and model names below are fixtures.
 """
 # The shared run_record fixture comes from conftest.py and describes a
 # fictional successful attempt. Helpers below create other internally consistent
@@ -28,9 +28,9 @@ def set_status(record: dict, status: str) -> None:
     # combination, rather than inheriting unrelated errors from setup.
     record["status"] = status
     if status == "running":
-        record.update(ended_at=None, elapsed_seconds=None, content=None, review=None, model_calls=[])
+        record.update(ended_at=None, elapsed_seconds=None, plan_data=None, plan_issues=None, model_calls=[])
     elif status == "failed":
-        record.update(error="Controlled failure before the first model request.", content=None, review=None, model_calls=[])
+        record.update(error="Controlled failure before the first model request.", plan_data=None, plan_issues=None, model_calls=[])
 
 
 def set_verifier(record: dict) -> None:
@@ -43,11 +43,11 @@ def set_verifier(record: dict) -> None:
         call["response_path"] = "runs/plan_0099/run_verify_0001/responses/response_01.json"
 
 
-def issue(*, related_record_id: str | None = "action_0001") -> dict:
+def issue(*, related_action_id: str | None = "action_0001") -> dict:
     return {
-        "issue_id": "issue_0001", "related_record_id": related_record_id,
-        "description": "Check unclear chart values on PDF page 1.", "type": "source_issue",
-        "origin_stage": "extractor", "status": "open", "resolved_by": None, "resolution": None,
+        "issue_id": "issue_0001", "related_action_id": related_action_id,
+        "issue_description": "Check unclear chart values on PDF page 1.", "issue_type": "source_issue",
+        "issue_origin": "extractor", "issue_status": "open", "resolved_by": None, "resolution": None,
     }
 
 
@@ -143,7 +143,7 @@ def test_unknown_run_fields_are_not_silently_saved(run_record: dict, path: tuple
     (("model_calls", 0, "output_tokens"), 1.5),
     (("model_calls", 0, "truncated"), "false"),
     (("model_calls", 0, "response_path"), ""),
-    (("content",), {}), (("review",), {}),
+    (("plan_data",), {}), (("plan_issues",), {}),
 ])
 def test_invalid_run_values_are_structure_errors(run_record: dict, path: tuple, value: object) -> None:
     select_path(run_record, path[:-1])[path[-1]] = value
@@ -155,7 +155,7 @@ def test_invalid_run_values_are_structure_errors(run_record: dict, path: tuple, 
     ("running", "ended_at", "2026-11-03T12:00:01Z"),
     ("running", "error", "Already failed."),
     ("succeeded", "ended_at", None),
-    ("succeeded", "content", None), ("succeeded", "review", None),
+    ("succeeded", "plan_data", None), ("succeeded", "plan_issues", None),
     ("succeeded", "error", "Failed."), ("succeeded", "model_calls", []),
     ("failed", "ended_at", None), ("failed", "error", None), ("failed", "error", "  "),
 ])
@@ -400,38 +400,38 @@ def test_retained_content_requires_a_known_positive_source_page_count(run_record
 
 
 def test_failed_run_can_retain_valid_content_without_review(run_record: dict) -> None:
-    run_record.update(status="failed", error="Final review could not be validated.", review=None)
+    run_record.update(status="failed", error="Final review could not be validated.", plan_issues=None)
     assert validation.validate_run_record(run_record, page_count=5) == []
 
 
 def test_failed_run_without_content_can_retain_unlinked_source_issues(run_record: dict) -> None:
     set_status(run_record, "failed")
-    run_record["review"] = {"issues": [issue(related_record_id=None)]}
+    run_record["plan_issues"] = {"issues": [issue(related_action_id=None)]}
     assert validation.validate_run_record(run_record) == []
 
 
 def test_retained_issue_cannot_link_to_a_record_absent_from_content(run_record: dict) -> None:
     set_status(run_record, "failed")
-    run_record["review"] = {"issues": [issue()]}
+    run_record["plan_issues"] = {"issues": [issue()]}
     problems = validation.validate_run_record(run_record)
-    assert len(problems) == 1 and problems[0].location == "$.review.issues[0].related_record_id"
+    assert len(problems) == 1 and problems[0].location == "$.plan_issues.issues[0].related_action_id"
 
 
 @pytest.mark.parametrize("problem_kind", ["page", "link", "duplicate-id", "issue-stage"])
 def test_embedded_response_uses_the_existing_relationship_checks(run_record: dict, problem_kind: str) -> None:
-    action = run_record["content"]["plan_actions"][0]
+    action = run_record["plan_data"]["actions"][0]
     if problem_kind == "page":
         action["evidence"][0]["page_numbers"] = [6]
-        expected = "$.content.plan_actions[0].evidence[0].page_numbers[0]"
+        expected = "$.plan_data.actions[0].evidence[0].page_numbers[0]"
     elif problem_kind == "link":
-        action["related_goal_ids"] = ["missing-goal"]
-        expected = "$.content.plan_actions[0].related_goal_ids[0]"
+        run_record["plan_issues"]["issues"] = [issue(related_action_id="missing-action")]
+        expected = "$.plan_issues.issues[0].related_action_id"
     elif problem_kind == "duplicate-id":
-        run_record["content"]["plan_actions"].append(copy.deepcopy(action))
-        expected = "$.content.plan_actions[1].action_id"
+        run_record["plan_data"]["actions"].append(copy.deepcopy(action))
+        expected = "$.plan_data.actions[1].action_id"
     else:
-        run_record["review"]["issues"] = [dict(issue(), origin_stage="verifier")]
-        expected = "$.review.issues[0].origin_stage"
+        run_record["plan_issues"]["issues"] = [dict(issue(), issue_origin="verifier")]
+        expected = "$.plan_issues.issues[0].issue_origin"
     before = copy.deepcopy(run_record)
     data, problems = validation.parse_run_record_json(json.dumps(run_record), page_count=5)
     assert data is None and len(problems) == 1 and problems[0].category == "reference"
@@ -455,7 +455,7 @@ def test_wrong_run_shapes_are_reported_without_crashing(data: object) -> None:
     assert problems and all(problem.category == "structure" for problem in problems)
 
 
-@pytest.mark.parametrize("path_attribute", ["_LEGACY_RUN_SCHEMA_PATH", "_LEGACY_CONTENT_SCHEMA_PATH", "_LEGACY_RESPONSE_SCHEMA_PATH"])
+@pytest.mark.parametrize("path_attribute", ["_RUN_SCHEMA_PATH", "_PLAN_DATA_SCHEMA_PATH", "_AGENT_RESPONSE_SCHEMA_PATH"])
 @pytest.mark.parametrize("schema_text", [None, '{"type":', '{"type": "invalid"}'])
 def test_missing_or_invalid_run_schema_dependencies_stop_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_record: dict,

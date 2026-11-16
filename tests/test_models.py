@@ -215,7 +215,7 @@ def test_transport_does_not_repair_or_validate_research_content(settings: dict, 
     assert result.completion_status == "normal" and result.error is None
     assert result.response_text == payload["message"]["content"]
     # Normal generation is a provider observation, not a passing research answer.
-    answer, problems = validation.parse_agent_response_json(result.response_text, page_count=5, stage="extractor", schema_version=1)
+    answer, problems = validation.parse_agent_response_json(result.response_text, page_count=5, stage="extractor")
     assert answer is None and problems
 
 

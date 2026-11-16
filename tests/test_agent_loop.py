@@ -33,10 +33,6 @@ PROFILE = "fictional_extractor"
 REAL_DOCUMENT_CLIENT = agents._document_client
 
 
-@pytest.fixture
-def run_record(action_run_record):
-    """Use the current action format throughout the extractor-loop tests."""
-    return action_run_record
 
 
 @pytest.fixture
@@ -150,7 +146,7 @@ def call(number=1, *, name="get_page_text", identifier="page_1"):
 
 
 def answer(run_record):
-    return json.dumps({"content": run_record["content"], "review": run_record["review"]})
+    return json.dumps({"plan_data": run_record["plan_data"], "plan_issues": run_record["plan_issues"]})
 
 
 def run(root, scripted, **options):
@@ -175,7 +171,7 @@ def test_readiness_then_schema_final_preserves_inputs_and_closes_client(project,
     result = run(project, scripted)
     assert result.status == "succeeded" and result.error is None
     assert result.final_validation.report["valid"] is True
-    assert result.final_validation.response["content"] == run_record["content"]
+    assert result.final_validation.response["plan_data"] == run_record["plan_data"]
     assert [attempt.phase for attempt in result.model_attempts] == ["tool_use", "final"]
     assert "format" not in scripted.requests[0] and len(scripted.requests[0]["tools"]) == 2
     assert scripted.requests[1]["format"] == result.extractor_input.response_format
@@ -256,7 +252,7 @@ def test_mcp_protocol_failure_stops_attempt_and_retains_tool_log(project, script
     assert result.tool_calls_started == 1 and len(scripted.requests) == 1
 
 
-@pytest.mark.parametrize("content", ["unexpected prose", "", "```READY_FOR_FINAL_RESPONSE```", '{"content":{}}'])
+@pytest.mark.parametrize("content", ["unexpected prose", "", "```READY_FOR_FINAL_RESPONSE```", '{"plan_data":{}}'])
 def test_unexpected_tool_phase_text_fails_without_a_final_or_retry_call(project, scripted, content):
     scripted.replies = [message(content)]
     result = run(project, scripted)
@@ -272,7 +268,7 @@ def test_outer_whitespace_is_allowed_only_for_control_signal(project, scripted, 
     assert scripted.requests[-1]["messages"][-2]["content"].startswith(" \n")
 
 
-@pytest.mark.parametrize("final_text", ["not JSON", '{"content": {}, "review": {"issues": []}}'])
+@pytest.mark.parametrize("final_text", ["not JSON", '{"plan_data": {}, "plan_issues": {"issues": []}}'])
 def test_invalid_final_response_fails_without_model_repair_retry(project, scripted, final_text):
     scripted.replies = [message(agents.FINAL_READY_SIGNAL), message(final_text)]
     result = run(project, scripted)
@@ -447,7 +443,7 @@ def test_client_cleanup_failure_prevents_success_even_after_valid_answer(project
 @pytest.mark.parametrize("field,value", [("source_url", "https://example.org/wrong.pdf"), ("date_accessed", "2026-11-05")])
 def test_wrong_collection_metadata_fails_without_silent_correction(project, scripted, run_record, field, value):
     payload = json.loads(answer(run_record))
-    payload["content"]["plan_info"][field] = value
+    payload["plan_data"]["metadata"][field] = value
     scripted.replies = [message(agents.FINAL_READY_SIGNAL), message(json.dumps(payload))]
     result = run(project, scripted)
     assert result.status == "failed" and "collection metadata" in result.error

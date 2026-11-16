@@ -63,14 +63,29 @@ def running(record: dict, run_id: str = "run_extract_0001", *, stage: str = "ext
     # and prevents setup changes leaking between examples.
     result = copy.deepcopy(record)
     result.update(run_id=run_id, stage=stage, input_run_id=input_run_id, status="running", ended_at=None,
-        elapsed_seconds=None, content=None, review=None, model_calls=[], tool_log_path=None, error=None)
+        elapsed_seconds=None, plan_data=None, plan_issues=None, model_calls=[], tool_log_path=None, error=None)
     result["settings"]["stage"] = stage
     return result
 
 
 @pytest.fixture
 def active_run(project: Path, run_record: dict) -> str:
-    return storage.create_run_record(project, running(run_record))
+    path = storage.create_run_record(project, running(run_record))
+    preserve_source_input(project, path, run_record)
+    return path
+
+
+def preserve_source_input(project: Path, path: str, record: dict) -> None:
+    """Represent the source snapshot published before normal model execution."""
+    destination = project / Path(path).parent / "artifacts/extractor_input.json"
+    if destination.exists():
+        return
+    _, preparation, pages = storage.load_plan_preparation(
+        project, record["plan_id"], record["source_path"]
+    )
+    storage.save_run_file(project, path, "artifacts/extractor_input.json", json.dumps({
+        "source_fingerprint": storage.preparation_text_fingerprint(preparation, pages),
+    }).encode())
 
 
 def snapshot(root: Path) -> dict:
@@ -88,8 +103,9 @@ def publish_response(project: Path, path: str, record: dict) -> None:
     # Simulate the required order: preserve raw bytes, then a report pointing to
     # those bytes, then let the test finalize its record. No model or repair code
     # runs here; the report is explicitly constructed fixture data.
+    preserve_source_input(project, path, record)
     raw_path = storage.save_run_file(project, path, "responses/response_01.json", json.dumps({
-        "content": record["content"], "review": record["review"],
+        "plan_data": record["plan_data"], "plan_issues": record["plan_issues"],
     }, ensure_ascii=False).encode("utf-8"))
     record["model_calls"][0]["response_path"] = raw_path
     storage.save_run_file(project, path, "validation_report.json", json.dumps(passing_report(raw_path)).encode())
@@ -101,6 +117,8 @@ def complete(project: Path, path: str, record: dict) -> None:
     # to read without hiding an actual model request.
     publish_response(project, path, record)
     storage.save_run_record(project, record)
+
+
 
 
 def tool_entry(**changes) -> dict:
@@ -198,14 +216,18 @@ def test_real_repair_report_and_texts_can_be_saved_before_finalization(
     # Exercise the actual validation/repair result with the existing storage API.
     # Raw -> separate candidate -> report -> final record is deliberate: a report
     # must never point to response files that have not been preserved yet.
-    answer = copy.deepcopy({"content": run_record["content"], "review": run_record["review"]})
+    answer = copy.deepcopy({"plan_data": run_record["plan_data"], "plan_issues": run_record["plan_issues"]})
     if invalid_link:
-        answer["content"]["plan_actions"][0]["related_goal_ids"] = ["missing_goal"]
+        answer["plan_issues"]["issues"] = [{
+            "issue_id": "issue_0001", "related_action_id": "missing-action",
+            "issue_description": "Check the affected action.", "issue_origin": "extractor",
+            "issue_status": "open", "resolved_by": None, "resolution": None,
+        }]
     raw = "```json\n" + json.dumps(answer, ensure_ascii=False) + "\n```"
     raw_path = storage.save_run_file(project, active_run, "responses/response_01.txt", raw.encode("utf-8"))
     result = validation.validate_and_repair_agent_response(
         raw, page_count=5, stage="extractor", completion_status="normal", raw_response_path=raw_path,
-        schema_version=1,
+
     )
     repaired_path = storage.save_run_file(
         project, active_run, "responses/repaired_final.txt", result.candidate_text.encode("utf-8")
@@ -214,9 +236,9 @@ def test_real_repair_report_and_texts_can_be_saved_before_finalization(
     final = copy.deepcopy(run_record)
     final["model_calls"][0]["response_path"] = raw_path
     if result.response is None:
-        final.update(status="failed", content=None, review=None, error="Final response contains an invalid record link.")
+        final.update(status="failed", plan_data=None, plan_issues=None, error="Final response contains an invalid record link.")
     else:
-        final.update(content=result.response["content"], review=result.response["review"])
+        final.update(plan_data=result.response["plan_data"], plan_issues=result.response["plan_issues"])
     storage.save_run_record(project, final)
     assert storage.load_run_record(project, active_run) == final
     assert (project / raw_path).read_bytes() == raw.encode("utf-8")
@@ -363,11 +385,14 @@ def test_supporting_file_paths_cannot_replace_metadata_or_escape_the_run(project
 
 def test_run_file_symlink_cannot_borrow_another_runs_artifact_folder(project: Path, active_run: str) -> None:
     other = project / "runs/plan_0099/run_extract_0002/artifacts"
-    other.mkdir(parents=True)
-    (project / active_run).parent.joinpath("artifacts").symlink_to(other, target_is_directory=True)
+    other.parent.mkdir(parents=True)
+    artifacts = (project / active_run).parent / "artifacts"
+    artifacts.rename(other)
+    artifacts.symlink_to(other, target_is_directory=True)
+    before = snapshot(other)
     with pytest.raises(storage.RunValidationError, match="outside"):
         storage.save_run_file(project, active_run, "artifacts/image.png", b"bytes")
-    assert list(other.iterdir()) == []
+    assert snapshot(other) == before
 
 
 def test_tool_log_appends_in_order_and_must_be_linked_at_completion(project: Path, active_run: str, run_record: dict) -> None:
@@ -427,7 +452,7 @@ def test_failed_validation_keeps_unparseable_raw_response_and_report(project: Pa
     report = dict(passing_report(raw_path), initial_errors=[error], remaining_errors=[error], valid=False)
     storage.save_run_file(project, active_run, "validation_report.json", json.dumps(report).encode())
     failed = copy.deepcopy(run_record)
-    failed.update(status="failed", content=None, review=None, error="Final JSON did not validate.")
+    failed.update(status="failed", plan_data=None, plan_issues=None, error="Final JSON did not validate.")
     storage.save_run_record(project, failed)
     assert storage.load_run_record(project, active_run) == failed
     assert (project / raw_path).read_bytes() == b'{"unfinished":'
@@ -536,7 +561,7 @@ def test_new_preparation_and_collection_corrections_do_not_rewrite_earlier_input
 @pytest.mark.parametrize("field", ["source_url", "date_accessed"])
 def test_content_collection_fields_must_use_the_selected_preparation_snapshot(project: Path, active_run: str, run_record: dict, field: str) -> None:
     publish_response(project, active_run, run_record)
-    run_record["content"]["plan_info"][field] = "https://example.org/wrong.pdf" if field == "source_url" else "2026-11-04"
+    run_record["plan_data"]["metadata"][field] = "https://example.org/wrong.pdf" if field == "source_url" else "2026-11-04"
     with pytest.raises(storage.RunValidationError, match="snapshot"):
         storage.save_run_record(project, run_record)
 

@@ -26,10 +26,6 @@ project = loop.project
 scripted = loop.scripted
 
 
-@pytest.fixture
-def run_record(action_run_record):
-    """Use the current action format for saved extractor runs."""
-    return action_run_record
 
 
 @pytest.fixture
@@ -105,7 +101,7 @@ def test_permitted_repairs_preserve_raw_assistant_and_candidate_separately(proje
     root = folder(project, saved)
     assert saved.record["status"] == "succeeded" and saved.persistence_error is None
     assert (root / "responses/response_02.txt").read_text() == raw
-    assert json.loads((root / "responses/repaired_final.txt").read_text())["content"] == run_record["content"]
+    assert json.loads((root / "responses/repaired_final.txt").read_text())["plan_data"] == run_record["plan_data"]
     assert json.loads((root / "validation_report.json").read_text())["repairs"]
     assert len(scripted.requests) == 2
 
@@ -120,7 +116,7 @@ def test_failed_attempts_save_available_evidence_without_retry(project, scripted
         scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), final]
     saved = execute(project, scripted)
     assert saved.persistence_error is None and saved.record["status"] == "failed"
-    assert saved.record["content"] is None and saved.record["review"] is None
+    assert saved.record["plan_data"] is None and saved.record["plan_issues"] is None
     assert storage.load_run_record(project, saved.record_path) == saved.record
     assert len(scripted.requests) == (1 if failure == "model-connection" else 2)
     assert len(saved.record["model_calls"]) == len(scripted.requests)
@@ -228,7 +224,7 @@ def test_source_loss_still_allows_failed_record_and_raw_evidence_to_be_saved(pro
         (project / loop.SOURCE).unlink()
     scripted.hooks = [lose_source]
     saved = execute(project, scripted)
-    assert saved.record["status"] == "failed" and saved.record["content"] is None
+    assert saved.record["status"] == "failed" and saved.record["plan_data"] is None
     assert saved.record["model_calls"]
     assert (project / saved.record["model_calls"][0]["response_path"]).is_file()
 
@@ -312,7 +308,7 @@ def test_code_changes_prevent_acceptance_but_preserve_original_snapshot(project,
     scripted.hooks = [lambda _: monkeypatch.setattr(agents, "_code_snapshot", lambda: {"src/fixture.py": b"changed"})]
     saved = execute(project, scripted)
     assert saved.record["status"] == "failed" and saved.persistence_error
-    assert saved.record["content"] is None
+    assert saved.record["plan_data"] is None
     assert (folder(project, saved) / "artifacts/code/src/fixture.py").read_bytes() == b"# fictional code snapshot\n"
 
 

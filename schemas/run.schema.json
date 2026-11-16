@@ -2,17 +2,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:heat-adaptation:run",
   "title": "Heat adaptation run record",
-  "description": "One extractor or verifier attempt, including saved run settings, measurements, content, and review, from DESIGN.md Appendix A.",
-  "$comment": "Python supplies run metadata and measurements. Load the content and agent-response schemas locally. Python checks finite numbers, timestamp order, paths, role agreement, truncation, and embedded response references. Storage must later resolve saved files and linked runs without rewriting completed work.",
+  "description": "One extractor or verifier attempt, including saved run settings, measurements, plan data, and plan issues, from DESIGN.md Appendix A.",
+  "$comment": "Python supplies run metadata and measurements. Load the plan data and agent-response schemas locally. Python checks finite numbers, timestamp order, paths, role agreement, truncation, and embedded response references. Storage must later resolve saved files and linked runs without rewriting completed work.",
   "type": "object",
   "required": [
     "schema_version", "plan_id", "run_id", "stage", "purpose", "input_run_id",
     "retry_of_run_id", "source_path", "status", "started_at", "ended_at",
-    "elapsed_seconds", "settings", "model_calls", "tool_log_path", "content", "review", "error"
+    "elapsed_seconds", "settings", "model_calls", "tool_log_path", "plan_data", "plan_issues", "error"
   ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"type": "integer", "const": 2},
+    "schema_version": {"type": "integer", "const": 1},
     "plan_id": {"$ref": "#/$defs/text"},
     "run_id": {"$ref": "#/$defs/text"},
     "stage": {"type": "string", "enum": ["extractor", "verifier"]},
@@ -30,8 +30,8 @@
     "settings": {"$ref": "#/$defs/saved_run_settings"},
     "model_calls": {"type": "array", "items": {"$ref": "#/$defs/model_call"}},
     "tool_log_path": {"$ref": "#/$defs/nullable_text"},
-    "content": {"anyOf": [{"type": "null"}, {"$ref": "urn:heat-adaptation:content"}]},
-    "review": {"anyOf": [{"type": "null"}, {"$ref": "urn:heat-adaptation:agent-response#/properties/review"}]},
+    "plan_data": {"anyOf": [{"type": "null"}, {"$ref": "urn:heat-adaptation:plan-data"}]},
+    "plan_issues": {"anyOf": [{"type": "null"}, {"$ref": "urn:heat-adaptation:agent-response#/properties/plan_issues"}]},
     "error": {"$ref": "#/$defs/nullable_text"}
   },
   "allOf": [
@@ -49,7 +49,7 @@
       "if": {"properties": {"status": {"const": "succeeded"}}, "required": ["status"]},
       "then": {
         "properties": {
-          "content": {"type": "object"}, "review": {"type": "object"},
+          "plan_data": {"type": "object"}, "plan_issues": {"type": "object"},
           "error": {"type": "null"}, "model_calls": {"minItems": 1}
         }
       }

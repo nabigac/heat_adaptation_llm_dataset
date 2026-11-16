@@ -1,20 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:heat-adaptation:content",
-  "title": "Heat adaptation extracted content",
+  "$id": "urn:heat-adaptation:plan-data",
+  "title": "Heat adaptation plan data",
   "description": "Plan information and grouped heat adaptation actions, defined in DESIGN.md appendices A-C.",
   "$comment": "Python validates action IDs, evidence pages, issue links, and required review flags. Experts assess source meaning and completeness.",
   "type": "object",
   "required": [
-    "plan_info",
-    "plan_actions"
+    "metadata",
+    "actions"
   ],
   "additionalProperties": false,
   "properties": {
-    "plan_info": {
-      "$ref": "#/$defs/plan_info"
+    "metadata": {
+      "$ref": "#/$defs/metadata"
     },
-    "plan_actions": {
+    "actions": {
       "type": "array",
       "items": {
         "$ref": "#/$defs/action"
@@ -65,7 +65,7 @@
         }
       }
     },
-    "plan_info": {
+    "metadata": {
       "type": "object",
       "required": [
         "plan_title",

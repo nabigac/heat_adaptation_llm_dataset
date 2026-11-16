@@ -1,6 +1,6 @@
 # Design Doc: Heat Adaptation LLM Dataset
 
-**Research design · updated 2026-11-14**
+**Research design · updated 2026-11-16**
 
 ## 1. Context and problem
 
@@ -49,10 +49,10 @@ Within a plan, actions are grouped by the specific activity undertaken. For exam
 
 | Component | Meaning and information gathered | JSON representation |
 | --- | --- | --- |
-| Plan | One document version, processed in full. | One dataset containing `content` and `review`. |
-| Plan information | Document and jurisdiction metadata. | `content.plan_info`. |
-| Actions | One record per specific heat adaptation activity, combining its occurrences throughout the plan. | `content.plan_actions`. |
-| Review issues | Uncertainty, conflicts, source gaps, or possible omissions requiring review. | `review.issues`. |
+| Plan | One document version, processed in full. | One dataset containing `plan_data` and `plan_issues`. |
+| Plan information | Document and jurisdiction metadata. | `plan_data.metadata`. |
+| Actions | One record per specific heat adaptation activity, combining its occurrences throughout the plan. | `plan_data.actions`. |
+| Plan issues | Uncertainty, conflicts, source gaps, or possible omissions requiring review. | `plan_issues.issues`. |
 
 #### Fields within each action object
 
@@ -143,21 +143,21 @@ Sections A–D define the target plan dataset, E defines category options, F giv
 
 All fields are required unless marked optional. Text is nonblank unless stated otherwise. Dates use `YYYY-MM-DD`. Record links refer to items within the same plan dataset, and cited page numbers fall within the original PDF's page range.
 
-### A. Plan dataset and content
+### A. Plan dataset and plan data
 
-The model returns a plan dataset containing `content` and `review`. Execution metadata is described in the implementation document's [saved run specification](IMPLEMENTATION.MD#saved-run).
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `content` | object | Plan information and action records, defined below. |
-| `review` | object | Contains the `issues` list defined in section D. |
-
-Within `content`:
+The model returns a plan dataset containing `plan_data` and `plan_issues`. Execution metadata is described in the implementation document's [saved run specification](IMPLEMENTATION.MD#saved-run).
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `plan_info` | object | One plan's metadata, defined in section B. |
-| `plan_actions` | list of action objects | One object per specific heat adaptation activity throughout the plan. An empty list follows a completed search, with unresolved source gaps recorded as issues. |
+| `plan_data` | object | Plan information and action records, defined below. |
+| `plan_issues` | object | Contains the `issues` list defined in section D. |
+
+Within `plan_data`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `metadata` | object | One plan's metadata, defined in section B. |
+| `actions` | list of action objects | One object per specific heat adaptation activity throughout the plan. An empty list follows a completed search, with unresolved source gaps recorded as issues. |
 
 ### B. Plan information
 
@@ -195,7 +195,9 @@ Each evidence object:
 | `quote` | string | Exact continuous source passage. Separate passages are represented by separate objects. |
 | `page_numbers` | nonempty list of unique positive integers | Physical PDF positions containing the passage, starting at 1. A continuous passage may span pages. |
 
-### D. Review and issues
+### D. Plan issues
+
+Within `plan_issues`:
 
 | Field | Type | Meaning |
 | --- | --- | --- |

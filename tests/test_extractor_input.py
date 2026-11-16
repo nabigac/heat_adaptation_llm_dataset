@@ -183,7 +183,7 @@ def test_compatible_schema_is_supplied_separately_and_request_construction_accep
     assert packet.response_format == models.prepare_ollama_response_schema()
     _, body, _ = models.build_ollama_request(packet.settings, packet.messages, response_format=packet.response_format)
     assert body["messages"] == packet.messages and body["format"] == packet.response_format
-    assert packet.response_format["required"] == ["content", "review"]
+    assert packet.response_format["required"] == ["plan_data", "plan_issues"]
     assert all("format" not in message for message in packet.messages)
 
 

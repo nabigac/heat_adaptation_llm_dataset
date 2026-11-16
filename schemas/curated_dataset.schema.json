@@ -4,15 +4,15 @@
   "title": "Expert-curated plan dataset",
   "type": "object",
   "required": [
-    "content",
-    "review"
+    "plan_data",
+    "plan_issues"
   ],
   "additionalProperties": false,
   "properties": {
-    "content": {
-      "$ref": "urn:heat-adaptation:content"
+    "plan_data": {
+      "$ref": "urn:heat-adaptation:plan-data"
     },
-    "review": {
+    "plan_issues": {
       "type": "object",
       "required": [
         "issues"

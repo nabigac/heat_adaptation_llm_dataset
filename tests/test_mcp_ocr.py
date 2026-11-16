@@ -36,10 +36,6 @@ scripted = loop.scripted
 facts = saved_tests.facts
 
 
-@pytest.fixture
-def run_record(action_run_record):
-    """Use the current action format for OCR-enabled extraction runs."""
-    return action_run_record
 
 
 def enable_ocr(root, *, enabled=True):
@@ -55,7 +51,7 @@ def enable_ocr(root, *, enabled=True):
 def active_run(project, run_record):
     enable_ocr(project)
     record = copy.deepcopy(run_record)
-    record.update(status="running", ended_at=None, elapsed_seconds=None, content=None, review=None,
+    record.update(status="running", ended_at=None, elapsed_seconds=None, plan_data=None, plan_issues=None,
                   model_calls=[], tool_log_path=None, error=None)
     record["settings"] = agents.load_profile(project, loop.PROFILE, stage="extractor")
     record["settings"]["environment"] = copy.deepcopy(run_record["settings"]["environment"])
@@ -374,7 +370,7 @@ def test_ocr_storage_failure_stops_saved_execution_without_another_model_call(pr
     call["function"]["arguments"] = {"page_number": 1}
     scripted.replies = [loop.message(calls=[call])]
     result = saved_tests.execute(project, scripted)
-    assert result.record["status"] == "failed" and result.record["content"] is None
+    assert result.record["status"] == "failed" and result.record["plan_data"] is None
     assert len(scripted.requests) == 1
     log = json.loads((project / result.record["tool_log_path"]).read_text())
     assert "Cannot preserve OCR evidence" in log[0]["error"]
@@ -388,13 +384,13 @@ def test_recognition_failure_can_remain_an_open_issue_in_a_successful_saved_run(
     call = loop.call(name="run_ocr")
     call["function"]["arguments"] = {"page_number": 1}
     final = json.loads(loop.answer(run_record))
-    final["review"]["issues"] = [{"issue_id": "issue_0001", "issue_type": "source_issue", "issue_status": "open",
+    final["plan_issues"]["issues"] = [{"issue_id": "issue_0001", "issue_type": "source_issue", "issue_status": "open",
         "related_action_id": None, "issue_description": "OCR could not recover page 1 text.",
         "issue_origin": "extractor", "resolved_by": None, "resolution": None}]
     scripted.replies = [loop.message(calls=[call]), loop.message(agents.FINAL_READY_SIGNAL), loop.message(json.dumps(final))]
     result = saved_tests.execute(project, scripted)
     assert result.record["status"] == "succeeded", result.record["error"]
-    assert result.record["review"]["issues"][0]["issue_status"] == "open"
+    assert result.record["plan_issues"]["issues"][0]["issue_status"] == "open"
     log = json.loads((project / result.record["tool_log_path"]).read_text())
     assert log[0]["result"]["isError"] is True and "Saved OCR report" in log[0]["error"]
 
@@ -418,8 +414,8 @@ def test_real_mcp_subprocess_recognizes_image_only_page_and_saved_loop_forwards_
     call = loop.call(name="run_ocr")
     call["function"]["arguments"] = {"page_number": 1}
     final = json.loads(loop.answer(run_record))
-    final["content"]["plan_info"].update(source_url=prep["source_url"], date_accessed=prep["date_accessed"])
-    final["content"]["plan_actions"][0].update(action="Open 3 cooling centres by 2028.",
+    final["plan_data"]["metadata"].update(source_url=prep["source_url"], date_accessed=prep["date_accessed"])
+    final["plan_data"]["actions"][0].update(action="Open 3 cooling centres by 2028.",
         evidence=[{"quote": expected, "page_numbers": [1]}])
     def check_reading(body):
         message = next(m for m in body["messages"] if m["role"] == "tool")

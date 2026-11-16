@@ -30,7 +30,7 @@ def add_arguments(project: Path, tmp_path: Path) -> list[str]:
     # Registration fixtures establish byte preservation, not PDF readability.
     pdf.write_bytes(b"%PDF-1.4\nFictional CLI registration fixture\n%%EOF\n")
     return [
-        "add",
+        "add_plan",
         str(pdf),
         "--project-root",
         str(project),
@@ -61,7 +61,7 @@ def prepare_arguments(
         writer.write(Path(add_arguments[1]))
     assert cli.main(add_arguments) == 0
     capsys.readouterr()
-    return ["prepare", "plan_0001", "--project-root", str(project)]
+    return ["prepare_plan", "plan_0001", "--project-root", str(project)]
 
 
 def test_add_calls_registration_and_reports_saved_paths(
@@ -96,7 +96,7 @@ def test_duplicate_add_reports_reuse(
 def test_list_of_new_project_creates_no_files(
     project: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    assert cli.main(["list", "--project-root", str(project)]) == 0
+    assert cli.main(["list_plans", "--project-root", str(project)]) == 0
 
     assert capsys.readouterr().out == "No registered documents.\n"
     assert list(project.iterdir()) == []
@@ -108,7 +108,7 @@ def test_list_shows_registered_metadata(
     assert cli.main(add_arguments) == 0
     capsys.readouterr()
 
-    assert cli.main(["list", "--project-root", str(project)]) == 0
+    assert cli.main(["list_plans", "--project-root", str(project)]) == 0
     output = capsys.readouterr()
 
     assert "PLAN_ID" in output.out
@@ -124,7 +124,7 @@ def test_default_project_is_current_directory(
 ) -> None:
     monkeypatch.chdir(project)
 
-    assert cli.main(["list"]) == 0
+    assert cli.main(["list_plans"]) == 0
     assert capsys.readouterr().out == "No registered documents.\n"
 
 
@@ -193,7 +193,7 @@ def test_list_rejects_damaged_registry(project: Path, capsys: pytest.CaptureFixt
     path.parent.mkdir(parents=True)
     path.write_text("damaged JSON", encoding="utf-8")
 
-    assert cli.main(["list", "--project-root", str(project)]) == 1
+    assert cli.main(["list_plans", "--project-root", str(project)]) == 1
     output = capsys.readouterr()
 
     assert "[syntax]" in output.err
@@ -208,7 +208,7 @@ def test_list_reports_missing_registry_with_existing_raw_file(
     path.parent.mkdir(parents=True)
     path.write_bytes(b"previously saved bytes")
 
-    assert cli.main(["list", "--project-root", str(project)]) == 1
+    assert cli.main(["list_plans", "--project-root", str(project)]) == 1
 
     assert "Restore the registry explicitly" in capsys.readouterr().err
     assert path.read_bytes() == b"previously saved bytes"
@@ -222,7 +222,7 @@ def test_list_reports_a_changed_original(
     capsys.readouterr()
     (project / "data/raw/plan_0001.pdf").write_bytes(b"changed saved original")
 
-    assert cli.main(["list", "--project-root", str(project)]) == 1
+    assert cli.main(["list_plans", "--project-root", str(project)]) == 1
 
     assert "no longer matches its checksum" in capsys.readouterr().err
 
@@ -254,9 +254,19 @@ def test_cli_help_lists_available_commands(capsys: pytest.CaptureFixture) -> Non
     assert error.value.code == 0
     output = capsys.readouterr()
     assert "usage: heat-adaptation-llm-dataset" in output.out
-    assert "add" in output.out
-    assert "prepare" in output.out
-    assert "list" in output.out
+    assert "add_plan" in output.out
+    assert "update_plan_data" in output.out
+    assert "prepare_plan" in output.out
+    assert "run_extract_mode" in output.out
+    assert "list_plans" in output.out
+
+
+@pytest.mark.parametrize("command", ["add", "update", "prepare", "extract", "list"])
+def test_previous_command_names_are_rejected(command, capsys):
+    with pytest.raises(SystemExit) as error:
+        cli.main([command, "--help"])
+    assert error.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_prepare_reports_ready_and_saved_paths(
@@ -284,7 +294,7 @@ def test_failed_pdf_preparation_is_saved_but_returns_failure_exit_status(
     assert cli.main(add_arguments) == 0
     capsys.readouterr()
 
-    result = cli.main(["prepare", "plan_0001", "--project-root", str(project)])
+    result = cli.main(["prepare_plan", "plan_0001", "--project-root", str(project)])
     output = capsys.readouterr()
 
     assert result == 1
@@ -293,7 +303,7 @@ def test_failed_pdf_preparation_is_saved_but_returns_failure_exit_status(
     assert "preparation_01/preparation.json" in output.out
     assert "Could not open or count PDF pages" in output.err
     assert "Review the saved preparation and page problems" in output.err
-    assert "uv run --locked heat-adaptation-llm-dataset prepare plan_0001" in output.err
+    assert "uv run --locked heat-adaptation-llm-dataset prepare_plan plan_0001" in output.err
     assert "Traceback" not in output.err
     record_path = storage.load_registry(project)["plans"][0]["prepared_source_path"]
     preparation, pages = storage.load_preparation(project, record_path)
@@ -318,7 +328,7 @@ def test_partly_readable_pdf_returns_ready_with_gaps_when_images_work(
     capsys.readouterr()
 
     # This case isolates image fallback. Automatic OCR has separate integration tests.
-    result = cli.main(["prepare", "plan_0001", "--no-ocr", "--project-root", str(project)])
+    result = cli.main(["prepare_plan", "plan_0001", "--no-ocr", "--project-root", str(project)])
     output = capsys.readouterr()
 
     assert result == 0
@@ -336,7 +346,7 @@ def test_partly_readable_pdf_returns_ready_with_gaps_when_images_work(
 
 def test_prepare_requires_a_plan_id(project: Path, capsys: pytest.CaptureFixture) -> None:
     with pytest.raises(SystemExit) as error:
-        cli.main(["prepare", "--project-root", str(project)])
+        cli.main(["prepare_plan", "--project-root", str(project)])
 
     assert error.value.code == 2
     assert "plan_id" in capsys.readouterr().err
@@ -345,7 +355,7 @@ def test_prepare_requires_a_plan_id(project: Path, capsys: pytest.CaptureFixture
 
 def test_prepare_help_describes_plan_id_and_project_root(capsys: pytest.CaptureFixture) -> None:
     with pytest.raises(SystemExit) as error:
-        cli.main(["prepare", "--help"])
+        cli.main(["prepare_plan", "--help"])
 
     assert error.value.code == 0
     output = capsys.readouterr()
@@ -379,7 +389,7 @@ def test_prepare_defaults_to_current_project_directory(
 ) -> None:
     monkeypatch.chdir(project)
 
-    assert cli.main(["prepare", "plan_0001"]) == 0
+    assert cli.main(["prepare_plan", "plan_0001"]) == 0
     assert "Status: ready" in capsys.readouterr().out
     assert storage.load_registry(project)["plans"][0]["prepared_source_path"] is not None
 
@@ -466,7 +476,7 @@ def test_cli_reports_ready_with_gaps_without_marking_it_failed(
 
     monkeypatch.setattr(cli.documents, "prepare_document", future_preparation)
 
-    assert cli.main(["prepare", "plan_0001", "--project-root", str(project)]) == 0
+    assert cli.main(["prepare_plan", "plan_0001", "--project-root", str(project)]) == 0
     output = capsys.readouterr()
 
     assert "Status: ready_with_gaps" in output.out
@@ -495,7 +505,7 @@ def test_failed_preparation_retry_command_quotes_project_path_with_spaces(
 
     monkeypatch.setattr(cli.documents, "prepare_document", failed_preparation)
 
-    assert cli.main(["prepare", "plan_0001", "--project-root", str(project)]) == 1
+    assert cli.main(["prepare_plan", "plan_0001", "--project-root", str(project)]) == 1
     output = capsys.readouterr()
 
     assert f"--project-root '{project.resolve()}'" in output.err
@@ -522,7 +532,7 @@ def test_prepare_exit_status_reaches_a_separate_python_process(
     # A separate process verifies that the integer returned by main() actually
     # becomes the terminal exit code through the __main__ entry point.
     result = subprocess.run(
-        [sys.executable, str(script), "prepare", "plan_0001"],
+        [sys.executable, str(script), "prepare_plan", "plan_0001"],
         cwd=project,
         capture_output=True,
         text=True,
@@ -539,7 +549,7 @@ def test_script_entry_point_works_in_another_directory(project: Path) -> None:
     script = Path(__file__).resolve().parents[1] / "src/cli.py"
     # A subprocess runs a separate Python process, exercising __main__ and exit codes.
     result = subprocess.run(
-        [sys.executable, str(script), "list"],
+        [sys.executable, str(script), "list_plans"],
         cwd=project,
         capture_output=True,
         text=True,

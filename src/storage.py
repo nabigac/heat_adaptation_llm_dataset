@@ -132,12 +132,15 @@ def save_run_record(project_root: Path | str, record: dict) -> str:
     Identity, selected preparation, prompts, and chosen configuration stay fixed.
     Previously unknown environment/call measurements may become known; recorded
     values and existing model calls cannot be erased or silently rewritten. A
-    failed record without accepted content/review may be finalized after an input
+    failed record without accepted plan data/issues may be finalized after an input
     disappears; its frozen links and surviving evidence remain for later recovery.
     """
     _require_run_structure(record)
     record_path = _run_record_path(record)
-    failed_without_output = record["status"] == "failed" and record["content"] is None and record["review"] is None
+    failed_without_output = (
+        record["status"] == "failed"
+        and record["plan_data"] is None and record["plan_issues"] is None
+    )
     # Strict loading is appropriate before using accepted results. Preserving a
     # failure needs a narrower read when the missing source is the failure's
     # cause; that branch must not publish accepted content or change input links.
@@ -343,18 +346,24 @@ def _check_run_source(project_root: Path | str, record: dict) -> dict:
             or saved_input.get("source_fingerprint") != source_fingerprint
         ):
             _run_problem(input_path, "The selected source differs from the preserved startup fingerprint.")
-    elif record["schema_version"] == 2 and record["status"] == "succeeded":
+    elif record["status"] == "succeeded":
         # Early failures may precede input publication. Successful new runs must
         # retain the snapshot that ties their answer to the exact prepared text.
-        _run_problem(input_path, "A successful version 2 run requires its preserved extractor input.")
+        _run_problem(
+            input_path,
+            "A successful run requires its preserved extractor input."
+        )
     if record["purpose"] in {"development", "comparison"} and entry["study_set"] != record["purpose"]:
         _run_problem("$.purpose", "Development/comparison work must match the plan's study-set assignment.")
-    if record["content"] is not None:
+    if record["plan_data"] is not None:
         # Collection corrections affect future preparations. Earlier content
         # must match the collection values saved with its own preparation.
         for field in ("source_url", "date_accessed"):
-            if record["content"]["plan_info"][field] != preparation[field]:
-                _run_problem("$.content.plan_info." + field, "Collection values must match the selected preparation snapshot.")
+            if record["plan_data"]["metadata"][field] != preparation[field]:
+                _run_problem(
+                    f"$.plan_data.metadata.{field}",
+                    "Collection values must match the selected preparation snapshot."
+                )
     return preparation
 
 
@@ -441,7 +450,7 @@ def _check_run_files(project_root: Path | str, record: dict, record_path: str) -
             _run_problem("$.tool_log_path", "A completed run must link its preserved tool activity.")
 
     report_path = f"{folder}/validation_report.json"
-    # Accepted content/review implies final-response checks were attempted.
+    # Accepted plan data/issues imply final-response checks were attempted.
     # Their report must survive too, including when a later stage error fails a run.
     report_file = _bound_run_file(project_root, record_path, report_path)
     if report_file.exists():
@@ -449,7 +458,7 @@ def _check_run_files(project_root: Path | str, record: dict, record_path: str) -
         _check_report_files(project_root, record_path, report)
         if record["status"] == "succeeded" and not report["valid"]:
             _run_problem(report_path, "A successful run requires a passing final-response validation report.")
-    elif record["status"] == "succeeded" or record["content"] is not None or record["review"] is not None:
+    elif record["status"] == "succeeded" or record["plan_data"] is not None or record["plan_issues"] is not None:
         raise FileNotFoundError(f"Final-response validation report is missing: {report_file}")
 
 

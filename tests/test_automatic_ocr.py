@@ -350,7 +350,7 @@ def test_automatic_ocr_uses_a_new_preparation_without_changing_the_previous_one(
 def test_cli_enables_selective_ocr_by_default_and_supports_opt_out(
     project: Path, mixed_plan: dict, controlled_ocr, capsys: pytest.CaptureFixture, enabled: bool
 ) -> None:
-    arguments = ["prepare", mixed_plan["plan_id"], "--project-root", str(project)]
+    arguments = ["prepare_plan", mixed_plan["plan_id"], "--project-root", str(project)]
     if not enabled:
         arguments.append("--no-ocr")
 

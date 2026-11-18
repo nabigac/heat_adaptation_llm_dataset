@@ -46,6 +46,15 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Observed result:** 90 affected tests passed; revised prompts loaded with unchanged source text, and all 78 original-run files were preserved. No extraction was launched at this step; the quality effect was **Not yet tested**.
 - **Remaining questions:** Assess grouping, status, and quotation fidelity on subsequent development outputs.
 
+### 2026-11-18 — Review revised extraction and pilot Hugging Face
+
+- **Category:** Model
+- **Problem:** Local Qwen3.5 27B run `0002` separated the competition and ambassador training, but quotation and status problems remained after prompt refinement.
+- **Decision/change:** Added a Hugging Face adapter to pilot the larger open-weight `Qwen/Qwen3.5-397B-A17B`, pinned to Novita, using the same prepared plan, prompts, local tools, and Python validation. After run `0003` failed, selected JSON-object mode with the target schema in the instructions for the next attempt.
+- **Reason:** Test whether a larger model could improve extraction without local hardware constraints.
+- **Observed result:** Run `0002` succeeded in about 18 minutes with 13 action records and two open issues. Run `0003` completed two investigation requests and ten quotation lookups, then failed with HTTP 400: Novita rejected `json_schema` and reported support for `json_object`. No final dataset was accepted.
+- **Remaining questions:** Hosted extraction quality was **Not yet tested**; JSON-object mode still needed checks for output validity and token-limit behavior.
+
 ### 2026-11-18 — Hosted JSON output fails budget and schema checks
 
 - **Category:** Model

@@ -78,6 +78,55 @@ Evidence consists of exact, continuous quotations with physical PDF page numbers
 
 Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains existing issue IDs, may add issues, and explains claimed resolutions for expert assessment. Experts may subsequently resolve issues in curated copies. Expert curation corrects or excludes unsupported material.
 
+### Example data output
+
+This fictional example groups tree planting across two wards. A linked issue records costs that could not be recovered from a table.
+
+```json
+{
+  "plan_data": {
+    "metadata": {
+      "plan_title": "Example City Heat Action Plan",
+      "jurisdiction_name": "Example City",
+      "country": "Example Country",
+      "plan_scale": "city",
+      "plan_type": "heat_specific_plan",
+      "publication_year": 2026,
+      "lead_agencies": ["Example City Council"],
+      "source_url": "https://example.org/heat-plan.pdf",
+      "date_accessed": "2026-11-18",
+      "language": "English"
+    },
+    "actions": [{
+      "action_id": "action_0001",
+      "action": "Example City Council plans to plant 100 street trees in North Ward and 200 in South Ward.",
+      "action_type": ["nature-based"],
+      "action_status": "planned",
+      "action_location": "North Ward; South Ward",
+      "action_recipient": null,
+      "action_cost": null,
+      "action_benefit": "Expected reduction in heat.",
+      "evidence": [{
+        "quote": "Example City Council plans to plant 100 street trees in North Ward and 200 in South Ward to reduce heat.",
+        "page_numbers": [4]
+      }]
+    }]
+  },
+  "plan_issues": {
+    "issues": [{
+      "issue_id": "issue_0001",
+      "related_action_id": "action_0001",
+      "issue_description": "Planting costs in the table on PDF page 5 could not be recovered from prepared text or OCR.",
+      "issue_type": "source_issue",
+      "issue_origin": "extractor",
+      "issue_status": "open",
+      "resolved_by": null,
+      "resolution": null
+    }]
+  }
+}
+```
+
 ### Workflow and comparison
 
 During development, models will draft action records and flag uncertainties. Experts will examine the outputs against the plans and identify changes needed in coding rules, prompts, tools, and review procedures. Examples showing what prompted a revision, how it was addressed, and what was observed afterwards will be preserved. These examples will support the study's account of building the workflow and the lessons drawn from that process.

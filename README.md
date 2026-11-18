@@ -1,8 +1,8 @@
 # heat adaptation LLM dataset
 
-this research project examines how heat adaptation experts and open-weight large language models (LLMs) can be paired to build an extraction workflow. it will share practical lessons from the expert judgments, model outputs, and revisions involved in developing that workflow.
+this research project examines how heat adaptation experts and open-weight large language models (LLMs) can be paired to build an extraction workflow. it will share practical lessons from the expert judgments, model outputs, and revisions involved in developing that workflow. the project uses open-weight models through hugging face.
 
-the workflow extracts heat adaptation actions from government and public agency plans into structured records with supporting quotations. **inkling 2 small is the extractor in both configurations:** **E** is its extraction, and **E+V** begins with that exact saved extraction, checked and revised by a different hosted open-weight model through hugging face. the verifier remains to be selected and implemented. expert-curated answers will also support a pilot instruction dataset for possible future fine-tuning.
+the workflow extracts heat adaptation actions from government and public agency plans into structured records with supporting quotations. the study explores two configurations: **E** (extraction) and E**E+V** (extraction + verification). **E+V** begins with that exact saved extraction, checked and revised by a different hosted open-weight model. **inkling 2 small** is the extractor in both configurations, whereas open-weight model that will be the verifier remains to be selected and implemented. expert-curated answers will also support a pilot instruction dataset for possible future fine-tuning.
 
 ## project documents
 

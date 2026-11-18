@@ -109,7 +109,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     run_extract_mode_parser = commands.add_parser(
         "run_extract_mode",
-        help="Run and save one extractor attempt using local Ollama and MCP.",
+        help="Run and save one hosted extractor attempt with local MCP document tools.",
         allow_abbrev=False,
     )
     run_extract_mode_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")

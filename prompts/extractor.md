@@ -1,9 +1,10 @@
 # Extractor task
 
 Extract all eligible heat adaptation activities from the complete supplied plan,
-using the shared coding instructions and field definitions. Group each specific
-activity across all neighborhoods, phases, and repeated mentions into one action
-object. Return all nine action fields and the complete issue list.
+using the shared coding instructions and field definitions. Identify distinct
+activities within each heading or pathway, then group repeated occurrences of
+the same activity across neighborhoods and phases into one action object. Return
+all nine action fields and the complete issue list.
 
 Read every supplied original PDF page position, including preparation notes and
 OCR supplements. Investigate relevant uncertainties with only the tools offered
@@ -15,9 +16,12 @@ has resolved_by set to extractor and a source-supported explanation. Open issues
 have null resolved_by and resolution fields. Never fabricate source text, page
 positions, facts, tool results, or expert participation.
 
-Before submission, check activity grouping, quantities and local associations,
-action types and overall status, exact continuous quotations, physical PDF page
-positions, valid action links, and issues for empty evidence or type lists.
+Before submission, check that distinct activities have separate records and that
+repeated occurrences of the same activity are grouped. Check quantities and local
+associations, action types, and clear source support for every status other than
+unspecified. Verify that quotations copy continuous source passages without
+rewriting or silent omissions, and cite every physical PDF page containing their
+words. Check valid action links and issues for empty evidence or type lists.
 
 Return exactly one JSON object containing plan_data and plan_issues, with every required
 field and no surrounding Markdown or commentary. Python does not fill missing

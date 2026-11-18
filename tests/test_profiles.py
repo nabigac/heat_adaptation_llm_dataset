@@ -263,10 +263,27 @@ def test_ocr_switch_and_nullable_fields_agree(configuration: dict, enabled: bool
 
 def test_hosted_configuration_requires_service_and_provider(configuration: dict) -> None:
     model = configuration["profiles"][0]["model"]
-    model.update(execution_mode="hosted_api", endpoint="https://example.org/api")
+    model.update(api_service=None, provider=None)
     assert validation.validate_profiles(configuration)
-    model.update(api_service="fictional-service", provider="fictional-provider")
+    model.update(api_service="huggingface", provider="deepinfra")
     assert validation.validate_profiles(configuration) == []
+
+
+@pytest.mark.parametrize("change", [
+    {"execution_mode": "local", "api_service": None, "provider": None},
+    {"api_service": "fictional-service"},
+])
+def test_active_profiles_require_hosted_huggingface_execution(configuration: dict, change: dict) -> None:
+    configuration["profiles"][0]["model"].update(change)
+    assert validation.validate_profiles(configuration)
+
+
+def test_saved_run_validation_retains_historical_local_settings(run_record: dict) -> None:
+    run_record["settings"]["model"].update(
+        execution_mode="local", api_service=None, provider=None,
+        endpoint="http://localhost:11434",
+    )
+    assert validation.validate_run_record(run_record, page_count=3) == []
 
 
 @pytest.mark.parametrize("path", [
@@ -365,7 +382,7 @@ def test_missing_shared_schema_is_a_visible_setup_failure(configuration: dict, t
 
 def test_repository_starter_profile_loads_but_does_not_claim_environment_observations() -> None:
     root = Path(__file__).resolve().parents[1]
-    settings = agents.load_profile(root, "qwen35_27b_extractor_development", stage="extractor")
+    settings = agents.load_profile(root, "inkling2_small_hf_extractor_development", stage="extractor")
     assert settings["stage"] == "extractor"
     assert len(settings["prompt_paths"]) == len(settings["prompt_texts"]) == 3
     assert all(text.strip() for text in settings["prompt_texts"])

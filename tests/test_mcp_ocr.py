@@ -344,11 +344,11 @@ def test_saved_runner_delivers_actual_mcp_ocr_result_to_next_model_request(proje
         assert (project / payload["result"]["image_path"]).is_file()
         assert (project / payload["result"]["text_path"]).read_bytes() == recognition.text.encode()
     scripted.hooks = [catalogue_and_prompt, received_reading]
-    scripted.replies = [loop.message(calls=[loop.call(name="run_ocr")]),
+    # Set OCR arguments before the helper encodes them into the hosted protocol.
+    call = loop.call(name="run_ocr")
+    call["function"]["arguments"] = {"page_number": 1}
+    scripted.replies = [loop.message(calls=[call]),
                         loop.message(agents.FINAL_READY_SIGNAL), loop.message(loop.answer(run_record))]
-    # The generic fixture's helper treats non-page tools as quote lookup. Set the
-    # actual OCR argument explicitly, as the real model must do.
-    scripted.replies[0]["message"]["tool_calls"][0]["function"]["arguments"] = {"page_number": 1}
     result = saved_tests.execute(project, scripted)
     assert result.record["status"] == "succeeded" and result.persistence_error is None
     log = json.loads((project / result.record["tool_log_path"]).read_text())

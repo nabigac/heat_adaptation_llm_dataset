@@ -1,6 +1,6 @@
 """Check the provider copy against our authoritative response contract.
 
-These tests exercise conversion and validation without contacting Ollama. Live
+These tests exercise conversion and validation without contacting the hosted model. Live
 synthetic probes check the serving setup separately; neither proves extraction
 accuracy, source support, or completeness on research documents.
 """
@@ -14,6 +14,7 @@ import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 
 import models
+import huggingface_api as hf
 from validation import validate_agent_response, validate_agent_response_structure
 
 
@@ -51,7 +52,7 @@ def response(run_record: dict) -> dict:
 
 @pytest.fixture(scope="module")
 def prepared_validator():
-    return Draft202012Validator(models.prepare_ollama_response_schema(), format_checker=FormatChecker())
+    return Draft202012Validator(models.prepare_response_schema(), format_checker=FormatChecker())
 
 
 def assert_agreement(data, prepared_validator, expected: bool) -> None:
@@ -168,8 +169,8 @@ def test_schema_mode_does_not_replace_semantic_validation(response, prepared_val
 
 def test_prepared_copy_is_self_contained_fresh_and_explicit(run_record):
     sources = {path: path.read_bytes() for path in (ROOT / "schemas").glob("*.schema.json")}
-    first = models.prepare_ollama_response_schema()
-    second = models.prepare_ollama_response_schema()
+    first = models.prepare_response_schema()
+    second = models.prepare_response_schema()
     assert first == second
     assert first["$schema"] == DIALECT
     assert not any(isinstance(value, dict) and {"$id", "$defs", "$ref"} & value.keys()
@@ -177,12 +178,13 @@ def test_prepared_copy_is_self_contained_fresh_and_explicit(run_record):
     assert sources == {path: path.read_bytes() for path in sources}
     settings = run_record["settings"]
     messages = [{"role": "user", "content": "Fictional test only."}]
-    _, body, _ = models.build_ollama_request(settings, messages, response_format=first)
-    assert body["format"] == first
-    body["format"]["properties"].clear()
+    prepared = hf.build_huggingface_request(settings, messages, response_format=first)
+    body = prepared.body
+    assert body["response_format"]["json_schema"]["schema"] == hf.prepare_deepinfra_response_schema(first)
+    body["response_format"]["json_schema"]["schema"]["properties"].clear()
     first["properties"]["plan_data"]["properties"].clear()
-    assert second == models.prepare_ollama_response_schema()
-    assert "format" not in models.build_ollama_request(settings, messages)[1]
+    assert second == models.prepare_response_schema()
+    assert "response_format" not in hf.build_huggingface_request(settings, messages).body
 
 
 @pytest.fixture
@@ -223,8 +225,8 @@ def test_bad_source_files_fail_visibly(schema_files, damage):
         schema_files(content={"$id": "urn:unknown"})
     else:
         schema_files(content={"$schema": "http://json-schema.org/draft-07/schema#"})
-    with pytest.raises(models.OllamaSchemaError):
-        models.prepare_ollama_response_schema()
+    with pytest.raises(models.ResponseSchemaError):
+        models.prepare_response_schema()
 
 
 @pytest.mark.parametrize("reference", [
@@ -235,8 +237,8 @@ def test_bad_source_files_fail_visibly(schema_files, damage):
 def test_unknown_or_unsupported_references_fail_locally(schema_files, reference):
     schema_files(content={"title": "Literal title, not a schema.", "allOf": [{"type": "object"}],
                           "properties": {"value": {"$ref": reference}}})
-    with pytest.raises(models.OllamaSchemaError, match="reference|Pointer|Expected a schema"):
-        models.prepare_ollama_response_schema()
+    with pytest.raises(models.ResponseSchemaError, match="reference|Pointer|Expected a schema"):
+        models.prepare_response_schema()
 
 
 @pytest.mark.parametrize("cross_document", [False, True])
@@ -246,8 +248,8 @@ def test_recursive_references_fail_instead_of_recursing_forever(schema_files, cr
                           "properties": {"value": {"$ref": "#/$defs/loop"}}},
                  response={"$defs": {"back": {"$ref": PLAN_DATA_URI + "#/$defs/loop"}},
                            "properties": {"plan_data": {"$ref": PLAN_DATA_URI}}})
-    with pytest.raises(models.OllamaSchemaError, match="Recursive"):
-        models.prepare_ollama_response_schema()
+    with pytest.raises(models.ResponseSchemaError, match="Recursive"):
+        models.prepare_response_schema()
 
 
 @pytest.mark.parametrize("fragment", [
@@ -261,8 +263,8 @@ def test_recursive_references_fail_instead_of_recursing_forever(schema_files, cr
 def test_unsupported_rules_are_rejected_rather_than_dropped(schema_files, fragment):
     schema_files(content={"$defs": {"text": {"type": "string"}, "no": False},
                           "properties": {"value": fragment}})
-    with pytest.raises(models.OllamaSchemaError):
-        models.prepare_ollama_response_schema()
+    with pytest.raises(models.ResponseSchemaError):
+        models.prepare_response_schema()
 
 
 def test_pointer_escapes_array_targets_and_repeated_refs(schema_files):
@@ -275,7 +277,7 @@ def test_pointer_escapes_array_targets_and_repeated_refs(schema_files):
             "array_target": {"$ref": "#/allOf/0"},
         },
     })
-    properties = models.prepare_ollama_response_schema()["properties"]["plan_data"]["properties"]
+    properties = models.prepare_response_schema()["properties"]["plan_data"]["properties"]
     assert properties["first"]["description"] == "Original wording.\nAdditional guidance."
     assert properties["second"]["description"] == "Original wording."
     assert properties["array_target"] == {"type": "object"}
@@ -289,7 +291,7 @@ def test_literal_values_and_property_names_are_never_treated_as_schema_keywords(
         name: {"const": literal, "examples": [literal], "default": literal}
         for name in ("$ref", "$id", "$schema", "$defs", "pattern")
     }})
-    properties = models.prepare_ollama_response_schema()["properties"]["plan_data"]["properties"]
+    properties = models.prepare_response_schema()["properties"]["plan_data"]["properties"]
     assert set(properties) == {"$ref", "$id", "$schema", "$defs", "pattern"}
     assert all(value == {"const": literal, "examples": [literal], "default": literal} for value in properties.values())
 
@@ -302,7 +304,7 @@ def test_compositions_and_boolean_schemas_keep_their_constraints(schema_files):
                "anyOf": [{"minItems": 2}, {"maxItems": 0}],
                "oneOf": [{"uniqueItems": True}, False]}
     schema_files(content=content)
-    prepared = models.prepare_ollama_response_schema()["properties"]["plan_data"]
+    prepared = models.prepare_response_schema()["properties"]["plan_data"]
     original = Draft202012Validator(content)
     converted = Draft202012Validator(prepared)
     for value in ([], ["text"], [1, "text"], [None, "text"], None):

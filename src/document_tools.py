@@ -856,7 +856,7 @@ def main(argv: list[str] | None = None) -> int:
                                              run_record_path=args.run_record_path)
     except DocumentToolError as error:
         parser.error(str(error))
-    # This is a separate local process, not an HTTP server and not the Ollama
+    # This is a separate local process, not an HTTP server and not the model API
     # service. Only a client connected to these pipes can make its MCP requests.
     server.run(transport="stdio")
     return 0

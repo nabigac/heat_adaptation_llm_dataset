@@ -1,4 +1,4 @@
-"""Check saved-text tools and a real MCP subprocess, without Ollama or OCR.
+"""Check saved-text tools and a real MCP subprocess, without model requests or OCR.
 
 The PDFs below are blank fixtures. Their prepared text is intentionally fictional:
 these tests establish source selection, exact matching, error handling and MCP
@@ -358,13 +358,13 @@ def test_entry_point_requires_explicit_selection_and_reports_startup_errors(proj
     assert "Cannot load selected document tools" in captured.err
 
 
-def test_discovered_sdk_catalogue_converts_to_ollama_without_rewriting_argument_rules(project):
+def test_discovered_sdk_catalogue_converts_to_model_tools_without_rewriting_argument_rules(project):
     async def exercise():
         server = document_tools.create_document_tool_server(project, PLAN_ID, source_path=SOURCE_PATH)
         async with Client(server, read_timeout_seconds=5) as client:
             discovered = (await client.list_tools()).tools
         catalogue = [tool.model_dump(mode="json", by_alias=True) for tool in discovered]
-        converted = models.prepare_ollama_tools(catalogue)
+        converted = models.prepare_document_tools(catalogue)
         assert [tool["function"]["name"] for tool in converted] == [tool.name for tool in discovered]
         for tool, original in zip(converted, discovered, strict=True):
             assert tool["function"]["parameters"] == original.input_schema

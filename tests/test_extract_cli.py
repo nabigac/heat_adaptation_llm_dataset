@@ -86,15 +86,15 @@ def test_development_feedback_shows_permitted_repairs(project, scripted, facts, 
 @pytest.mark.parametrize("failure", ["invalid", "truncated", "connection", "overflow"])
 def test_failed_execution_returns_nonzero_with_preserved_record(project, scripted, facts, connected_cli, run_record, capsys, monkeypatch, failure):
     if failure == "connection":
-        scripted.replies = [httpx.ConnectError("Controlled unavailable Ollama.")]
+        scripted.replies = [httpx.ConnectError("Controlled unavailable hosted API.")]
     elif failure == "overflow":
-        async def count(client, url, body, result, directory):
-            result.report.update(fits=False, error="Controlled context overflow.")
-        monkeypatch.setattr(saved_tests.models, "_check_token_budget", count)
+        def estimate(request):
+            return saved_tests.models.TokenBudgetResult({"fits": False, "input_tokens": None, "error": "Controlled context overflow."}, {})
+        monkeypatch.setattr(saved_tests.hf, "estimate_huggingface_budget", estimate)
     else:
         final = loop.message("not JSON" if failure == "invalid" else loop.answer(run_record))
         if failure == "truncated":
-            final["done_reason"] = "length"
+            final["choices"][0]["finish_reason"] = "length"
         scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), final]
     assert cli.main(arguments(project)) == 1
     output = capsys.readouterr()
@@ -180,8 +180,7 @@ def test_manual_retry_gets_new_id_and_preserves_failed_attempt(project, scripted
     assert output_record(project).read_bytes() == old
 
 
-@pytest.mark.parametrize("purpose", ["comparison", "exploratory"])
-def test_comparison_feedback_hides_claims_issues_repairs_and_client_logs(project, scripted, facts, connected_cli, run_record, capsys, purpose):
+def test_comparison_plan_exploration_hides_claims_issues_repairs_and_client_logs(project, scripted, facts, connected_cli, run_record, capsys):
     registry = storage.load_registry(project)
     registry["plans"][0]["study_set"] = "comparison"
     storage.save_registry(project, registry)
@@ -195,7 +194,7 @@ def test_comparison_feedback_hides_claims_issues_repairs_and_client_logs(project
     fake_reference = project / f"runs/{loop.PLAN_ID}/reference_initial.json"
     fake_reference.parent.mkdir(parents=True)
     fake_reference.write_text('{"not_a_validated_reference":true}')
-    assert cli.main(arguments(project, purpose=purpose)) == 0
+    assert cli.main(arguments(project, purpose="exploratory")) == 0
     output = capsys.readouterr()
     assert "Status: succeeded" in output.out and "Validation report:" in output.out
     assert hidden not in output.out + output.err and "Repair [" not in output.out
@@ -211,7 +210,7 @@ def test_comparison_failure_hides_validation_values_and_exception_notes(project,
     facts["code_dirty"] = False
     hidden = "UNSEEN_MODEL_RESPONSE_FRAGMENT"
     scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message('{"' + hidden + '":1}')]
-    assert cli.main(arguments(project, purpose="comparison")) == 1
+    assert cli.main(arguments(project, purpose="exploratory")) == 1
     output = capsys.readouterr()
     assert hidden not in output.out + output.err
     assert "Error categories:" in output.err and "structure" in output.err
@@ -257,7 +256,7 @@ def test_comparison_subprocess_stderr_is_saved_without_terminal_disclosure(proje
     monkeypatch.setattr(mcp.client.stdio, "stdio_client", with_diagnostic)
     monkeypatch.setattr(agents, "_document_client", loop.REAL_DOCUMENT_CLIENT)
     ready(scripted, run_record)
-    assert cli.main(arguments(project, purpose="comparison")) == 0
+    assert cli.main(arguments(project, purpose="exploratory")) == 0
     output = capfd.readouterr()
     assert sentinel not in output.out + output.err
     log = output_record(project).parent / "artifacts/mcp_stderr.log"
@@ -301,14 +300,10 @@ from pathlib import Path
 import httpx
 import agents,models
 fixture=json.loads(Path(sys.argv[1]).read_text())
-agents._local_environment=lambda *args:fixture["environment"].copy()
+agents._execution_environment=lambda *args:fixture["environment"].copy()
 agents._code_snapshot=lambda:{"src/fixture.py":b"fixture"}
-async def observe(*args,**kwargs):return models.OllamaEnvironmentObservation()
-agents.observe_ollama_environment=observe
-async def count(client,url,body,result,directory):result.report.update(fits=True,input_tokens=21)
-models._check_token_budget=count
 replies=[agents.FINAL_READY_SIGNAL,fixture["answer"]]
-def handle(request):return httpx.Response(200,json={"done":True,"done_reason":"stop","prompt_eval_count":21,"eval_count":7,"message":{"role":"assistant","content":replies.pop(0)}})
+def handle(request):return httpx.Response(200,json={"model":"test-lab/fictional-model","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":replies.pop(0)}}],"usage":{"prompt_tokens":21,"completion_tokens":7}})
 transport=httpx.MockTransport(handle)
 real=agents.run_extractor
 async def run(*args,**kwargs):return await real(*args,**kwargs,_transport=transport)
@@ -335,12 +330,8 @@ def test_sigint_returns_130_after_preserving_cancelled_run(project, facts, tmp_p
 from pathlib import Path
 import httpx
 import agents,models,cli
-agents._local_environment=lambda *args:json.loads(Path(sys.argv[1]).read_text())
+agents._execution_environment=lambda *args:json.loads(Path(sys.argv[1]).read_text())
 agents._code_snapshot=lambda:{"src/fixture.py":b"fixture"}
-async def observe(*args,**kwargs):return models.OllamaEnvironmentObservation()
-agents.observe_ollama_environment=observe
-async def count(client,url,body,result,directory):result.report.update(fits=True,input_tokens=21)
-models._check_token_budget=count
 if sys.argv[2]=="1":
  save=agents.save_run_file
  def fail(root,record,relative,raw):

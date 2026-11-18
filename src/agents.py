@@ -1,7 +1,7 @@
-"""Assemble extractor inputs and coordinate a bounded local model/MCP loop.
+"""Assemble inputs and coordinate a hosted model with bounded local MCP tools.
 
 Input assembly only reads files. run_extractor_loop additionally starts the local
-MCP subprocess, calls Ollama and document tools, and validates the final answer.
+MCP subprocess, calls the selected model and document tools, and validates the final answer.
 The bare loop returns evidence in memory; run_extractor adds incremental saved
 run records. cli.py calls the saved wrapper and displays its result. No helper
 here silently retries a failed run.
@@ -24,9 +24,12 @@ from pathlib import Path, PurePosixPath
 from typing import Callable, Literal
 
 from models import (
-    ModelCallResult, ModelRequestCancelled, build_ollama_request,
-    prepare_ollama_response_schema, prepare_ollama_tools, request_ollama_chat,
-    observe_ollama_environment, OllamaEnvironmentCancelled,
+    ModelCallResult, ModelRequestCancelled,
+    prepare_response_schema, prepare_document_tools,
+)
+from huggingface_api import (
+    PreparedHuggingFaceRequest, build_huggingface_request,
+    request_huggingface_chat, require_huggingface_token,
 )
 from storage import (
     PreparationValidationError, RegistryValidationError, load_plan_preparation, resolve_project_path,
@@ -38,6 +41,7 @@ from validation import (
 )
 
 
+# Input assembly: select configuration and an exact saved source before execution.
 class ProfileValidationError(ValueError):
     """Keep structured problems as well as a readable configuration error."""
 
@@ -63,9 +67,9 @@ class ExtractorInput:
     """One in-memory input snapshot for preview, token checks, or execution.
 
     source_path and page_count identify the exact preparation for saved run
-    records and response validation. Pass settings, messages, and response_format
-    to models.py for a separate count-only check or model request. Building this
-    object does not count tokens, certify tool/image access, or start a run.
+    records and response validation. The Hugging Face adapter uses settings,
+    messages, and response_format to build and estimate each request. Building
+    this object does not contact the API, certify tool access, or start a run.
     Frozen attributes still contain editable dictionaries/lists. The runner saves
     each actual sent request rather than relying on this flag for preservation.
     """
@@ -177,16 +181,11 @@ def build_extractor_input(
     Only the source preparation and its registered PDF are read as evidence.
     Current collection corrections or a newer preparation cannot replace the
     selected snapshot. A failed or inconsistent preparation stops assembly.
-    ProfileValidationError and OllamaSchemaError retain their existing interfaces;
-    source-file failures become ExtractorInputError with structured locations.
-    This builder supplies text messages for local Ollama. The loop adds tools;
-    direct image input is unsupported.
+    Profile/schema failures stop setup; source-file failures become
+    ExtractorInputError with structured locations. The loop later adds tools
+    to these text messages. Direct image input is unsupported.
     """
     settings = load_profile(project_root, profile_name, stage="extractor", config_path=config_path)
-    if settings["model"]["execution_mode"] != "local":
-        raise ExtractorInputError([ValidationProblem(
-            "other", "$.settings.model.execution_mode", "This input builder currently supports local Ollama profiles."
-        )])
     try:
         _, preparation, pages = load_plan_preparation(project_root, plan_id, source_path)
     except (PreparationValidationError, RegistryValidationError) as error:
@@ -207,9 +206,13 @@ def build_extractor_input(
         source_fingerprint = preparation_text_fingerprint(preparation, pages)
     except ValueError as error:
         raise ExtractorInputError([ValidationProblem("structure", "$.messages", str(error))]) from error
+    # Keep the full contract here. The transport derives a generation copy;
+    # Python still validates answers against the original schemas.
+    response_format = prepare_response_schema()
+    build_huggingface_request(settings, messages, tools=[], response_format=response_format)
     return ExtractorInput(
         plan_id=plan_id, source_path=source_path, page_count=preparation["page_count"],
-        settings=settings, messages=messages, response_format=prepare_ollama_response_schema(),
+        settings=settings, messages=messages, response_format=response_format,
         source_fingerprint=source_fingerprint,
     )
 
@@ -264,7 +267,7 @@ def _format_extractor_source(preparation: dict, pages: list[dict]) -> str:
 
 
 # These are controller instructions, separate from the selected coding prompts.
-# Exact sent requests retain them in ModelAttempt.request_body. A readiness turn
+# Exact sent requests retain them in ModelAttempt.request.body. A readiness turn
 # is part of the extraction workflow, never a retry or a model-based JSON repair.
 FINAL_READY_SIGNAL = "READY_FOR_FINAL_RESPONSE"
 _TOOL_PHASE_INSTRUCTIONS = (
@@ -295,9 +298,7 @@ class ModelAttempt:
     """
 
     phase: Literal["tool_use", "final"]
-    request_url: str
-    request_body: dict
-    timeout_seconds: float
+    request: PreparedHuggingFaceRequest
     response_reference: str
     result: ModelCallResult | None = None
 
@@ -330,6 +331,7 @@ class LoopProgressError(RuntimeError):
 
 
 def _loop_checkpoint(callback, event: str, state: ExtractorLoopResult, payload=None, *, suppress=False) -> None:
+    """Notify the optional writer; cancellation retains any checkpoint error."""
     if callback is not None:
         try:
             callback(event, state, payload)
@@ -428,23 +430,26 @@ async def _bounded_mcp_request(awaitable, timeout_seconds: float):
 
 async def _model_turn(
     state: ExtractorLoopResult, phase: Literal["tool_use", "final"], tools: list[dict],
-    response_directory: str, models_directory, transport, progress,
+    response_directory: str, transport, progress,
 ) -> ModelCallResult:
-    """Record one exact attempt; models.py enforces context and model timeouts."""
+    """Record one exact attempt; the API adapter checks capacity and timeouts."""
     packet = state.extractor_input
     response_format = packet.response_format if phase == "final" else None
-    url, body, timeout = build_ollama_request(packet.settings, state.messages,
-                                            tools=tools, response_format=response_format)
-    attempt = ModelAttempt(phase, url, body, timeout,
-                           f"{response_directory}/response_{len(state.model_attempts) + 1:02d}.txt")
+    request = build_huggingface_request(
+        packet.settings, state.messages, tools=tools, response_format=response_format,
+    )
+    attempt = ModelAttempt(
+        phase, request, f"{response_directory}/response_{len(state.model_attempts) + 1:02d}.txt",
+    )
     state.model_attempts.append(attempt)
     _loop_checkpoint(progress, "model_request", state)
     def observed(event, payload):
         _loop_checkpoint(progress, "model_" + event, state, payload)
     try:
-        attempt.result = await request_ollama_chat(
-            packet.settings, state.messages, tools=tools, response_format=response_format,
-            models_directory=models_directory, _transport=transport,
+        # Save, budget, and send this same immutable request snapshot. The
+        # transport never rebuilds it from mutable settings or conversation data.
+        attempt.result = await request_huggingface_chat(
+            request, _transport=transport,
             on_progress=observed if progress is not None else None,
         )
     except ModelRequestCancelled as error:
@@ -527,11 +532,11 @@ async def _execute_tool_calls(state: ExtractorLoopResult, client, calls: list[di
 async def run_extractor_loop(
     project_root: Path | str, plan_id: str, *, source_path: str, profile_name: str,
     config_path: str = "configs/profiles.json", response_directory: str = "responses",
-    models_directory: Path | str | None = None, _transport=None,
+    _transport=None,
     _on_progress: Callable | None = None, _prepared_input: ExtractorInput | None = None,
     _run_record_path: str | None = None,
 ) -> ExtractorLoopResult:
-    """Coordinate one local extractor attempt without writing a research run.
+    """Coordinate one extractor attempt without writing a research run.
 
     Invalid input/profile/path choices raise before execution. Later operational
     failures return a failed result with available evidence; cancellation raises
@@ -573,11 +578,11 @@ async def run_extractor_loop(
                                                  and packet.settings["document_tools"]["ocr_enabled"] else set())
             if {tool["name"] for tool in state.tool_catalogue} != expected_tools or len(state.tool_catalogue) != len(expected_tools):
                 raise ValueError("The extractor requires the two supported saved-text tools and, for an OCR-enabled saved run, run_ocr.")
-            tools = prepare_ollama_tools(state.tool_catalogue)
+            tools = prepare_document_tools(state.tool_catalogue)
             # Every tool-phase turn must consume budget or finish investigation.
             # This gives a finite bound without adding a second profile setting.
             while state.tool_calls_started < packet.settings["max_tool_calls"]:
-                result = await _model_turn(state, "tool_use", tools, response_directory, models_directory, _transport, _on_progress)
+                result = await _model_turn(state, "tool_use", tools, response_directory, _transport, _on_progress)
                 state.messages.append(deepcopy(result.assistant_message))
                 if result.tool_calls:
                     await _execute_tool_calls(state, client, result.tool_calls, _on_progress)
@@ -590,7 +595,7 @@ async def run_extractor_loop(
             reason = ("The tool-call budget is exhausted. " if state.tool_calls_started >= packet.settings["max_tool_calls"]
                       else "The model declared investigation complete. ")
             state.messages.append({"role": "system", "content": reason + _FINAL_PHASE_INSTRUCTIONS})
-            final = await _model_turn(state, "final", [], response_directory, models_directory, _transport, _on_progress)
+            final = await _model_turn(state, "final", [], response_directory, _transport, _on_progress)
             state.messages.append(deepcopy(final.assistant_message))
             state.final_validation = validate_and_repair_agent_response(
                 final.response_text or "", page_count=packet.page_count, stage="extractor",
@@ -660,8 +665,8 @@ def _code_snapshot() -> dict[str, bytes]:
     return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(paths)}
 
 
-def _local_environment(packet: ExtractorInput, preparation: dict) -> dict:
-    """Record observed local versions/hardware and required Git state.
+def _execution_environment(packet: ExtractorInput, preparation: dict) -> dict:
+    """Record client software and Git state, leaving remote model facts unknown.
 
     Most unavailable fields are nullable. code_dirty is required to be Boolean,
     so an unobservable Git state stops setup rather than inventing clean=False.
@@ -674,16 +679,6 @@ def _local_environment(packet: ExtractorInput, preparation: dict) -> dict:
                               text=True, check=True, timeout=5).stdout.strip()
     commit = git("rev-parse", "HEAD")
     dirty = bool(git("status", "--porcelain", "--untracked-files=normal"))
-    hardware = [part for part in (platform.system(), platform.machine()) if part]
-    if platform.system() == "Darwin":
-        for key in ("machdep.cpu.brand_string", "hw.memsize"):
-            try:
-                value = subprocess.run(["/usr/sbin/sysctl", "-n", key], capture_output=True,
-                                       text=True, check=True, timeout=5).stdout.strip()
-                if value:
-                    hardware.append(f"{key}={value}")
-            except (OSError, subprocess.SubprocessError):
-                pass  # Missing details remain absent; user-reported specs are not substituted.
     tools = packet.settings["document_tools"]
     tool_details = []
     sdk_version = _package_version("mcp")
@@ -693,8 +688,8 @@ def _local_environment(packet: ExtractorInput, preparation: dict) -> dict:
     if tool_code.is_file():
         tool_details.append("document_tools_sha256=" + hashlib.sha256(tool_code.read_bytes()).hexdigest())
     return {
-        "model_revision": None, "runtime": "ollama", "runtime_version": None, "quantization": None,
-        "hardware": "; ".join(hardware) or None, "code_commit": commit, "code_dirty": dirty,
+        "model_revision": None, "runtime": "huggingface_inference_providers", "runtime_version": None, "quantization": None,
+        "hardware": None, "code_commit": commit, "code_dirty": dirty,
         "python_version": platform.python_version(), "model_client_version": _package_version("httpx"),
         "preparation_version": f"v{preparation['schema_version']}", "tools_version": "; ".join(tool_details) or None,
         "ocr_version": _package_version(tools["ocr_engine"]) if tools["ocr_enabled"] else None,
@@ -723,6 +718,7 @@ class SavedExtractorCancelled(asyncio.CancelledError):
         super().__init__("Saved extractor cancelled; available record/evidence is attached in result.")
 
 
+# Persistence wraps execution: publish evidence at checkpoints, then finalize once.
 class _RunRecorder:
     """Publish immutable evidence and update the active record at checkpoints."""
 
@@ -769,24 +765,14 @@ class _RunRecorder:
         save_run_record(self.root, self.record)
         self.last_saved = deepcopy(self.record)
 
-    def environment(self, values: dict) -> None:
-        saved = self.record["settings"]["environment"]
-        for name, value in values.items():
-            if value is None:
-                continue
-            if saved[name] is not None and saved[name] != value:
-                raise ValueError(f"Environment observation changed during execution: {name}")
-            saved[name] = value
-
     def budget(self, number: int, result, *, final=False) -> None:
         stem = f"responses/attempt_{number:02d}"
         self.json(f"{stem}/token_budget{'_final' if final else ''}.json", result.report)
         for name, raw in result.raw_responses.items():
             self.file(f"{stem}/preflight/{name}.json", raw)
-        self.environment({"runtime_version": result.report.get("runtime_version"),
-                          "model_revision": result.report.get("model_digest")})
 
     def call_index(self, number: int) -> int:
+        """Map an attempt to actual generation usage; blocked preflight has none."""
         if number not in self.call_indexes:
             self.call_indexes[number] = len(self.record["model_calls"])
             self.record["model_calls"].append({"input_tokens": None, "output_tokens": None,
@@ -794,6 +780,7 @@ class _RunRecorder:
         return self.call_indexes[number]
 
     def model_result(self, number: int, attempt: ModelAttempt) -> None:
+        """Preserve response evidence and known usage, including failed requests."""
         result = attempt.result
         if result is None:
             return
@@ -838,6 +825,7 @@ class _RunRecorder:
             self.json("validation_report.json", checked.report)
 
     def progress(self, event: str, state: ExtractorLoopResult, payload) -> None:
+        """Translate loop events into saved evidence before execution continues."""
         try:
             number = len(state.model_attempts)
             stem = f"responses/attempt_{number:02d}"
@@ -847,8 +835,11 @@ class _RunRecorder:
                 self.json("artifacts/mcp_catalogue.json", state.tool_catalogue)
             elif event == "model_request":
                 attempt = state.model_attempts[-1]
-                self.json(f"{stem}/request.json", {"phase": attempt.phase, "url": attempt.request_url,
-                    "body": attempt.request_body, "timeout_seconds": attempt.timeout_seconds})
+                request = attempt.request
+                self.json(f"{stem}/request.json", {
+                    "phase": attempt.phase, "url": request.url,
+                    "body": request.body, "timeout_seconds": request.timeout_seconds,
+                })
             elif event == "model_preflight_complete":
                 self.budget(number, payload)
                 self.active()
@@ -879,7 +870,7 @@ async def run_extractor(
     project_root: Path | str, plan_id: str, *, source_path: str, profile_name: str,
     purpose: Literal["development", "comparison", "exploratory"],
     retry_of_run_id: str | None = None, config_path: str = "configs/profiles.json",
-    models_directory: Path | str | None = None, _transport=None,
+    _transport=None,
 ) -> SavedExtractorRun:
     """Execute and incrementally preserve one explicitly selected extractor run.
 
@@ -893,17 +884,17 @@ async def run_extractor(
     root = Path(project_root).resolve()
     packet = build_extractor_input(root, plan_id, source_path=source_path,
                                    profile_name=profile_name, config_path=config_path)
-    # Reject invalid endpoints (including inline credentials) and unsupported
-    # options before preserving settings or contacting a service.
-    build_ollama_request(packet.settings, packet.messages, tools=[])
+    # Input assembly already checks connection settings without contacting the
+    # API. Credentials are required here, before allocating a research run.
+    require_huggingface_token()
+    if purpose == "comparison":
+        raise ValueError("Formal comparison is not yet enabled; validate the verifier and reference workflow and freeze settings first.")
     if packet.settings["image_input_enabled"]:
         raise ValueError("Direct image input is not supported by the saved extractor.")
     _, preparation, pages = load_plan_preparation(root, plan_id, source_path)
     if preparation_text_fingerprint(preparation, pages) != packet.source_fingerprint:
         raise ValueError("The selected source changed during saved-run setup.")
-    environment = _local_environment(packet, preparation)
-    if purpose == "comparison" and environment["code_dirty"]:
-        raise ValueError("Formal comparison requires clean committed code.")
+    environment = _execution_environment(packet, preparation)
     snapshot = _code_snapshot()
     settings = {**deepcopy(packet.settings), "environment": environment}
     record = {
@@ -915,32 +906,25 @@ async def run_extractor(
     }
     recorder = _RunRecorder(root, record)
     state, cancellation, error = None, None, None
-    observation = None
-    observation_started_at = None
     try:
         for relative, raw in snapshot.items():
             recorder.file(f"artifacts/code/{relative}", raw)
         recorder.json("artifacts/code_fingerprints.json", {
             "sha256": {name: hashlib.sha256(raw).hexdigest() for name, raw in snapshot.items()},
         })
-        observation_started_at = _utc_now()
-        observation = await observe_ollama_environment(packet.settings, _transport=_transport)
-        for name, raw in observation.raw_responses.items():
-            recorder.file(f"artifacts/environment/{name}.json", raw)
-        recorder.json("artifacts/environment/observations.json", {"values": observation.values, "errors": observation.errors,
-            "observation_started_at": observation_started_at, "observed_before_model_requests": True})
-        recorder.environment(observation.values)
+        recorder.json("artifacts/environment/observations.json", {
+            "values": {},
+            "errors": ["Remote weight revision, runtime version, quantization, hardware and loaded state are not observed by this adapter."],
+            "observation_started_at": _utc_now(), "observed_before_model_requests": True,
+        })
         recorder.active()
         state = await run_extractor_loop(root, plan_id, source_path=source_path, profile_name=profile_name,
             config_path=config_path, response_directory=f"{recorder.folder}/responses",
-            models_directory=models_directory, _transport=_transport,
+            _transport=_transport,
             _prepared_input=packet, _on_progress=recorder.progress, _run_record_path=recorder.path)
     except ExtractorLoopCancelled as cancelled:
         state, cancellation = cancelled.result, cancelled
         error = state.error
-    except OllamaEnvironmentCancelled as cancelled:
-        observation, cancellation = cancelled.observation, cancelled
-        error = "Extractor cancelled during startup observations."
     except asyncio.CancelledError as cancelled:
         cancellation = cancelled
         error = "Extractor execution was cancelled."
@@ -950,12 +934,6 @@ async def run_extractor(
     # Complete evidence already available in memory. This is failure handling,
     # never another model/tool request or a continuation after an I/O failure.
     try:
-        if observation is not None:
-            for name, raw in observation.raw_responses.items():
-                recorder.file(f"artifacts/environment/{name}.json", raw)
-            recorder.json("artifacts/environment/observations.json", {"values": observation.values, "errors": observation.errors,
-                "observation_started_at": observation_started_at, "observed_before_model_requests": True})
-            recorder.environment(observation.values)
         if state is not None:
             for number, attempt in enumerate(state.model_attempts, 1):
                 recorder.model_result(number, attempt)

@@ -23,7 +23,12 @@
       "properties": {
         "name": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/name"},
         "stage": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/stage"},
-        "model": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/model"},
+        "model": {
+          "allOf": [
+            {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/model"},
+            {"properties": {"execution_mode": {"const": "hosted_api"}, "api_service": {"const": "huggingface"}}}
+          ]
+        },
         "generation": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/generation"},
         "context_limit": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/context_limit"},
         "prompt_paths": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/prompt_paths"},

@@ -18,6 +18,7 @@ import pytest
 
 import agents
 import models
+import huggingface_api as hf
 import storage
 import test_agent_loop as loop
 
@@ -31,19 +32,11 @@ scripted = loop.scripted
 @pytest.fixture
 def facts(monkeypatch, run_record):
     environment = copy.deepcopy(run_record["settings"]["environment"])
-    environment.update(runtime="ollama", code_commit="fixture-commit", code_dirty=True,
-                       python_version="fixture-python", preparation_version="v3")
-    monkeypatch.setattr(agents, "_local_environment", lambda packet, prep: copy.deepcopy(environment))
+    environment.update(runtime="huggingface_inference_providers", code_commit="fixture-commit", code_dirty=True,
+                       python_version="fixture-python", preparation_version="v3", model_revision=None,
+                       runtime_version=None, quantization=None, hardware=None, model_loaded_at_start=None)
+    monkeypatch.setattr(agents, "_execution_environment", lambda packet, prep: copy.deepcopy(environment))
     monkeypatch.setattr(agents, "_code_snapshot", lambda: {"src/fixture.py": b"# fictional code snapshot\n"})
-    async def observed(settings, **options):
-        return models.OllamaEnvironmentObservation(
-            values={"model_loaded_at_start": False, "quantization": "fixture-quantization"},
-            raw_responses={"loaded_models": b'{"models":[]}', "model_details": b'{"details":{}}'},
-        )
-    monkeypatch.setattr(agents, "observe_ollama_environment", observed)
-    async def counted(client, url, body, result, models_directory):
-        result.report.update(fits=True, input_tokens=21, runtime_version="0.40.14", model_digest="d" * 64)
-    monkeypatch.setattr(models, "_check_token_budget", counted)
     return environment
 
 
@@ -61,7 +54,7 @@ def test_success_is_saved_incrementally_and_loads_with_all_evidence(project, scr
     def first_request(body):
         active = json.loads((expected / "output.json").read_text())
         assert active["status"] == "running" and active["model_calls"] == []
-        assert active["settings"]["environment"]["model_revision"] == "d" * 64
+        assert active["settings"]["environment"]["model_revision"] is None
         assert json.loads((expected / "responses/attempt_01/request.json").read_text())["body"] == body
         assert (expected / "responses/attempt_01/token_budget.json").is_file()
     def second_request(body):
@@ -81,8 +74,8 @@ def test_success_is_saved_incrementally_and_loads_with_all_evidence(project, scr
     assert saved.record["elapsed_seconds"] >= saved.execution.elapsed_seconds > 0
     assert saved.record["ended_at"] is not None
     env = saved.record["settings"]["environment"]
-    assert env["code_commit"] == "fixture-commit" and env["model_loaded_at_start"] is False
-    assert env["runtime_version"] == "0.40.14" and env["quantization"] == "fixture-quantization"
+    assert env["code_commit"] == "fixture-commit" and env["model_loaded_at_start"] is None
+    assert env["runtime_version"] is None and env["quantization"] is None
     assert (expected / "artifacts/code/src/fixture.py").read_bytes() == b"# fictional code snapshot\n"
     assert (expected / "artifacts/extractor_input.json").is_file()
     assert (expected / "artifacts/mcp_catalogue.json").is_file()
@@ -112,7 +105,7 @@ def test_failed_attempts_save_available_evidence_without_retry(project, scripted
         scripted.replies = [httpx.ConnectError("Controlled unavailable model.")]
     else:
         final = loop.message("not JSON" if failure == "invalid-final" else loop.answer(run_record))
-        if failure == "truncated-final": final["done_reason"] = "length"
+        if failure == "truncated-final": final["choices"][0]["finish_reason"] = "length"
         scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), final]
     saved = execute(project, scripted)
     assert saved.persistence_error is None and saved.record["status"] == "failed"
@@ -128,15 +121,34 @@ def test_failed_attempts_save_available_evidence_without_retry(project, scripted
 
 
 def test_blocked_preflight_is_preserved_without_inventing_generation_usage(project, scripted, facts, monkeypatch):
-    async def blocked(client, url, body, result, models_directory):
-        result.report.update(fits=False, error="Controlled overflow.", input_tokens=100)
-    monkeypatch.setattr(models, "_check_token_budget", blocked)
+    def blocked(request):
+        return models.TokenBudgetResult({"fits": False, "error": "Controlled overflow.", "input_tokens": None}, {})
+    monkeypatch.setattr(hf, "estimate_huggingface_budget", blocked)
     saved = execute(project, scripted)
     assert saved.record["status"] == "failed" and saved.record["model_calls"] == []
     assert not scripted.requests
     report = json.loads((folder(project, saved) / "responses/attempt_01/token_budget.json").read_text())
-    assert report["input_tokens"] == 100 and not report["fits"]
+    assert report["input_tokens"] is None and not report["fits"]
     assert not (folder(project, saved) / "responses/response_01.json").exists()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("finish_reason", False), ("finish_reason", {}), ("content", {"invalid": "content"}),
+])
+def test_malformed_provider_metadata_preserves_a_valid_failed_record(project, scripted, facts, field, value):
+    response = loop.message(agents.FINAL_READY_SIGNAL)
+    target = response["choices"][0]
+    if field == "content":
+        target = target["message"]
+    target[field] = value
+    scripted.replies = [response]
+    saved = execute(project, scripted)
+    assert saved.record["status"] == "failed" and saved.persistence_error is None
+    assert len(scripted.requests) == 1
+    call = saved.record["model_calls"][0]
+    assert call["input_tokens"] == 21 and call["output_tokens"] == 7
+    assert json.loads((project / call["response_path"]).read_text()) == response
+    assert storage.load_run_record(project, saved.record_path) == saved.record
 
 
 def test_request_save_failure_prevents_model_call_and_saves_failed_status(project, scripted, facts, monkeypatch):
@@ -164,7 +176,7 @@ def test_received_bytes_survive_a_chunk_write_failure_and_execution_stops(projec
     assert saved.record["status"] == "failed" and saved.persistence_error
     assert len(scripted.requests) == 1 and len(saved.record["model_calls"]) == 1
     raw = (project / saved.record["model_calls"][0]["response_path"]).read_bytes()
-    assert json.loads(raw)["message"]["content"] == agents.FINAL_READY_SIGNAL
+    assert json.loads(raw)["choices"][0]["message"]["content"] == agents.FINAL_READY_SIGNAL
 
 
 def test_unwritable_final_status_reports_the_actual_still_running_record(project, scripted, facts, run_record, monkeypatch):
@@ -229,8 +241,10 @@ def test_source_loss_still_allows_failed_record_and_raw_evidence_to_be_saved(pro
     assert (project / saved.record["model_calls"][0]["response_path"]).is_file()
 
 
-def test_dirty_code_cannot_start_formal_comparison(project, scripted, facts):
-    with pytest.raises(ValueError, match="clean committed"):
+@pytest.mark.parametrize("dirty", [False, True])
+def test_formal_comparison_stays_blocked_until_workflow_is_ready(project, scripted, facts, dirty):
+    facts["code_dirty"] = dirty
+    with pytest.raises(ValueError, match="not yet enabled"):
         asyncio.run(agents.run_extractor(project, loop.PLAN_ID, source_path=loop.SOURCE,
             profile_name=loop.PROFILE, purpose="comparison", _transport=scripted.transport))
     assert not (project / "runs").exists() and not scripted.requests
@@ -241,50 +255,34 @@ def test_credentials_are_rejected_before_settings_are_saved(project, scripted, f
     config = json.loads(path.read_text())
     config["profiles"][0]["model"]["endpoint"] = "http://user:secret@localhost:11434"
     path.write_text(json.dumps(config))
-    with pytest.raises(ValueError, match="credentials"):
+    with pytest.raises(ValueError, match="endpoint"):
         execute(project, scripted)
     assert not (project / "runs").exists()
 
 
-def test_unknown_startup_details_remain_null(project, scripted, facts, run_record, monkeypatch):
-    async def unknown(settings, **options):
-        return models.OllamaEnvironmentObservation(errors=["Controlled unavailable startup metadata."])
-    monkeypatch.setattr(agents, "observe_ollama_environment", unknown)
+def test_unknown_startup_details_remain_null(project, scripted, facts, run_record):
     scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message(loop.answer(run_record))]
     saved = execute(project, scripted)
     assert saved.record["status"] == "succeeded"
-    assert saved.record["settings"]["environment"]["model_loaded_at_start"] is None
-    assert saved.record["settings"]["environment"]["quantization"] is None
+    environment = saved.record["settings"]["environment"]
+    for name in ("model_loaded_at_start", "quantization", "runtime_version", "model_revision", "hardware"):
+        assert environment[name] is None
 
 
 def test_active_run_uses_frozen_settings_when_profile_files_change(project, scripted, facts, run_record, monkeypatch):
-    async def changed(settings, **options):
+    def changed(body):
         path = project / "configs/profiles.json"
         config = json.loads(path.read_text())
         config["profiles"][0]["generation"]["max_output_tokens"] = 99
         path.write_text(json.dumps(config))
         (project / "prompts/shared.md").write_text("Changed after settings were frozen.")
-        return models.OllamaEnvironmentObservation()
-    monkeypatch.setattr(agents, "observe_ollama_environment", changed)
+    scripted.hooks = [changed]
     scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message(loop.answer(run_record))]
     saved = execute(project, scripted)
     assert saved.record["status"] == "succeeded"
     assert saved.record["settings"]["generation"]["max_output_tokens"] == 8192
     assert "Fictional shared" in saved.record["settings"]["prompt_texts"][0]
-    assert scripted.requests[0]["options"]["num_predict"] == 8192
-
-
-def test_startup_cancellation_saves_received_observations_without_model_work(project, scripted, facts, monkeypatch):
-    async def stopped(settings, **options):
-        raise models.OllamaEnvironmentCancelled(models.OllamaEnvironmentObservation(
-            raw_responses={"loaded_models": b'{"models":'}))
-    monkeypatch.setattr(agents, "observe_ollama_environment", stopped)
-    with pytest.raises(agents.SavedExtractorCancelled) as cancelled:
-        execute(project, scripted)
-    saved = cancelled.value.result
-    assert saved.record["status"] == "failed" and not saved.record["model_calls"]
-    assert saved.execution is None and not scripted.requests
-    assert (folder(project, saved) / "artifacts/environment/loaded_models.json").read_bytes() == b'{"models":'
+    assert scripted.requests[0]["max_tokens"] == 8192
 
 
 def test_tool_timeout_preserves_request_and_completed_error_log(project, scripted, facts):
@@ -326,7 +324,7 @@ def test_published_response_is_not_overwritten_after_a_postpublication_error(pro
     saved = execute(project, scripted)
     assert saved.record["status"] == "failed" and saved.persistence_error
     assert attempts == ["responses/response_01.json"] and len(scripted.requests) == 1
-    assert json.loads((project / saved.record["model_calls"][0]["response_path"]).read_text())["message"]["content"] == agents.FINAL_READY_SIGNAL
+    assert json.loads((project / saved.record["model_calls"][0]["response_path"]).read_text())["choices"][0]["message"]["content"] == agents.FINAL_READY_SIGNAL
 
 
 def test_unwritable_raw_response_keeps_known_usage_and_received_chunks(project, scripted, facts, monkeypatch):
@@ -345,7 +343,8 @@ def test_unwritable_raw_response_keeps_known_usage_and_received_chunks(project, 
     assert call["finish_reason"] == "stop" and call["truncated"] is False
     assert call["response_path"] is None  # Do not link a file that failed to publish.
     chunks = sorted((folder(project, saved) / "responses/attempt_01/chunks").glob("*.bin"))
-    assert json.loads(b"".join(path.read_bytes() for path in chunks))["done"] is True
+    response = json.loads(b"".join(path.read_bytes() for path in chunks))
+    assert response["choices"][0]["finish_reason"] == "stop"
 
 
 def test_published_tool_log_is_not_duplicated_after_append_reports_an_error(project, scripted, facts, monkeypatch):
@@ -368,11 +367,11 @@ def test_unobservable_required_git_state_is_not_guessed(project, monkeypatch):
         raise subprocess.CalledProcessError(128, args[0])
     monkeypatch.setattr(agents.subprocess, "run", unavailable)
     with pytest.raises(subprocess.CalledProcessError):
-        agents._local_environment(packet, preparation)
+        agents._execution_environment(packet, preparation)
 
 
 def test_hard_termination_leaves_running_record_and_received_chunks(project, facts, tmp_path):
-    # This child uses no real MCP/Ollama process. It blocks after a received HTTP
+    # This child uses no real MCP/API process. It blocks after a received HTTP
     # chunk has been saved; SIGTERM then bypasses Python's graceful finalization.
     environment = tmp_path / "environment.json"
     environment.write_text(json.dumps(facts))
@@ -383,12 +382,8 @@ import httpx
 from mcp.types import ListToolsResult,Tool
 import agents,models
 root=Path(sys.argv[1])
-agents._local_environment=lambda *args:json.loads(Path(sys.argv[2]).read_text())
+agents._execution_environment=lambda *args:json.loads(Path(sys.argv[2]).read_text())
 agents._code_snapshot=lambda:{"src/fixture.py":b"fixture"}
-async def observe(*args,**kwargs): return models.OllamaEnvironmentObservation()
-agents.observe_ollama_environment=observe
-async def count(client,url,body,result,models_directory):result.report.update(fits=True,input_tokens=21)
-models._check_token_budget=count
 class Client:
  async def __aenter__(self):return self
  async def __aexit__(self,*args):pass

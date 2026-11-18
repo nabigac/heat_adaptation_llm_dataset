@@ -1,14 +1,15 @@
 """Exercise orchestration and MCP lifecycle with controlled fictional inputs.
 
-Most tests use fake MCP replies and mock Ollama HTTP, while the subprocess case
-uses our real document server. Model preflight counts are synthetic here; real
-tokenization is covered by test_token_budget and live development diagnostics.
+Most tests use fake MCP replies and mock hosted HTTP, while the subprocess case
+uses our real document server. Capacity checks use the hosted request-size
+estimate; no test sends a paid request.
 No test downloads a model or sends a real model request.
 """
 
 import asyncio
 import copy
 import hashlib
+from itertools import count
 import json
 import time
 from contextlib import asynccontextmanager
@@ -23,6 +24,7 @@ from pypdf import PdfWriter
 import agents
 import document_tools
 import models
+import huggingface_api as hf
 import storage
 import validation
 
@@ -36,7 +38,8 @@ REAL_DOCUMENT_CLIENT = agents._document_client
 
 
 @pytest.fixture
-def project(tmp_path, run_record):
+def project(tmp_path, run_record, monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "fictional-test-token")
     root = tmp_path / "project"
     pdf = root / f"data/raw/{PLAN_ID}.pdf"
     pdf.parent.mkdir(parents=True)
@@ -114,10 +117,6 @@ def scripted(monkeypatch):
     state = SimpleNamespace(client=FakeClient(), replies=[], requests=[], hooks=[])
     monkeypatch.setattr(agents, "_document_client", lambda root, packet, **options: state.client)
 
-    async def count(client, url, body, result, models_directory):
-        result.report.update(fits=True, input_tokens=21)
-    monkeypatch.setattr(models, "_check_token_budget", count)
-
     def handle(request):
         body = json.loads(request.content)
         state.requests.append(body)
@@ -127,21 +126,27 @@ def scripted(monkeypatch):
         response = state.replies.pop(0)
         if isinstance(response, Exception):
             raise response
-        return httpx.Response(200, json={"done": True, "done_reason": "stop", "prompt_eval_count": 21,
-                                       "eval_count": 7, **response})
+        return httpx.Response(200, json=response)
     state.transport = httpx.MockTransport(handle)
     return state
 
 
-def message(content="", calls=None):
-    value = {"role": "assistant", "content": content, "thinking": "Preserved thought.\r\n"}
+_call_numbers = count(1)
+
+
+def message(content="", calls=None, *, finish=None):
+    value = {"role": "assistant", "content": content, "reasoning_content": "Preserved thought.\r\n"}
     if calls is not None:
-        value["tool_calls"] = calls
-    return {"message": value}
+        value["tool_calls"] = [{"id": c["id"], "type": "function", "function": {
+            "name": c["function"]["name"], "arguments": json.dumps(c["function"]["arguments"]),
+        }} for c in calls]
+    return {"model": "test-lab/fictional-model", "choices": [{"index": 0, "message": value,
+            "finish_reason": finish or ("tool_calls" if calls else "stop")}],
+            "usage": {"prompt_tokens": 21, "completion_tokens": 7}}
 
 
-def call(number=1, *, name="get_page_text", identifier="page_1"):
-    return {"id": identifier, "function": {"index": 0, "name": name,
+def call(number=1, *, name="get_page_text", identifier=None):
+    return {"id": identifier or f"page_{next(_call_numbers)}", "function": {"index": 0, "name": name,
         "arguments": {"page_number": number} if name == "get_page_text" else {"quote": "trees"}}}
 
 
@@ -173,9 +178,9 @@ def test_readiness_then_schema_final_preserves_inputs_and_closes_client(project,
     assert result.final_validation.report["valid"] is True
     assert result.final_validation.response["plan_data"] == run_record["plan_data"]
     assert [attempt.phase for attempt in result.model_attempts] == ["tool_use", "final"]
-    assert "format" not in scripted.requests[0] and len(scripted.requests[0]["tools"]) == 2
-    assert scripted.requests[1]["format"] == result.extractor_input.response_format
-    assert scripted.requests[1]["tools"] == []
+    assert "response_format" not in scripted.requests[0] and len(scripted.requests[0]["tools"]) == 2
+    assert scripted.requests[1]["response_format"]["json_schema"]["schema"] == hf.prepare_deepinfra_response_schema(result.extractor_input.response_format)
+    assert "tools" not in scripted.requests[1]
     assert result.messages[0] == result.extractor_input.messages[0]
     assert result.extractor_input.messages[-1] in result.messages
     assert result.tool_calls_started == 0 and result.tool_log == []
@@ -185,14 +190,14 @@ def test_readiness_then_schema_final_preserves_inputs_and_closes_client(project,
 
 
 def test_automatic_tool_result_returns_in_history_before_readiness_and_final(project, scripted, run_record):
-    scripted.replies = [message(calls=[call()]), message(agents.FINAL_READY_SIGNAL), message(answer(run_record))]
+    scripted.replies = [message(calls=[call(identifier="page_1")]), message(agents.FINAL_READY_SIGNAL), message(answer(run_record))]
     result = run(project, scripted)
     assert result.status == "succeeded" and result.tool_calls_started == 1
     assert scripted.client.calls == [("get_page_text", {"page_number": 1})]
     returned = next(m for m in scripted.requests[1]["messages"] if m["role"] == "tool")
-    assert returned["tool_call_id"] == "page_1" and returned["tool_name"] == "get_page_text"
+    assert returned["tool_call_id"] == "page_1" and returned["name"] == "get_page_text"
     assert json.loads(returned["content"])["result"]["text"] == "We will plant 20 trees."
-    assert scripted.requests[1]["messages"][-2]["thinking"] == "Preserved thought.\r\n"
+    assert "thinking" not in scripted.requests[1]["messages"][-2]
     assert not validation.validate_tool_log(result.tool_log)
     assert result.tool_log[0]["result"]["structuredContent"]["page_number"] == 1
 
@@ -207,7 +212,7 @@ def test_budget_limits_actual_executions_and_denied_batch_calls_receive_error_re
     returned = [m for m in scripted.requests[-1]["messages"] if m["role"] == "tool"]
     assert [m["tool_call_id"] for m in returned] == ["one", "two"]
     assert json.loads(returned[1]["content"])["is_error"] is True
-    assert "budget is exhausted" in scripted.requests[-1]["messages"][-1]["content"]
+    assert any("budget is exhausted" in m["content"] for m in scripted.requests[-1]["messages"])
     assert [a.phase for a in result.model_attempts] == ["tool_use", "final"]
     assert not validation.validate_tool_log(result.tool_log)
 
@@ -265,7 +270,7 @@ def test_outer_whitespace_is_allowed_only_for_control_signal(project, scripted, 
     scripted.replies = [message(" \n" + agents.FINAL_READY_SIGNAL + "\n"), message(answer(run_record))]
     result = run(project, scripted)
     assert result.status == "succeeded"
-    assert scripted.requests[-1]["messages"][-2]["content"].startswith(" \n")
+    assert any(m["role"] == "assistant" and m["content"].startswith(" \n") for m in scripted.requests[-1]["messages"])
 
 
 @pytest.mark.parametrize("final_text", ["not JSON", '{"plan_data": {}, "plan_issues": {"issues": []}}'])
@@ -292,7 +297,7 @@ def test_permitted_fence_repair_occurs_without_an_extra_model_call(project, scri
 @pytest.mark.parametrize("phase", ["tool_use", "final"])
 def test_model_output_truncation_stops_immediately_and_retains_available_bytes(project, scripted, run_record, phase):
     scripted.replies = ([] if phase == "tool_use" else [message(agents.FINAL_READY_SIGNAL)]) + [
-        {**message(answer(run_record)), "done_reason": "length"}]
+        message(answer(run_record), finish="length")]
     result = run(project, scripted)
     assert result.status == "failed" and "truncation" in result.error
     assert result.model_attempts[-1].result.raw_response
@@ -300,21 +305,21 @@ def test_model_output_truncation_stops_immediately_and_retains_available_bytes(p
 
 
 def test_unconfirmed_tool_phase_completion_cannot_trigger_execution(project, scripted):
-    scripted.replies = [{**message(agents.FINAL_READY_SIGNAL), "done_reason": None}]
+    scripted.replies = [message(agents.FINAL_READY_SIGNAL, finish="unknown")]
     result = run(project, scripted)
-    assert result.status == "failed" and "confirmed normal" in result.error
+    assert result.status == "failed" and "completion reason" in result.error
     assert scripted.client.calls == [] and len(scripted.requests) == 1
 
 
 def test_unknown_final_completion_keeps_existing_validation_rules(project, scripted, run_record):
-    scripted.replies = [message(agents.FINAL_READY_SIGNAL), {**message(answer(run_record)), "done_reason": None}]
-    assert run(project, scripted).status == "succeeded"
+    scripted.replies = [message(agents.FINAL_READY_SIGNAL), message(answer(run_record), finish="unknown")]
+    assert run(project, scripted).status == "failed"
 
 
 def test_model_failure_or_blocked_preflight_has_no_tool_execution_or_retry(project, scripted, monkeypatch):
-    async def blocked(client, url, body, result, models_directory):
-        result.report.update(fits=False, input_tokens=100, error="Fictional overflow.")
-    monkeypatch.setattr(models, "_check_token_budget", blocked)
+    def blocked(request):
+        return models.TokenBudgetResult({"fits": False, "input_tokens": None, "error": "Fictional overflow."}, {})
+    monkeypatch.setattr(hf, "estimate_huggingface_budget", blocked)
     result = run(project, scripted)
     assert result.status == "failed" and "overflow" in result.error
     assert not scripted.requests and not scripted.client.calls
@@ -481,7 +486,7 @@ def test_source_fingerprint_is_stable_for_json_formatting_but_detects_text_and_n
                                                    expected_source_fingerprint="0" * 64)
 
 
-def test_real_mcp_subprocess_is_used_by_coordinator_with_mock_ollama(project, scripted, run_record, monkeypatch):
+def test_real_mcp_subprocess_is_used_by_coordinator_with_mock_hosted_api(project, scripted, run_record, monkeypatch):
     # Restore the real factory captured from the module implementation. Only the
     # HTTP model replies/counts are controlled; actual document tools run over pipes.
     monkeypatch.setattr(agents, "_document_client", REAL_DOCUMENT_CLIENT)
@@ -511,7 +516,7 @@ def test_real_server_rejects_text_changed_between_input_assembly_and_startup(pro
 
 def test_unsupported_image_profile_is_rejected_before_startup(project, scripted):
     configure(project, image_input_enabled=True)
-    with pytest.raises(ValueError, match="Direct image"):
+    with pytest.raises(ValueError, match="image input"):
         run(project, scripted)
     assert not scripted.requests and not scripted.client.entered
 

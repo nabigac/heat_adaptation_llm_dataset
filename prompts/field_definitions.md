@@ -30,7 +30,9 @@ Each actions object has exactly these nine fields.
   quantities, implementers, dates, conditions, and local or phase-specific details.
 - action_type: list of unique values from infrastructural, institutional,
   behavioral/cultural, and nature-based. Empty if none is justified, with an issue.
-- action_status: planned, underway, completed, or unspecified.
+- action_status: planned, underway, completed, or unspecified. Default to
+  unspecified unless the source clearly establishes the grouped activity's
+  overall status under the shared coding rules.
 - action_location: nonblank string containing all stated places or coverage, or null.
 - action_recipient: nonblank string containing intended populations or groups, or null.
 - action_cost: nonblank description of stated amounts, units, periods, and cost
@@ -48,9 +50,11 @@ Action types have these meanings.
 - nature-based: vegetation, ecosystems, or ecological processes linked to heat.
 
 Each evidence object contains exactly quote and page_numbers. quote is a nonblank
-exact continuous passage. page_numbers is a nonempty list of unique positive
-integers within the physical original PDF page range. A passage may span pages.
-Together, quotations support the activity and all its recorded substantive details.
+continuous passage copied verbatim from source text, without rewriting or silent
+omissions. page_numbers is a nonempty list of unique positive integers within the
+physical original PDF page range. A passage may span pages; cite every page
+containing its words. Separate passages use separate evidence objects. Together,
+quotations support the activity and all its recorded substantive details.
 
 ## Plan issues
 

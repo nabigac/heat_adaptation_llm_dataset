@@ -27,11 +27,11 @@ def run_record() -> dict:
             "name": "fictional_extractor",
             "stage": "extractor",
             "model": {
-                "name": "fictional-model",
-                "execution_mode": "local",
-                "endpoint": "http://localhost:11434",
-                "api_service": None,
-                "provider": None
+                "name": "test-lab/fictional-model",
+                "execution_mode": "hosted_api",
+                "endpoint": "https://router.huggingface.co/v1",
+                "api_service": "huggingface",
+                "provider": "deepinfra"
             },
             "generation": {
                 "temperature": 0,

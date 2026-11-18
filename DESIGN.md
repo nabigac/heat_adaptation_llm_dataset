@@ -1,12 +1,12 @@
 # Design Doc: Heat Adaptation LLM Dataset
 
-**Research design · updated 2026-11-16**
+**Research design · updated 2026-11-18**
 
 ## 1. Context and problem
 
 Plans issued by governments and public agencies describe actions to address heat risk. Extracting these actions into a consistent dataset would support comparison across jurisdictions. The work requires reading varied documents, combining descriptions spread across pages, and preserving details such as implementation status, costs, and expected benefits.
 
-Large language models (LLMs) could assist this work, but their outputs require assessment against the source. This study will examine a workflow combining open-weight models, document tools, and heat adaptation experts. Open-weight models have downloadable trained parameters and can be run locally. Preserving the source documents, model versions, prompts, settings, and expert judgments supports reproducibility.
+Large language models (LLMs) could assist this work, but their outputs require assessment against the source. This study will examine a workflow combining open-weight models, document tools, and heat adaptation experts. Open-weight models publish their trained parameters; the study accesses these models through hosted APIs using Hugging Face Inference Providers. Preserving the source documents, model identities, available version information, prompts, settings, and expert judgments supports reproducibility.
 
 ## 2. Research aim and objectives
 
@@ -45,6 +45,8 @@ Each extraction will produce one JSON dataset for a plan, containing plan inform
 
 Within a plan, actions are grouped by the specific activity undertaken. For example, all tree planting belongs in one action object, including planting in different neighborhoods or phases. Details associated with each location or phase are preserved. Tree planting and drinking fountain installation form separate actions. The broad `action_type` categories classify each activity and may overlap.
 
+One source heading, pathway, or programme may contain several distinct activities. Activities with different primary tasks or outputs receive separate records, even when they share a goal, recipient group, or implementer. Routine implementation steps remain part of the activity they support.
+
 #### Plan dataset components
 
 | Component | Meaning and information gathered | JSON representation |
@@ -61,7 +63,7 @@ Within a plan, actions are grouped by the specific activity undertaken. For exam
 | Action identifier | Stable ID followed through verification. | `action_id` |
 | Action description | Activity, implementers, quantities, timing, conditions, and phase-specific details. | `action` |
 | Action type | Infrastructural, institutional, behavioral/cultural, and/or nature-based. | `action_type` |
-| Action status | Planned, underway, completed, or unspecified at the grouped activity level. | `action_status` |
+| Action status | Unspecified unless the source clearly establishes that the grouped activity is planned, underway, or completed. | `action_status` |
 | Action location | All stated locations or geographic coverage. | `action_location` |
 | Action recipients | Stated intended populations or affected groups. | `action_recipient` |
 | Action cost | Stated amounts, units, periods, and whether estimated, allocated, spent, or needed. | `action_cost` |
@@ -72,7 +74,7 @@ Costs, benefits, and evidence are attached to the activity they describe. The [a
 
 ### Evidence and issues
 
-Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Separate passages are represented by separate evidence entries, including relevant headings or footnotes. Adequate evidence collectively supports the activity and its stated details.
+Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Quotations preserve the source wording and punctuation without rewriting or silent omissions. Every page containing quoted words is cited. Separate passages are represented by separate evidence entries, including relevant headings or footnotes. Adequate evidence collectively supports the activity and its stated details.
 
 Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains existing issue IDs, may add issues, and explains claimed resolutions for expert assessment. Experts may subsequently resolve issues in curated copies. Expert curation corrects or excludes unsupported material.
 
@@ -80,13 +82,17 @@ Concerns about one action are grouped into one issue. Omissions and source gaps 
 
 During development, models will draft action records and flag uncertainties. Experts will examine the outputs against the plans and identify changes needed in coding rules, prompts, tools, and review procedures. Examples showing what prompted a revision, how it was addressed, and what was observed afterwards will be preserved. These examples will support the study's account of building the workflow and the lessons drawn from that process.
 
+Inkling 2 Small (`thinkingmachines/Inkling-2-Small`), accessed through Hugging Face Inference Providers with DeepInfra as the fixed hosting provider, is the extractor for both study configurations. E consists of its extraction. E+V begins with that exact saved extraction, which a different hosted open-weight model then checks and revises. The verifier model will be selected and validated during development before comparison settings are fixed. PDF preparation, optical character recognition (OCR) with EasyOCR, and document tools run on the researcher's computer. LLM inference is hosted.
+
+Model and hosting details, response format controls, context and output limits, tool use, runtime, and provider-reported tokens are recorded. Generation is constrained by a provider-compatible schema, with compatibility assessed separately using fictional inputs. The provider constrains record structure and permitted values; list uniqueness and conditional issue-status rules are checked after generation. Every output undergoes the same complete Python acceptance checks. Structural compliance does not establish substantive accuracy. Earlier local and hosted trials are retained as development evidence for model selection; they do not form the planned E versus E+V comparison.
+
 The extractor and verifier will use the same source preparation and document tool capabilities through Model Context Protocol (MCP), the interface connecting agents to tools.
 
 | Stage | Procedure and saved result |
 | --- | --- |
 | 1. Registration and preparation | The original PDF, collection metadata, page text, and preparation problems will be preserved. |
-| 2. Extraction (E) | The extractor will receive the whole prepared plan. Its answer, issues, settings, tool activity, and execution records will be saved. |
-| 3. Verification (E+V) | A different model will check a copy of that exact extraction, including unflagged content and possible omissions. Its full revised answer will be saved. |
+| 2. Extraction (E) | Inkling 2 Small will receive the whole prepared plan through the Hugging Face API. Its answer, issues, settings, tool activity, and execution records will be saved. |
+| 3. Verification (E+V) | A different hosted model, also accessed through Hugging Face, will check a copy of that exact Inkling extraction, including unflagged content and possible omissions. Its full revised answer will be saved. |
 | 4. Independent reference preparation | After successful E and V runs, experts will code the original PDF before viewing model outputs. This initial reference will be preserved. |
 | 5. Expert assessment | Experts will match activities by meaning, review possible reference corrections, and assess both outputs against one shared final reference. Revisions will be recorded with reasons and source evidence. |
 | 6. Analysis and dataset assembly | Lessons about pairing experts and LLMs to build the workflow will be synthesized. Paired outputs will be compared, and instruction examples will be assembled from expert-curated answers and their supporting inputs. |
@@ -131,7 +137,7 @@ The analysis will examine how heat adaptation experts and LLMs work together to 
 
 The paired comparison will examine whether verification improves the accuracy and completeness of action records, the adequacy of supporting evidence, and the handling of issues requiring review. Changes between E and E+V will be examined for each plan, including corrected errors, recovered omissions, new errors, and unresolved issues. Runtime, token use, and failed attempts will describe the computational requirements of each approach.
 
-With five selected comparison plans and one model pair, the findings will be descriptive and specific to this study setting. Document layout and errors when extracting text from PDFs or scans may affect extraction quality. Expert judgments about action grouping and scoring may vary, and revisions to the reference after viewing model outputs may favor information included in those outputs.
+With five selected comparison plans and one model pair, the findings will be descriptive and specific to this study setting. Document layout and errors when extracting text from PDFs or scans may affect extraction quality. Hosted services may expose limited information about model revisions and serving conditions; unavailable details are recorded as unknown. Expert judgments about action grouping and scoring may vary, and revisions to the reference after viewing model outputs may favor information included in those outputs.
 
 The coarse action scores and combined evidence judgment may hide differences in the nature or severity of errors. Grouping an activity across locations or phases also gives records with different amounts of detail equal weight. Issue counts depend on what the models flag and provide only a partial view of review needs.
 
@@ -192,8 +198,8 @@ Each evidence object:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `quote` | string | Exact continuous source passage. Separate passages are represented by separate objects. |
-| `page_numbers` | nonempty list of unique positive integers | Physical PDF positions containing the passage, starting at 1. A continuous passage may span pages. |
+| `quote` | string | Exact continuous source passage, preserving wording and punctuation without rewriting or silent omissions. Separate passages are represented by separate objects. |
+| `page_numbers` | nonempty list of unique positive integers | Every physical PDF position containing quoted words, starting at 1. A continuous passage may span pages. |
 
 ### D. Plan issues
 
@@ -235,14 +241,14 @@ The four categories describe the mechanisms used by an activity. One activity ma
 
 #### Action status
 
-Status describes what the plan reports about the grouped activity.
+Status describes what the selected document reports about the grouped activity. The default is `unspecified`; another value requires an explicit statement or unambiguous source evidence of the overall status. The current date does not advance an activity's reported status.
 
 | Action status | Working definition |
 | --- | --- |
-| `planned` | Proposed or committed, with no source evidence that work has begun. |
-| `underway` | Work has started or the activity is operating. |
+| `planned` | Clearly proposed or committed, with no source evidence that work has begun. |
+| `underway` | Clearly reported as in progress or operating. |
 | `completed` | The grouped activity is explicitly reported as finished. |
-| `unspecified` | An overall status cannot be established, including when only differing phase or location statuses are available. |
+| `unspecified` | Default when the overall status is not clearly established, including when only differing phase or location statuses are available. |
 
 #### Issue types
 
@@ -263,21 +269,21 @@ These rules describe how models and experts interpret the source and organize ac
 | Coding question | Coding rule |
 | --- | --- |
 | Which activities qualify as heat adaptation actions? | Eligible activities are explicitly connected to reducing heat risk or enabling adaptation through their description or a heat-specific heading. General climate, greening, or health measures require this source connection. |
-| How should activities be grouped? | The same specific activity is combined across neighborhoods, programmes, phases, and repeated mentions. One object for tree planting retains all stated locations, quantities, dates, implementers, statuses, costs, benefits, and evidence. Differences in those details alone do not create separate objects. |
-| When should activities have separate records? | Distinct activities, such as tree planting and drinking fountain installation, have separate objects. Broad categories such as nature-based may contain several distinct activities. Borderline cases will be piloted before comparison. |
+| How should activities be grouped? | Specific activities are identified before repeated mentions are combined. The same activity is grouped across neighborhoods, programmes, and phases. One object for tree planting retains all stated locations, quantities, dates, implementers, statuses, costs, benefits, and evidence. Differences in those details alone do not create separate objects. |
+| When should activities have separate records? | Activities with different primary tasks or outputs have separate objects, even within one heading, pathway, or programme. A cooling innovation competition and an ambassador training programme are distinct, as are heat mapping and an awareness campaign. Shared goals, recipients, implementers, or broad action types do not establish one activity. Routine implementation steps remain within their activity. Borderline cases will be piloted before comparison. |
 | How should details and conflicting statements be handled? | Each detail retains its association with the stated location or phase. Repeated totals are counted once. Conflicting source statements are recorded as issues. |
 | When should goals be included? | A concrete activity retains its stated targets or deadlines. A broad aspiration alone falls outside the action records. |
 | How should monitoring and evaluation be recorded? | Concrete heat-related activities, such as operating heat-health surveillance, are actions. The description preserves the source's distinction between monitoring and demonstrated outcomes. |
 | How should locations, recipients, and implementers be recorded? | Locations and intended populations use their dedicated fields. Implementers appear in `action`, supported by evidence identifying their responsibility for the activity. |
 | How should action types be assigned? | Every category supported by the activity's described mechanism is recorded. Possible wider effects alone do not justify a type. Multiple types describe aspects of the same activity. |
-| How should action status be coded? | The source's overall status is recorded using the values in appendix E. A past deadline alone cannot establish completion. |
-| How should differing phase or location statuses be handled? | When the source provides no overall status, `action_status` is `unspecified` and each phase or location status is retained in `action`. Mixed reporting alone requires no issue. |
+| How should action status be coded? | The default is `unspecified`. Another value requires an explicit statement or unambiguous source evidence of the grouped activity's overall status, using appendix E. Presence in a plan or a deadline alone does not establish status. Coding reflects the selected document's account, without inference from the current date. |
+| How should differing phase or location statuses be handled? | When the source provides no overall status, `action_status` is `unspecified` and each phase or location status is retained in `action`. A completed pilot or past event alone does not establish the status of a broader grouped activity. Mixed reporting alone requires no issue. |
 | How should other reported states be handled? | States outside the four values, such as withdrawal, are retained in `action`, with `action_status` set to `unspecified` and the coding limitation identified in an issue. |
 | How should costs be recorded? | Amounts retain their original currency or units, periods, qualifications, and whether estimated, allocated, spent, or needed. Each amount retains its association with the relevant phase or location. |
 | How should benefits be recorded? | Outcomes retain quantities, affected groups, comparisons, timing, and qualifications, including stated adverse effects and whether expected, modelled, or observed. |
 | When should shared budgets or outcomes be attached to an action? | Shared budgets or outcomes are attached when the source establishes an activity link. Their scope is retained, and repeated amounts are counted once. General plan-wide statements without an activity link fall outside the action dataset. |
 | How should missing details be recorded? | Unavailable descriptive fields are represented by `null`, and unstated overall status by `unspecified`. When no action type can be justified, the type list is empty (`[]`) and an issue explains the uncertainty. Missing details alone cannot establish zero cost, no benefit, or absence of an action. |
-| How should supporting evidence be recorded? | Exact continuous quotations use physical PDF page numbers counted from 1. Separate passages have separate evidence entries, including necessary headings or footnotes. Together, the evidence supports the activity and its recorded details. |
+| How should supporting evidence be recorded? | Exact continuous quotations preserve wording, punctuation, and parenthetical text without rewriting or silent omissions. Every physical PDF page containing quoted words is cited, counted from 1. Separate passages, including nonadjacent headings or footnotes, have separate evidence entries. When continuity across pages is unclear, separate excerpts are used. Together, the evidence supports the activity and its recorded details. |
 
 ### G. Evaluation measures and calculations
 

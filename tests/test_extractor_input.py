@@ -20,6 +20,7 @@ from pypdf import PdfWriter
 import agents
 import document_tools
 import models
+import huggingface_api as hf
 import storage
 
 
@@ -180,9 +181,11 @@ def test_uses_selected_snapshot_metadata_not_registry_corrections(project):
 
 def test_compatible_schema_is_supplied_separately_and_request_construction_accepts_packet(project):
     packet = build(project)
-    assert packet.response_format == models.prepare_ollama_response_schema()
-    _, body, _ = models.build_ollama_request(packet.settings, packet.messages, response_format=packet.response_format)
-    assert body["messages"] == packet.messages and body["format"] == packet.response_format
+    assert packet.response_format == models.prepare_response_schema()
+    prepared = hf.build_huggingface_request(packet.settings, packet.messages, response_format=packet.response_format)
+    body = prepared.body
+    assert body["messages"][:-1] == packet.messages
+    assert body["response_format"]["json_schema"]["schema"] == hf.prepare_deepinfra_response_schema(packet.response_format)
     assert packet.response_format["required"] == ["plan_data", "plan_issues"]
     assert all("format" not in message for message in packet.messages)
 
@@ -192,8 +195,7 @@ def test_no_model_token_count_ocr_rendering_or_file_writes(project, monkeypatch)
         raise AssertionError("Input assembly must not start this operation.")
 
     monkeypatch.setattr(httpx, "AsyncClient", forbidden)
-    monkeypatch.setattr(models, "request_ollama_chat", forbidden)
-    monkeypatch.setattr(models, "check_ollama_token_budget", forbidden)
+    monkeypatch.setattr(agents, "request_huggingface_chat", forbidden)
     monkeypatch.setattr(document_tools, "EasyOcrReader", forbidden)
     monkeypatch.setattr(document_tools, "PdfPageRenderer", forbidden)
     before = snapshot(project)
@@ -296,12 +298,12 @@ def test_invalid_profile_selection_stops_assembly(project, choice):
     assert snapshot(project) == before
 
 
-def test_hosted_profile_is_not_treated_as_an_ollama_connection(project):
+def test_non_huggingface_profile_is_rejected_before_assembly(project):
     file = project / "configs/profiles.json"
     config = json.loads(file.read_bytes())
     config["profiles"][0]["model"].update(execution_mode="hosted_api", api_service="fictional", provider="fictional")
     file.write_text(json.dumps(config))
-    with pytest.raises(agents.ExtractorInputError, match="local Ollama"):
+    with pytest.raises(agents.ProfileValidationError):
         build(project)
 
 
@@ -427,6 +429,6 @@ def test_invalid_registry_selection_cannot_supply_a_source(project, damage):
 def test_schema_setup_failure_is_not_silently_replaced(project, tmp_path, monkeypatch):
     monkeypatch.setattr(models, "_SCHEMA_DIRECTORY", tmp_path)
     before = snapshot(project)
-    with pytest.raises(models.OllamaSchemaError):
+    with pytest.raises(models.ResponseSchemaError):
         build(project)
     assert snapshot(project) == before

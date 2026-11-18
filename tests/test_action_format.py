@@ -130,7 +130,7 @@ def test_expert_resolution_is_valid_in_curated_answers_and_rejected_in_model_ans
     assert validation.validate_curated_dataset(response, page_count=3) == []
     for stage in ("extractor", "verifier"):
         assert validation.validate_agent_response(response, page_count=3, stage=stage)
-    provider = Draft202012Validator(models.prepare_ollama_response_schema())
+    provider = Draft202012Validator(models.prepare_response_schema())
     assert not provider.is_valid(response)
 
 

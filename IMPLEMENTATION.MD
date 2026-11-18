@@ -128,11 +128,11 @@ Quotation matching locates wording; it does not establish claim support or OCR f
 
 ## 4. Hugging Face configuration and requests
 
-`configs/profiles.json` contains shared `document_tools` plus named model profiles. Select `--profile` explicitly for extraction. Each run saves the selected values and ordered prompt texts.
+`configs/profiles.json` contains shared `document_tools` plus named model profiles. A profile defines execution settings independently of the study set; `--purpose` identifies how a run is used. Select `--profile` explicitly for extraction. Each run saves the selected values and ordered prompt texts.
 
 | Setting | Current value |
 | --- | --- |
-| Extractor profile | `inkling2_small_hf_extractor_development` |
+| Extractor profile | `inkling2_small_hf_extractor` |
 | Model | `thinkingmachines/Inkling-2-Small` |
 | Service and fixed host | Hugging Face Inference Providers; `deepinfra` |
 | Endpoint and routing ID | `https://router.huggingface.co/v1`; `thinkingmachines/Inkling-2-Small:deepinfra` |

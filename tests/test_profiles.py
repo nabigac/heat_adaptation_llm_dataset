@@ -382,7 +382,7 @@ def test_missing_shared_schema_is_a_visible_setup_failure(configuration: dict, t
 
 def test_repository_starter_profile_loads_but_does_not_claim_environment_observations() -> None:
     root = Path(__file__).resolve().parents[1]
-    settings = agents.load_profile(root, "inkling2_small_hf_extractor_development", stage="extractor")
+    settings = agents.load_profile(root, "inkling2_small_hf_extractor", stage="extractor")
     assert settings["stage"] == "extractor"
     assert len(settings["prompt_paths"]) == len(settings["prompt_texts"]) == 3
     assert all(text.strip() for text in settings["prompt_texts"])

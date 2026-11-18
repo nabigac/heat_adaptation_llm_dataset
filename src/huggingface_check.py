@@ -23,7 +23,7 @@ from models import ModelRequestCancelled, _json_object, prepare_response_schema
 from validation import validate_agent_response
 
 
-DEFAULT_PROFILE = "inkling2_small_hf_extractor_development"
+DEFAULT_PROFILE = "inkling2_small_hf_extractor"
 SMALL_SCHEMA = {
     "type": "object", "properties": {"compatible": {"type": "boolean", "const": True}},
     "required": ["compatible"], "additionalProperties": False,

@@ -9,7 +9,7 @@
   },
   "profiles": [
     {
-      "name": "inkling2_small_hf_extractor_development",
+      "name": "inkling2_small_hf_extractor",
       "stage": "extractor",
       "model": {
         "name": "thinkingmachines/Inkling-2-Small",

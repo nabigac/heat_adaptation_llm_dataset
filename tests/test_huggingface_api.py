@@ -136,13 +136,13 @@ def test_valid_empty_optional_metadata_is_accepted(settings, field, value):
 
 def test_deepinfra_requests_strict_schema_without_changing_the_contract(settings):
     settings["model"]["provider"] = "deepinfra"
-    settings["generation"]["max_output_tokens"] = 32768
+    settings["generation"]["max_output_tokens"] = 131072
     schema = agents.prepare_response_schema()
     messages = [{"role": "user", "content": "Fictional source."}]
     before = deepcopy((settings, schema, messages))
     prepared = hf.build_huggingface_request(settings, messages, response_format=schema)
     body = prepared.body
-    assert body["model"] == MODEL + ":deepinfra" and body["max_tokens"] == 32768
+    assert body["model"] == MODEL + ":deepinfra" and body["max_tokens"] == 131072
     assert body["response_format"] == {"type": "json_schema", "json_schema": {
         "name": "heat_adaptation_extraction", "strict": True,
         "schema": hf.prepare_deepinfra_response_schema(schema),
@@ -208,10 +208,12 @@ def test_other_hosts_do_not_receive_deepinfra_schema_adaptations(settings):
     assert body["response_format"]["json_schema"]["schema"] == schema
 
 
-@pytest.mark.parametrize("tokens,accepted", [(18052, True), (32768, True), (32769, False)])
-def test_hosted_output_limit_counts_all_reported_tokens_including_reasoning(settings, tokens, accepted):
+@pytest.mark.parametrize("limit", [32768, 131072])
+@pytest.mark.parametrize("offset,accepted", [(-1, True), (0, True), (1, False)])
+def test_hosted_output_limit_counts_all_reported_tokens_including_reasoning(settings, limit, offset, accepted):
     settings["model"]["provider"] = "deepinfra"
-    settings["generation"]["max_output_tokens"] = 32768
+    settings["generation"]["max_output_tokens"] = limit
+    tokens = limit + offset
     data = envelope(usage={"prompt_tokens": 100, "completion_tokens": tokens,
                            "completion_tokens_details": {"reasoning_tokens": 5555}})
     result, _ = request(settings, data)

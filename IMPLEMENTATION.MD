@@ -136,10 +136,12 @@ Quotation matching locates wording; it does not establish claim support or OCR f
 | Model | `thinkingmachines/Inkling-2-Small` |
 | Service and fixed host | Hugging Face Inference Providers; `deepinfra` |
 | Endpoint and routing ID | `https://router.huggingface.co/v1`; `thinkingmachines/Inkling-2-Small:deepinfra` |
-| Context/output limits | 1,048,576 context tokens; 32,768 output tokens per request, including reported reasoning. |
+| Context/output limits | 1,048,576 context tokens; 131,072 output tokens per request, including reported reasoning. The full output allowance is reserved in each capacity check. |
 | Generation controls | Temperature, top-p, and seed null: use provider defaults and record that choice. |
 | Execution limits | 10 submitted document-tool calls per extraction; 1,800 seconds per model request; 120 seconds per tool request. |
 | Tool/input settings | EasyOCR, English, CPU, 150 DPI; text input with local tools; direct image input disabled. |
+
+Both development plans completed successfully at the 131,072-token output allowance. Preliminary findings and remaining extraction errors are recorded in [CHANGELOG.md](CHANGELOG.md); formal quality assessment remains pending.
 
 Authentication reads `HF_TOKEN` at execution. Require it before allocating a run; never save authentication headers or credentials. `.env` files are not loaded automatically. [README.md](README.md#api-access) explains setup. Local LLM weights and serving software are unnecessary; OCR and document processing remain local.
 
@@ -197,7 +199,7 @@ The readiness turn counts as a generation. Blocked preflight is retained as an a
 
 `output.json` follows [run.schema.json](schemas/run.schema.json). It records plan/run identity, stage/purpose, source path, retry/input links, UTC start/end, measured duration, frozen settings/environment, generation calls, tool-log path, status/error, and accepted `plan_data`/`plan_issues`. Only saved success retains the accepted answer; failures retain evidence with null accepted output. Unknown measurements remain null.
 
-A `plan_id` identifies one PDF version, and a `run_id` identifies one execution. Action/issue IDs are local to linked outputs and persist through verification/curation. Each manual invocation gets a new numbered run directory, including retries. `--retry-of-run-id` links a failed attempt; it does not resume or overwrite it. Keep the first successful output under fixed settings for comparison; label deliberate successful repeats exploratory.
+A `plan_id` identifies one PDF version, and a `run_id` identifies one execution. Action/issue IDs are local to linked outputs and persist through verification/curation. Each manual invocation gets a new numbered run directory, including retries. `--retry-of-run-id` links a failed attempt; it does not resume or overwrite it. Selected E/E+V pairs retain their exact run IDs when later runs become available.
 
 ### Saved extractor execution
 
@@ -241,9 +243,11 @@ Issue checks enforce one linked issue per affected action, valid IDs/links, and 
 
 ### Verifier control — planned
 
-Select and validate a different hosted model through Hugging Face. Add its profile, prompt, structured-output/tool checks, and runner. Load the exact successful Inkling E run, source fingerprint, answer/issues, and shared tool settings. Supply the whole source and check all fields, grouping, unflagged content, omissions, and evidence through the same bounded investigation/final-answer pattern.
+Select and validate a different hosted model through Hugging Face. Add its profile, prompt, structured-output/tool checks, and runner.
 
-Save a separate verifier run with `input_run_id` pointing to E. Preserve continuing action/issue IDs and issue origins, allocate IDs for additions, and explain resolutions of every grouped concern. Check source/tool consistency and issue continuity with existing validators. A failed V retry stays linked to the same E run. Freeze both configurations, including clean committed code, before enabling formal comparison.
+For development, comparison, and later expansion, default to the latest validated, successful extractor run for the plan unless an explicit E run ID is supplied. Most recent means the highest numbered eligible extractor run, with status `succeeded`, that passes saved-run validation. Apply the same purpose and fixed-comparison-setting checks to default and explicit selections. Stop if no eligible input exists. Resolve selection once when V starts, then load that E run's exact preparation, source fingerprint, answer/issues, and shared tool settings. Supply the whole source and check all fields, grouping, unflagged content, omissions, and evidence through the same bounded investigation/final-answer pattern.
+
+Save a separate verifier run with `input_run_id` pointing to the selected E. A failed V retry retains the original `input_run_id` rather than resolving the latest E again; verifying a newer E starts a new pair. Preserve continuing action/issue IDs and issue origins, allocate IDs for additions, and explain resolutions of every grouped concern. Check source/tool consistency and issue continuity with existing validators. Freeze both configurations, including clean committed code, before enabling formal comparison. Record the selected comparison pair before expert assessment and retain it when later extractions become available.
 
 ### Expert files and measurement — planned
 

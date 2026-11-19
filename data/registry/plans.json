@@ -10,6 +10,16 @@
       "date_accessed": "2026-11-02",
       "study_set": "development",
       "prepared_source_path": "data/processed/plan_0001/preparation_01/preparation.json"
+    },
+    {
+      "plan_id": "plan_0002",
+      "plan_title": "Paris Climate Action Plan",
+      "pdf_path": "data/raw/plan_0002.pdf",
+      "document_sha256": "342eba4ec6379d2938f45f9a688e18595d914dba025e5e54f3934b698970c1c1",
+      "source_url": "https://cdn.paris.fr/paris/2025/06/25/plan-climat-en-9E8O.pdf",
+      "date_accessed": "2026-11-19",
+      "study_set": "development",
+      "prepared_source_path": "data/processed/plan_0002/preparation_01/preparation.json"
     }
   ]
 }

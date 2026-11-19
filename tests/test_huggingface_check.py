@@ -26,7 +26,7 @@ def test_current_profile_selects_only_hosted_inkling():
     assert len(config["profiles"]) == 1
     assert selected["model"]["name"] == MODEL and selected["model"]["provider"] == "deepinfra"
     assert selected["model"]["execution_mode"] == "hosted_api"
-    assert selected["generation"]["max_output_tokens"] == 32768
+    assert selected["generation"]["max_output_tokens"] == 131072
     assert selected["context_limit"] == 1048576
 
 
@@ -35,7 +35,7 @@ def test_diagnostic_saves_schema_usage_and_caps_without_changing_study(project, 
     hosted_project(project, "deepinfra", model)
     config_path = project / "configs/profiles.json"
     config = json.loads(config_path.read_text())
-    config["profiles"][0]["generation"]["max_output_tokens"] = 32768
+    config["profiles"][0]["generation"]["max_output_tokens"] = 131072
     config_path.write_text(json.dumps(config))
     monkeypatch.setenv("HF_TOKEN", TOKEN)
     before = study_hashes(project)

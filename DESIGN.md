@@ -146,7 +146,9 @@ The extractor and verifier will use the same source preparation and document too
 | 5. Expert assessment | Experts will match activities by meaning, review possible reference corrections, and assess both outputs against one shared final reference. Revisions will be recorded with reasons and source evidence. |
 | 6. Analysis and dataset assembly | Lessons about pairing experts and LLMs to build the workflow will be synthesized. Paired outputs will be compared, and instruction examples will be assembled from expert-curated answers and their supporting inputs. |
 
-Each comparison will use the first successful E run and the first successful V run linked to it under the fixed settings. Successful execution means that format and execution checks have passed. Failed attempts will be retained, with manual retries linked to the earlier attempt. Deliberate repeats of successful work will be treated as exploratory.
+Verification will default to the most recent validated, successful E run for the plan unless a specific E run is selected. The same selection rule applies to development, comparison, and later expansion. The selected E run ID will be saved with V, and verifier retries will retain that input.
+
+Each comparison will use the selected E output and the first successful V run linked to it under fixed settings. The pair will be recorded before expert assessment and retained when later extractions become available. Successful execution means that format and execution checks have passed. Failed attempts and repeated runs will be preserved, with manual retries linked to the earlier attempt.
 
 Models, prompts, preparation, tools, coding rules, and scoring will be fixed before comparison. Any subsequent changes and the affected runs will be documented. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) describes current software and planned work, and [README.md](README.md) provides available commands.
 

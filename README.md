@@ -32,7 +32,7 @@ issues retain stable IDs and origins through verification and curation. expert f
 | --- | --- | --- |
 | 1. registration and preparation | the original PDF, collection metadata, page text, and preparation problems are preserved. native text extraction and selective optical character recognition (OCR) run locally. | implemented. |
 | 2. extraction (E) | inkling 2 small receives the whole prepared plan through the hugging face API, pinned to deepinfra. its answer, issues, settings, tool activity, and execution records are saved. | implemented; compatibility checks and a freetown development extraction succeeded. |
-| 3. verification (E+V) | a different hosted model through hugging face will check the exact saved E output, including unflagged content and possible omissions. its full revised answer will be saved. | planned; verifier model not yet selected. |
+| 3. verification (E+V) | a different hosted model through hugging face will check the latest validated, successful E output unless another run is specified, including unflagged content and possible omissions. the chosen E run ID and full revised answer will be saved. | planned; verifier model not yet selected. |
 | 4. independent reference preparation | after successful E and V runs, experts will code the original PDF before viewing model outputs. this independent initial reference will be preserved. | planned. |
 | 5. expert assessment | experts will match activities by meaning, review possible reference corrections, and assess both outputs against one shared final reference. revisions will record reasons and source evidence. | planned. |
 | 6. analysis and dataset assembly | lessons about pairing experts and LLMs will be synthesized, paired outputs compared, and instruction examples assembled from expert-curated answers and their supporting inputs. | planned. |
@@ -139,7 +139,7 @@ uv run --locked heat-adaptation-llm-dataset run_extract_mode plan_0001 \
 
 inkling receives the prepared plan and can request local document tools. python validates its JSON answer before accepting the run. the terminal prints the saved status and paths. each attempt creates a new folder under `runs/<plan_id>/run_extract_NNNN/`, containing `output.json`, responses, and available tool/validation reports. source accuracy still requires expert review.
 
-- **purpose:** use `development` for development plans. `exploratory` labels runs outside the formal comparison, including deliberate repeats. formal `comparison` execution remains disabled; comparison-plan feedback stays restricted pending the reference workflow.
+- **purpose:** use `development` for development plans. `exploratory` labels additional investigations outside the formal comparison. formal `comparison` execution remains disabled; comparison-plan feedback stays restricted pending the reference workflow.
 - **retry:** after fixing a failure, repeat the command with `--retry-of-run-id run_extract_0001`, using the actual failed run ID. earlier attempts are preserved; retries are manual.
 - **cancel:** press ctrl+c to retain available evidence and stop. if a record remains `running`, confirm the process has stopped and inspect the files before recovery.
 

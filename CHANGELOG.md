@@ -81,3 +81,21 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Reason:** Improve traceability and readability while retaining the selected extraction setup.
 - **Observed result:** 1,660 tests passed, with 11 OCR dependency warnings. Four offline request comparisons retained identical bytes, routing, timeouts, and estimates. All 734 preservation-baseline files were unchanged; all five historical runs loaded. The implementation guide was roughly halved. No paid calls were made.
 - **Remaining questions:** Formal extraction-quality assessment and the different hosted verifier remain pending.
+
+### 2026-11-19 — Add Paris and increase the extraction output allowance
+
+- **Category:** Data / Model
+- **Problem:** The workflow needed testing on a second development plan; Paris extraction stopped at its output limit.
+- **Decision/change:** Registered and prepared Paris (`plan_0002`), reran Freetown, and attempted Paris extraction with Inkling 2 Small through Hugging Face/DeepInfra. Increased the output allowance from 32,768 to 131,072 tokens per request and aligned the implementation guide and tests.
+- **Reason:** Allow more space for reasoning, actions, and supporting quotations.
+- **Observed result:** Paris preparation preserved 92 physical PDF pages with status `ready_with_gaps`; spread spot checks confirmed numbering, with OCR limitations remaining. Freetown `0006` succeeded with 14 actions and five issues. Paris `0001` reached 32,768 output tokens, including 21,487 reasoning tokens, and its incomplete JSON was rejected. The allowance update passed 271 focused tests and offline capacity checks for both plans; existing runs were preserved.
+- **Remaining questions:** Higher-allowance rerun results are pending; formal extraction quality is **Not yet tested**.
+
+### 2026-11-19 — Complete and review both development extractions
+
+- **Category:** Model / Research
+- **Problem:** Both development plans needed complete extractions and preliminary review after increasing the output allowance.
+- **Decision/change:** Reran Freetown (`plan_0001`, `0008`) and Paris (`plan_0002`, `0002`) with the updated hosted workflow and 131,072-token output allowance. Reviewed outputs against prepared text, tool results, and selected PDF pages.
+- **Reason:** Confirm execution and identify errors to inform verifier development.
+- **Observed result:** Both succeeded without repairs. Freetown returned 14 actions and five open issues in 4m 40s (about $0.073); Paris returned 36 actions and five open issues in 14m 16s (about $0.230). Costs are API-reported. Freetown covered the main pathways but retained citation, quotation, and evidence gaps. Paris omitted a heat-monitoring programme and showed bundled activities, incorrect detail associations, status problems, and incomplete evidence. These are preliminary findings, not formal quality scores.
+- **Remaining questions:** Independent references, formal quality assessment, and verifier performance are **Not yet tested**.

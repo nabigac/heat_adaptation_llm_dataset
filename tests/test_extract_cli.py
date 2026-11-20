@@ -70,6 +70,8 @@ def test_extract_runs_real_saved_workflow_and_reports_actual_files(project, scri
     assert "Status: succeeded" in output.out and "Model requests: 2" in output.out
     assert f"Run record: runs/{loop.PLAN_ID}/run_extract_0001/output.json" in output.out
     assert f"Validation report: runs/{loop.PLAN_ID}/run_extract_0001/validation_report.json" in output.out
+    assert f"Quotation/page diagnostic: runs/{loop.PLAN_ID}/run_extract_0001/{agents.QUOTATION_PAGE_REPORT_PATH}" in output.out
+    assert "Quotation/page flags: 0 possible page mismatches; 0 unmatched quotations; 0 unconfirmed spans." in output.out
     assert output.err == ""
     assert connected_cli[0][1] == {"source_path": loop.SOURCE, "profile_name": loop.PROFILE,
         "purpose": "development", "retry_of_run_id": None, "config_path": "configs/profiles.json"}

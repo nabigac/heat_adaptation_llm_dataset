@@ -1,6 +1,6 @@
 # Implementation: Heat Adaptation LLM Dataset
 
-**Implementation guide · updated 2026-11-18**
+**Implementation guide · updated 2026-11-19**
 
 This guide maps the repository and specifies execution, preservation, and the remaining implementation work. [DESIGN.md](DESIGN.md) defines the research protocol, coding rules, and evaluation formulas; [README.md](README.md) provides setup and terminal commands. Existing JSON schemas are the authoritative field contracts. Proposed expert-file contracts appear at the end of this guide because their schemas are not implemented yet.
 
@@ -10,11 +10,12 @@ This guide maps the repository and specifies execution, preservation, and the re
 heat_adaptation_llm_dataset/
 ├── src/                         # Application modules; see the responsibility map below
 ├── tests/                       # Automated checks with fictional inputs and controlled HTTP
-├── configs/profiles.json         # Inkling routing, generation limits, prompts, shared tools
+├── configs/profiles.json         # Extractor/verifier routing, limits, prompts, shared tools
 ├── prompts/
 │   ├── shared_coding.md          # Activity grouping, inclusion, evidence, and issue rules
 │   ├── field_definitions.md      # Meaning of every answer field and missing value
-│   └── extractor.md              # Extractor task and investigation instructions
+│   ├── extractor.md              # Extractor task and investigation instructions
+│   └── verifier.md               # Approved verification task and issue continuity rules
 ├── schemas/                     # JSON field contracts; see the contract map below
 ├── data/                        # Tracked registry and separately preserved research inputs
 │   ├── registry/plans.json       # Tracked identity, collection metadata, preparation links
@@ -23,12 +24,15 @@ heat_adaptation_llm_dataset/
 │       ├── preparation.json     # Settings, source identity, status, and page-file link
 │       ├── pages.json           # Ordered physical pages, exact text, and review notes
 │       └── images/              # Preserved page PNGs and candidate-region crops
-├── runs/<plan_id>/run_extract_NNNN/
-│   ├── output.json              # Saved run status, settings, measurements, accepted answer
-│   ├── responses/               # Prepared requests, received responses, capacity reports
-│   ├── artifacts/               # Source/code snapshots, MCP diagnostics, tool requests, OCR
-│   ├── tool_log.json            # Ordered tool activity, when present
-│   └── validation_report.json   # Final-answer checks, when attempted
+├── runs/<plan_id>/
+│   ├── run_extract_NNNN/         # Extractor attempts; same file layout as below
+│   └── run_verify_NNNN/          # Verifier attempts linked to an exact extractor input
+│       ├── output.json          # Status, settings, measurements, accepted answer
+│       ├── responses/           # Requests, responses, capacity reports, repaired candidate
+│       ├── artifacts/           # Input/code snapshots, MCP diagnostics, tools, OCR
+│       │   └── quotation_page_report.json # Citation repairs and remaining review flags
+│       ├── tool_log.json        # Ordered tool activity, when present
+│       └── validation_report.json # Final-answer checks, when attempted
 ├── artifacts/huggingface_checks/ # Explicit compatibility diagnostics, outside study runs
 ├── .cache/easyocr/               # Cached English OCR models
 ├── .venv/                       # Installed project environment
@@ -48,15 +52,16 @@ Git tracks code, schemas, prompts, profiles, registry metadata, and project docu
 | [src/cli.py](src/cli.py) | Arguments, command dispatch, terminal feedback, comparison disclosure restrictions, exit codes. |
 | [src/documents.py](src/documents.py) | Registration, collection-metadata updates, native text preparation, and selective OCR coordination. |
 | [src/document_tools.py](src/document_tools.py) | PDF rendering/image inspection, EasyOCR, source-bound page/quotation tools, and the local MCP server. |
-| [src/agents.py](src/agents.py) | Profile/prompt loading, complete source input, bounded extractor execution, and incremental run recording. |
+| [src/agents.py](src/agents.py) | Profile/prompt loading, E input selection, complete source input, shared extractor/verifier execution, and incremental recording. |
 | [src/huggingface_api.py](src/huggingface_api.py) | Prepared HTTP requests, fixed provider routing, schema adaptation, size estimates, response interpretation, and usage. |
 | [src/models.py](src/models.py) | Shared response/tool schemas, conversation validation, and model-result evidence types; no network operations. |
-| [src/validation.py](src/validation.py) | Strict JSON parsing, schema checks, record relationships, source context, and permitted-repair coordination. |
+| [src/validation.py](src/validation.py) | Strict JSON parsing, early-draft recognition, schema checks, record relationships, source context, and permitted-repair coordination. |
 | [src/repair.py](src/repair.py) | The four allowed formatting repairs, producing a separate candidate and audit trail. |
+| [src/quotation_diagnostics.py](src/quotation_diagnostics.py) | Local quotation matching, conservative single-page citation corrections, and remaining review flags; no model calls or file access. |
 | [src/storage.py](src/storage.py) | Paths, identities, atomic publication, immutable evidence, active-record updates, and loading/integrity checks. |
 | [src/huggingface_check.py](src/huggingface_check.py) | Explicit fictional-input compatibility checks, saved separately from research extractions. |
 
-Planned modules are `src/expert_files.py` for references and assessments, and `src/metrics.py` for shared calculations/exports. Planned research paths are `runs/<plan_id>/run_verify_NNNN/`, `drafts/`, `reference_initial.json`, `reference_final.json`, `assessment_e.json`, `assessment_ev.json`, and `runs/analysis/`; optional notebooks will call the same calculation code.
+Planned modules are `src/expert_files.py` for references and assessments, and `src/metrics.py` for shared calculations/exports. Planned research paths are `drafts/`, `reference_initial.json`, `reference_final.json`, `assessment_e.json`, `assessment_ev.json`, and `runs/analysis/`; optional notebooks will call the same calculation code.
 
 ### JSON contracts
 
@@ -85,11 +90,12 @@ The CLI entry point is `cli.main()`:
 | `update_plan_data` | `documents.update_document_metadata()` | Validated partial registry update. |
 | `prepare_plan` | `documents.prepare_document()` | New preparation folder and registry link. |
 | `run_extract_mode` | `agents.run_extractor()` | One new extraction attempt and its evidence. |
+| `run_verify_mode` | `agents.run_verifier()` | One new verification attempt linked to its selected E, with a full revised answer. |
 | `list_plans` | `documents.list_documents()` | Read-only registration/preparation listing. |
 
-Extraction follows `CLI → saved runner → extractor loop → Hugging Face API`, with `extractor loop → local MCP tools` for source checks. `validation.py` checks answers and relationships; `storage.py` owns publication and file integrity. The model never writes research files directly.
+Both model commands follow `CLI → saved runner → shared model/tool loop → Hugging Face API`, with local MCP tools for source checks. CLI argument handling and terminal feedback are shared between stages. `validation.py` checks answers and relationships; `quotation_diagnostics.py` corrects qualifying citations and flags remaining concerns; `storage.py` owns publication and file integrity. The shared runner coordinates these steps. The model never writes research files directly.
 
-Inkling 2 Small (`thinkingmachines/Inkling-2-Small`), accessed through Hugging Face Inference Providers with DeepInfra pinned, produces E. E+V will start with that exact saved extraction and add a different hosted open-weight verifier through Hugging Face, which remains unselected and unimplemented. Registration, preparation, extraction, response validation, saving/loading, and expert-curated answer validation are implemented. Verification, expert references/assessments, metrics, comparison execution, and instruction export remain planned. Formal comparison is currently blocked.
+Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) produces E. DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) checks and revises that exact saved extraction for E+V. Both models use Hugging Face Inference Providers with DeepInfra pinned. The verifier profile, prompts, input selection, shared runner, CLI, and preservation checks are implemented; Freetown pilots succeeded at 10 and 20 tool calls. Automatic quotation checks and qualifying citation repairs are implemented and tested offline; live use of that step and Paris verification remain pending. Registration, preparation, extraction, response validation, saving/loading, and expert-curated answer validation are implemented. Expert references/assessments, metrics, comparison execution, and instruction export remain planned. Formal comparison is currently blocked.
 
 ## 3. Document collection and preparation
 
@@ -130,7 +136,7 @@ Quotation matching locates wording; it does not establish claim support or OCR f
 
 `configs/profiles.json` contains shared `document_tools` plus named model profiles. A profile defines execution settings independently of the study set; `--purpose` identifies how a run is used. Select `--profile` explicitly for extraction. Each run saves the selected values and ordered prompt texts.
 
-| Setting | Current value |
+| Setting | Current extractor value |
 | --- | --- |
 | Extractor profile | `inkling2_small_hf_extractor` |
 | Model | `thinkingmachines/Inkling-2-Small` |
@@ -138,16 +144,20 @@ Quotation matching locates wording; it does not establish claim support or OCR f
 | Endpoint and routing ID | `https://router.huggingface.co/v1`; `thinkingmachines/Inkling-2-Small:deepinfra` |
 | Context/output limits | 1,048,576 context tokens; 131,072 output tokens per request, including reported reasoning. The full output allowance is reserved in each capacity check. |
 | Generation controls | Temperature, top-p, and seed null: use provider defaults and record that choice. |
-| Execution limits | 10 submitted document-tool calls per extraction; 1,800 seconds per model request; 120 seconds per tool request. |
+| Execution limits | 20 submitted document-tool calls per stage; 1,800 seconds per model request; 120 seconds per tool request. |
 | Tool/input settings | EasyOCR, English, CPU, 150 DPI; text input with local tools; direct image input disabled. |
 
 Both development plans completed successfully at the 131,072-token output allowance. Preliminary findings and remaining extraction errors are recorded in [CHANGELOG.md](CHANGELOG.md); formal quality assessment remains pending.
+
+Verifier profile `deepseek_v4_1_flash_1017_hf_verifier` uses DeepSeek through the same service and fixed host, with the same limits and shared tools. It loads the shared coding rules and field definitions, followed by the [verifier task](prompts/verifier.md). Freetown `run_verify_0002` completed with the updated 20-call allowance and source-page instructions, while citation errors remained. Twenty is the tool-call ceiling; the output token allowance remains 131,072 per request. Historical runs retain their saved limits, prompts, and exact requests.
 
 Authentication reads `HF_TOKEN` at execution. Require it before allocating a run; never save authentication headers or credentials. `.env` files are not loaded automatically. [README.md](README.md#api-access) explains setup. Local LLM weights and serving software are unnecessary; OCR and document processing remain local.
 
 ### Input and request preparation
 
 `build_extractor_input()` checks the exact preparation and original PDF, snapshots prompts/settings, and assembles the whole source without model/OCR calls or file writes. Join `shared_coding.md`, `field_definitions.md`, and `extractor.md` with two newlines in one system message. A user message contains collection metadata, preparation notes, and all unchanged page text with distinct physical-page boundaries. Document text and tool results are evidence, not instructions.
+
+`build_verifier_input()` selects one validated E run and uses that run's exact preparation. It loads the three verifier-profile prompts and adds a separate user message containing E's complete `plan_data` and `plan_issues`. E's reasoning, execution logs, and expert files are excluded from the model conversation. The input snapshot also preserves E's full run record and SHA-256 fingerprint. Require a different model and identical shared document-tool settings; stop if the baseline or source changes.
 
 `build_huggingface_request()` creates a `PreparedHuggingFaceRequest`. Its serialized bytes, endpoint, timeout, expected model, and capacity limits are fixed. The runner saves its decoded body, the capacity check measures those bytes, and `request_huggingface_chat()` sends them without rebuilding the request. Internal tool arguments are objects; API arguments are JSON strings with unique call IDs. Return every tool result in call order, retaining the matching ID. Preserve reasoning in raw evidence while omitting it from API conversation replay.
 
@@ -168,32 +178,61 @@ Save the estimate, byte size, margin, limits, and fit decision separately from a
 
 Actual input/output totals come only from API `prompt_tokens`/`completion_tokens`; unavailable usage remains null and reported zero stays zero. Reject malformed usage or tool-call containers, invalid arguments, changed returned model identity, unknown completion reasons, reported truncation, and reported usage above configured limits. Preserve received bytes and valid observations even when the request fails. Provider error messages include the nested explanation when available. HTTP has no automatic retries, redirects, model switches, or provider fallback.
 
+Model identity checks are case-insensitive and allow the verified `deepseek-ai/DeepSeek-V4.1-Flash-1017` → `deepseek/deepseek-v4.1-flash-1017` response alias. Requests retain the configured ID, and raw responses retain the reported ID. Other checkpoints and unlisted namespaces are rejected.
+
 ### Compatibility diagnostics
 
-`uv run --locked python -m huggingface_check` defaults to Inkling and deliberately makes paid requests. Run it before adopting a changed serving setup, rather than before each plan. It stops at the first failed check:
+`uv run --locked python -m huggingface_check` defaults to the Inkling profile and makes up to three paid requests. `--model namespace/model` overrides only the diagnostic model, retaining the base profile's pinned DeepInfra host, prompts, context limit, and other settings. It does not edit profiles or implement verification. Invalid overrides stop before creating artifacts or sending requests. Run the diagnostic before adopting a changed serving setup, rather than before each plan. It stops at the first failed check:
 
 | Check | Requested output cap |
 | --- | --- |
 | Small strict schema with a conflicting requested field | 2,048 tokens |
 | Adapted project schema on a fictional complete one-page plan | 4,096 tokens |
 | Deliberately short output-limit probe | 64 tokens |
+| Optional fictional `get_page_text` call (`--check-tools`) | 2,048 tokens |
+| Optional result replay and JSON answer (`--check-tools`) | 2,048 tokens |
 
-Limits are capped by the profile, with at most 300 seconds per request. Requested caps are not guaranteed billing ceilings. Only the last probe permits truncation; missing output usage makes it inconclusive. Validate the fictional answer against the original contract. Save settings, exact requests, responses, estimates, usage, and results under `artifacts/huggingface_checks/`. These checks do not modify study files or establish real-plan accuracy or future provider behavior.
+`--check-tools` adds at most two requests, for five total. Require exactly one call for page 1. Python supplies a fictional result with a fresh confirmation code generated after the call; the next answer must reproduce it. The code appears only in the tool result, not in the output schema. Use the existing adapter's assistant/tool replay without calling MCP, reading PDFs, or running OCR. Save the fictional result alongside both requests and responses. This checks one tool interaction, not the complete document-tool catalogue or verifier workflow.
 
-## 5. Extractor execution and preservation
+Limits are capped by the profile, with at most 300 seconds per request. Requested caps are not guaranteed billing ceilings. Only the 64-token probe permits truncation; missing output usage makes it inconclusive. Validate the fictional extraction against the original contract. Save the base profile name, actual model/override, selected checks, settings, exact requests, responses, estimates, usage, and results under `artifacts/huggingface_checks/`. These small checks do not establish acceptance of the full configured output allowance, whole-plan capacity, extraction/verifier quality, or future provider behavior. Study files and credentials remain outside diagnostic artifacts.
 
-### Extractor control
+## 5. Model execution and preservation
 
-`run_extractor()` wraps the in-memory `run_extractor_loop()` with checkpoint saving:
+### Shared execution control
+
+`run_extractor()` and `run_verifier()` wrap their respective in-memory entry points with the same checkpoint recorder. `_run_agent_loop()` implements the common tool investigation and final generation; `_run_saved_agent()` implements common publication and failure handling:
 
 1. Validate explicit plan/preparation/profile/purpose choices and authentication; observe client software/Git state, snapshot code/contracts, and allocate a new `running` record.
 2. Assemble the complete input and discover the selected-source MCP catalogue.
-3. Prepare, record, budget, and send an investigation request. Accept valid tool calls or `READY_FOR_FINAL_RESPONSE` with optional outer whitespace. Other control text fails without another model call.
-4. Execute calls sequentially. Every submitted MCP call consumes budget, including failures; excess requests receive logged non-execution errors. Catalogue discovery consumes no slot. Continue until readiness or budget exhaustion.
-5. Send one final request with tools disabled and the response schema enabled. Validate completion and answer, apply only allowed repairs, and recheck source, collection metadata, and application snapshots.
-6. Stop the MCP subprocess and preserve its diagnostics before final publication. Return the last successfully saved status, even if the answer was valid in memory.
+3. Before each investigation request, refresh one controller message with total, submitted, and remaining document-tool calls and the maximum next batch size. Earlier exact requests remain immutable. Prepare, record, budget, and send the request. Process tool calls first; otherwise recognize `READY_FOR_FINAL_RESPONSE` with optional outer whitespace or a complete JSON answer draft. Unexpected prose and unrecognized JSON fail without another model call.
+4. Execute calls sequentially. Every submitted MCP call consumes budget, including failures; excess requests receive logged non-execution errors. Catalogue discovery consumes no slot. Continue until readiness, a recognized draft, or budget exhaustion.
+5. Send one final request with tools disabled and the response schema enabled, even after an early draft. Validate completion and answer, apply permitted format repairs, and recheck the source. Verification also checks the preserved E snapshot.
+6. Diagnose quotation locations and apply qualifying single-page corrections. Validate any changed candidate again, then check collection metadata and verifier issue continuity. Preserve repairs and remaining flags without adding model/tool calls.
+7. Stop the MCP subprocess, preserve its diagnostics, and recheck application snapshots before final publication. Return the last successfully saved status, even if the answer was valid in memory.
 
-The readiness turn counts as a generation. Blocked preflight is retained as an attempt but contributes no generation usage. Whole-stage elapsed time includes setup, tools, validation, saving, and cleanup. Request deadlines cover connection, response reads, and in-request evidence callbacks; tool deadlines also cover SDK waiting/decoding.
+The readiness or draft turn counts as a generation. Blocked preflight is retained as an attempt but contributes no generation usage. Whole-stage elapsed time includes setup, tools, validation, saving, and cleanup. Request deadlines cover connection, response reads, and in-request evidence callbacks; tool deadlines also cover SDK waiting/decoding.
+
+#### Early JSON drafts
+
+The readiness signal remains preferred. If a normally completed investigation response has no tool calls, `validation.is_agent_response_draft()` can instead recognize strict, finite JSON with exactly `plan_data` and `plan_issues`. `plan_data` must contain only a metadata object and an actions list of objects; `plan_issues` must contain only an issues list of objects. Duplicate fields, incomplete or code-fenced JSON, wrong container types, and nonfinite numbers do not qualify. Failed, truncated, or unconfirmed responses cannot trigger the transition.
+
+Recognition does not validate individual fields or accept the draft. Unexpected record fields such as `resolution_pages` can remain in a recognized draft, but must pass the unchanged full checks in the final answer. Preserve the draft in its original response files and conversation. The final controller message labels it unvalidated, requires source/schema checking, and requests one complete new answer. Only that final answer can proceed to citation correction and acceptance. There is no repeated final-generation or model-repair loop. An early draft can use more tokens than the readiness signal; normal capacity checks still apply to the final request.
+
+The shared coding prompt directs activity-level grouping before additions, source-specific quantity/date associations, and short exact excerpts when layout interrupts text. Source line breaks and word-wrap hyphens can remain in quotations. A clearly supported activity is retained with a linked issue when faithful evidence cannot be recovered. Before readiness, both E and V check every evidence quotation; V explicitly includes unchanged extractor evidence and cross-checks issue explanations against the final fields and actual revisions. The final controller request repeats the same quotation scope using physical page boundaries or returned page numbers. These are model instructions, not an automatic factual assessment or an extra model pass; their quality effect remains **Not yet tested**.
+
+### Automatic quotation/page checks and corrections
+
+The sequence is `JSON checks and format repairs → source checks → citation correction → JSON/context checks → saving`. Matching and correction live in `quotation_diagnostics.py`; the shared runner coordinates validation and preservation.
+
+After structural and source checks, Python compares every evidence quotation with the prepared physical pages and successful OCR readings already saved during the run. V also uses OCR readings from its pinned E run locally; E's logs remain outside the verifier conversation. This step launches no OCR or model requests. Matching collapses whitespace only, preserving words, case, punctuation, and hyphens. Repeated wording elsewhere does not flag a valid cited location. Multi-page matches must use text from every cited page in consecutive physical order; uncertain spans remain unconfirmed.
+
+`correct_quotation_pages()` returns a copied `plan_data` and a version 2 diagnostic report. It changes only a single-page citation with available cited text, no quotation match there, and exactly one alternative matching physical page. It never changes quotation wording, action details, metadata, or issues. Repeated matches, unavailable cited text, multi-page citations, and inexact wording remain unchanged; no general page-number offset is inferred. Invalid page ranges fail structural validation before this step.
+
+The shared runner adds each `quotation_page_number` change to `validation_report.json`, serializes a separate `responses/repaired_final.txt`, and validates it again before contextual acceptance. Existing format repairs remain in the same audit trail; the raw model response remains unchanged. V receives the saved, processed E answer. These source-based repairs stay outside the source-independent functions in `validation.py` and `repair.py`.
+
+The quotation report preserves the preparation fingerprint, matching method, initial summary, repairs with original/corrected pages and zero-based evidence indices, and remaining findings. Its final summary includes `corrected`; `findings` describes only remaining possible mismatches, unmatched quotations, and unconfirmed spans. An unmatched quotation can reflect OCR or layout differences. Flags alone do not fail a run; invalid corrected candidates and report-saving failures follow normal failure handling. Location checks do not establish factual support or evidence adequacy. No issue status is changed or resolution attributed to a model by Python.
+
+Earlier runs remain unchanged and need no new report. V uses an older E exactly as saved, without retroactively correcting it. Formal comparison pairs must use the same frozen processing policy for both stages; assessment covers processed outputs, with raw responses available for review.
 
 ### Saved run
 
@@ -201,11 +240,11 @@ The readiness turn counts as a generation. Blocked preflight is retained as an a
 
 A `plan_id` identifies one PDF version, and a `run_id` identifies one execution. Action/issue IDs are local to linked outputs and persist through verification/curation. Each manual invocation gets a new numbered run directory, including retries. `--retry-of-run-id` links a failed attempt; it does not resume or overwrite it. Selected E/E+V pairs retain their exact run IDs when later runs become available.
 
-### Saved extractor execution
+### Saved execution
 
 | Evidence | Location within the run |
 | --- | --- |
-| Frozen source input and tool catalogue | `artifacts/extractor_input.json`, `artifacts/mcp_catalogue.json` |
+| Frozen input and tool catalogue | `artifacts/extractor_input.json` for E or `artifacts/verifier_input.json` for V; `artifacts/mcp_catalogue.json` |
 | Application code, schemas, setup files, SHA-256 manifest | `artifacts/code/`, `artifacts/code_fingerprints.json` |
 | Environment notes | `artifacts/environment/observations.json` |
 | Exact request, capacity reports, headers, received chunks, result summary | `responses/attempt_NN/` |
@@ -215,14 +254,15 @@ A `plan_id` identifies one PDF version, and a `run_id` identifies one execution.
 | Fresh OCR request, PNG, text, report with hashes/settings/times/errors | `artifacts/ocr/request_NNNN/` |
 | Full conversation and subprocess stderr | `artifacts/conversation.json`, `artifacts/mcp_stderr.log` |
 | Validation and separate repaired candidate | `validation_report.json`, `responses/repaired_final.txt` when changed |
+| Quotation/page repairs and remaining diagnostic findings | `artifacts/quotation_page_report.json` |
 
 Observe local client versions and Git state. Remote weight revision, runtime version, quantization, model hardware, and loaded state remain null because the adapter cannot inspect them. Source/code snapshots establish what was used, including uncommitted code; they do not identify an undisclosed remote weight revision.
 
-Storage validates paths, source identity, selected preparation, and linked records. Successful runs require the frozen input; loading compares its fingerprint with the preparation and page text. Completed records/artifacts cannot be overwritten. Active records and ordered logs can grow atomically without changing fixed settings or earlier known observations. Use one writer at a time.
+Storage validates paths, source identity, selected preparation, and linked records. Successful runs require the frozen input; loading compares its source fingerprint with the preparation and page text. V also requires its saved E record and byte fingerprint to match the linked extractor. Completed records/artifacts cannot be overwritten. Active records and ordered logs can grow atomically without changing fixed settings or earlier known observations. Use one writer at a time.
 
 Checkpoint failure stops execution and triggers best-effort failed publication. Preserve available bytes and usage. A failed save or abrupt termination may leave `running`, partial artifacts, and null end/duration; recovery is manual after confirming process termination. Cancellation preserves available evidence and returns 130. Other CLI outcomes are 0 for saved success, 1 for operational failure, and 2 for invalid arguments.
 
-Comparison-plan feedback remains restricted, including exploratory runs: hide claims, issues, response fragments, repair details, and client logs until a validated independent-reference workflow exists. Files remain on disk. If troubleshooting exposes outputs, an unexposed expert must prepare the initial reference.
+Comparison-plan feedback remains restricted, including exploratory runs: hide claims, issues, response fragments, repair details, quotation/page correction and flag counts, and client logs until a validated independent-reference workflow exists. Report paths remain visible; files remain on disk. If troubleshooting exposes outputs, an unexposed expert must prepare the initial reference.
 
 ### Validation and permitted repair
 
@@ -235,19 +275,19 @@ Comparison-plan feedback remains restricted, including exploratory runs: hide cl
 | Missing closing delimiters | Unambiguous nesting after a complete value and confirmed normal completion. |
 | Single page number | Positive integer converted to a one-item `page_numbers` list, then range-checked. |
 
-Preserve the original and candidate separately and repeat every acceptance check. Failed/truncated requests receive no repairs. Missing fields, unsupported details, duplicates, and other substantive violations require a separately initiated attempt.
+The source-based page-citation repair is coordinated separately by the runner using `quotation_diagnostics.py`, as described above. Preserve the original and candidate separately and repeat acceptance checks on any changed answer. Failed/truncated requests receive no repairs. Missing fields, unsupported details, duplicates, and other substantive violations require a separately initiated attempt.
 
 Issue checks enforce one linked issue per affected action, valid IDs/links, and resolver/status relationships. Open issues require null resolver/resolution; resolved issues require a permitted resolver and nonblank explanation. E uses extractor origin/resolver. V retains original identities/origins, may reopen issues, and uses verifier origin for additions and verifier resolver for its fixes. Expert resolutions belong only in curated copies, validated with `validate_curated_dataset()`. Removed/merged actions require updated links and an explanation of retired targets where a link becomes null.
 
 ## 6. Remaining implementation
 
-### Verifier control — planned
+### Verifier pilot — in progress
 
-Select and validate a different hosted model through Hugging Face. Add its profile, prompt, structured-output/tool checks, and runner.
+`run_verify_mode` calls `agents.run_verifier()` with required plan ID, `--profile`, and `--purpose`; optional `--input-run-id`, `--retry-of-run-id`, `--config-path`, and `--project-root` control selection. Source preparation is inherited from E. Shared CLI handling prints the saved status, actual E input ID, and available evidence paths; cancellation returns 130, and comparison details remain restricted. Freetown verification completed with the configured 131,072-token allowance. The remaining pilot work is Paris verification and live review of the new quotation checks and citation corrections.
 
-For development, comparison, and later expansion, default to the latest validated, successful extractor run for the plan unless an explicit E run ID is supplied. Most recent means the highest numbered eligible extractor run, with status `succeeded`, that passes saved-run validation. Apply the same purpose and fixed-comparison-setting checks to default and explicit selections. Stop if no eligible input exists. Resolve selection once when V starts, then load that E run's exact preparation, source fingerprint, answer/issues, and shared tool settings. Supply the whole source and check all fields, grouping, unflagged content, omissions, and evidence through the same bounded investigation/final-answer pattern.
+The implemented runner uses `agents.select_verifier_input_run()` to select the highest numbered eligible E run that passes saved-run validation, unless an explicit E ID is supplied. It resolves selection once, preserves the input, and retains that E on retries. This applies to development, comparison, and later expansion purpose rules; formal comparison execution remains disabled. It supplies the whole source, answer/issues, and matching shared tools for review of grouping, unflagged content, omissions, details, and evidence.
 
-Save a separate verifier run with `input_run_id` pointing to the selected E. A failed V retry retains the original `input_run_id` rather than resolving the latest E again; verifying a newer E starts a new pair. Preserve continuing action/issue IDs and issue origins, allocate IDs for additions, and explain resolutions of every grouped concern. Check source/tool consistency and issue continuity with existing validators. Freeze both configurations, including clean committed code, before enabling formal comparison. Record the selected comparison pair before expert assessment and retain it when later extractions become available.
+V is saved separately with `input_run_id`; verifying a newer E starts a new pair. Validators enforce issue ID/origin retention, permitted resolvers, and valid action links. The prompt requires continuing action identities and explanations for splits, merges, removals, and resolutions; semantic correctness remains an expert judgment. Freeze both configurations, including clean committed code, before enabling formal comparison. Record the selected comparison pair before expert assessment and retain it when later extractions become available.
 
 ### Expert files and measurement — planned
 
@@ -283,11 +323,15 @@ After assessment, experts curate separate supported answers while preserving ass
 
 ### Current development checkpoint
 
-The Inkling diagnostic passed all three checks. Freetown `run_extract_0005` succeeded without repairs in about 193 seconds, with 14 actions and one extractor-claimed resolved issue requiring expert confirmation. Preliminary review found improved quotation matching and remaining evidence gaps. Formal quality scores and E+V performance are **Not yet tested**. Earlier trials and decisions remain in [CHANGELOG.md](CHANGELOG.md).
+Inkling extraction succeeded without repairs on Freetown (`run_extract_0008`: 14 actions, five open issues) and Paris (`run_extract_0002`: 36 actions, five open issues). Preliminary review found quotation, evidence, grouping, status, and omission problems. Formal quality scores remain **Not yet tested**. Earlier trials and decisions remain in [CHANGELOG.md](CHANGELOG.md).
 
-The full suite passed 1,660 tests with 11 OCR dependency warnings after the request/readability refactor. Offline comparisons preserved request bytes, routing, timeouts, and capacity estimates across four representative request cases. All 734 preservation-baseline files remained unchanged, and all five historical Freetown records loaded. No paid calls were made. These checks establish software behavior, not extraction accuracy or future provider behavior.
+DeepSeek passed all five compatibility checks and completed Freetown verification twice from the same `run_extract_0008`. `run_verify_0001` used a 10-call ceiling; `run_verify_0002` used 20 calls and the revised source-page instructions. Both succeeded without Python repairs and retained 14 actions. Preliminary review found useful quotation/detail corrections alongside remaining source gaps and incorrect page citations. These pilots predate automatic citation correction and do not establish formal E+V quality or isolate the effects of the prompt and budget changes.
 
-Next: finish development-plan review and the second development plan; implement/validate the different hosted verifier; pilot expert-file validation and the agreed measures; freeze settings and run the five-plan paired comparison; then curate/export instruction examples. Direct model images, richer status listing, expansion, and fine-tuning are deferred.
+The new Python step passed a 464-test focused regression suite and 12 follow-up boundary/context checks. Read-only replay corrected all three known page mismatches in `run_verify_0002` in memory, leaving two unmatched quotations for review. Saved runs were not changed. New live runs with automatic citation correction are **Not yet tested**.
+
+Paris `run_verify_0001` stopped after 14 tool calls when DeepSeek returned a JSON answer instead of the readiness signal. It never reached final-generation constraints or quotation checks; offline inspection also found an unexpected `resolution_pages` field. The controller now recognizes a complete early draft and proceeds to the existing strict-schema final request. The failed run remains unchanged; a live retry with this transition is **Not yet tested**.
+
+Next: retry Paris with the updated controller and review corrections and remaining flags; implement expert-file validation and the agreed measures; freeze settings and produce consistent E/E+V pairs for the five-plan comparison; then curate/export instruction examples. Direct model images, richer status listing, expansion, and fine-tuning are deferred.
 
 ## Appendix: supporting JSON files
 

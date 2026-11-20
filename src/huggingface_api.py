@@ -27,6 +27,14 @@ from validation import validate_profiles
 HF_ENDPOINT = "https://router.huggingface.co/v1"
 HOSTED_MARGIN_TOKENS = 8192
 
+# Router response names can differ from Hugging Face IDs. Only explicitly
+# verified aliases are accepted; matching just the basename would hide changes
+# of model owner or checkpoint. OpenRouter's weights link confirms this pair:
+# https://openrouter.ai/deepseek/deepseek-v4.1-flash-1017
+_RESPONSE_MODEL_ALIASES = {
+    "deepseek-ai/deepseek-v4.1-flash-1017": frozenset({"deepseek/deepseek-v4.1-flash-1017"}),
+}
+
 
 @dataclass(frozen=True)
 class PreparedHuggingFaceRequest:
@@ -264,6 +272,18 @@ def _returned_tool_calls(received: object, definitions: dict) -> list[dict]:
     return _validate_tool_calls(calls, definitions, require_known=True)
 
 
+def _matches_model_identity(expected: str, reported: object) -> bool:
+    """Accept the configured ID or an exact documented response alias."""
+    if not isinstance(reported, str):
+        return False
+    expected = expected.lower()
+    reported = reported.lower()
+    # Keep existing support for a routing suffix on the configured ID. Aliases
+    # are matched whole, without guessing extra suffixes or namespace rewrites.
+    return (reported.split(":")[0] == expected
+            or reported in _RESPONSE_MODEL_ALIASES.get(expected, ()))
+
+
 def _interpret_huggingface_response(
     raw: bytes, request: PreparedHuggingFaceRequest, *, status_code: int | None,
     elapsed_seconds: float, failure: str | None = None,
@@ -288,10 +308,7 @@ def _interpret_huggingface_response(
                 status_code=status_code, provider_timings_ns={}, error=failure or detail,
             )
         returned_model = payload.get("model")
-        if returned_model is not None and (
-            not isinstance(returned_model, str)
-            or returned_model.split(":")[0].lower() != request.model_name.lower()
-        ):
+        if returned_model is not None and not _matches_model_identity(request.model_name, returned_model):
             problems.append("Returned model identity differs from the selected model.")
         choices = payload.get("choices")
         if not isinstance(choices, list) or len(choices) != 1:

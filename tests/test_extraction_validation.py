@@ -35,6 +35,51 @@ def test_parsers_preserve_the_complete_answer_and_metadata(response):
     assert answer == before and data == before["plan_data"] and response == before
 
 
+def test_draft_recognition_does_not_validate_or_change_answer_fields(response):
+    response["plan_data"]["metadata"]["draft_only"] = True
+    raw = json.dumps(response)
+    assert validation.is_agent_response_draft(raw) is True
+    parsed, problems = validation.parse_agent_response_json(raw, page_count=5, stage="extractor")
+    assert parsed is None and problems
+    assert json.loads(raw) == response
+
+
+def test_empty_answer_containers_are_recognizable_but_not_acceptable():
+    raw = '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[]}}'
+    assert validation.is_agent_response_draft(raw) is True
+    assert validation.parse_agent_response_json(raw, page_count=5, stage="extractor")[1]
+
+
+@pytest.mark.parametrize("text", [
+    "", "ordinary prose", "{}", "[]", "null", '{"plan_data":{}}',
+    '{"plan_data":{},"plan_issues":{}}',
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[]},"extra":0}',
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[]}',
+    '```json\n{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[]}}\n```',
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[]}} trailing prose',
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[],"issues":[]}}',
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[{"value":NaN}]}}',
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[{"value":Infinity}]}}',
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[{"value":1e10000}]}}',
+])
+def test_ambiguous_incomplete_or_nonstandard_json_is_not_a_draft(text):
+    assert validation.is_agent_response_draft(text) is False
+
+
+@pytest.mark.parametrize("path,value", [
+    (("plan_data",), None), (("plan_issues",), []),
+    (("plan_data", "metadata"), []), (("plan_data", "actions"), {}),
+    (("plan_data", "actions"), [None]), (("plan_issues", "issues"), "issues"),
+    (("plan_issues", "issues"), [0]),
+])
+def test_draft_recognition_requires_answer_containers_and_object_records(response, path, value):
+    target = response
+    for name in path[:-1]:
+        target = target[name]
+    target[path[-1]] = value
+    assert validation.is_agent_response_draft(json.dumps(response)) is False
+
+
 @pytest.mark.parametrize("field", [
     "plan_title", "jurisdiction_name", "country", "plan_scale", "plan_type",
     "publication_year", "lead_agencies", "source_url", "date_accessed", "language",

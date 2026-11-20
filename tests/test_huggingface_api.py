@@ -19,6 +19,8 @@ from validation import validate_agent_response
 
 project = loop.project
 MODEL = "thinkingmachines/Inkling-2-Small"
+DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+DEEPSEEK_ROUTER_MODEL = "deepseek/deepseek-v4.1-flash-1017"
 TOKEN = "fictional-hf-token-for-tests"
 TOOLS = [{"type": "function", "function": {
     "name": "get_page_text", "description": "Read a page.", "parameters": {
@@ -83,6 +85,40 @@ def test_wire_request_pins_provider_preserves_schema_and_omits_secrets(settings)
     assert body["messages"][:-1] == messages
     assert (settings, messages, schema) == before
     assert TOKEN not in json.dumps(body)
+
+
+@pytest.mark.parametrize("reported", [
+    DEEPSEEK_MODEL, DEEPSEEK_MODEL.lower(), DEEPSEEK_MODEL + ":deepinfra",
+    DEEPSEEK_ROUTER_MODEL, DEEPSEEK_ROUTER_MODEL.upper(),
+])
+def test_deepseek_exact_identity_and_verified_alias_preserve_wire_and_raw_names(settings, reported):
+    settings["model"]["name"] = DEEPSEEK_MODEL
+    data = envelope('{"compatible":true}', model=reported)
+    result, sent = request(settings, data)
+    assert result.error is None and result.completion_status == "normal"
+    assert json.loads(sent[0].content)["model"] == DEEPSEEK_MODEL + ":deepinfra"
+    assert json.loads(result.raw_response)["model"] == reported
+    assert result.response_text == '{"compatible":true}'
+
+
+@pytest.mark.parametrize("reported", [
+    "deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash-1018",
+    "deepseek-ai/DeepSeek-V4.1-Flash-1018", "other-owner/deepseek-v4.1-flash-1017",
+    DEEPSEEK_ROUTER_MODEL + "-extra", DEEPSEEK_ROUTER_MODEL + ":other-host", MODEL, 123,
+])
+def test_deepseek_alias_does_not_accept_other_models_namespaces_or_checkpoints(settings, reported):
+    settings["model"]["name"] = DEEPSEEK_MODEL
+    result, sent = request(settings, envelope(model=reported))
+    assert result.completion_status == "failed" and "model identity" in result.error
+    assert len(sent) == 1 and json.loads(result.raw_response)["model"] == reported
+
+
+@pytest.mark.parametrize("expected", [MODEL, "deepseek-ai/DeepSeek-V4.1-Flash",
+                                     "deepseek-ai/DeepSeek-V4.1-Flash-1018"])
+def test_verified_alias_is_not_reused_for_other_selected_models(settings, expected):
+    settings["model"]["name"] = expected
+    result, _ = request(settings, envelope(model=DEEPSEEK_ROUTER_MODEL))
+    assert result.completion_status == "failed" and "model identity" in result.error
 
 
 def test_sending_uses_prepared_bytes_and_limits_after_callers_edit_inputs(settings, monkeypatch):

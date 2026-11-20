@@ -99,3 +99,75 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Reason:** Confirm execution and identify errors to inform verifier development.
 - **Observed result:** Both succeeded without repairs. Freetown returned 14 actions and five open issues in 4m 40s (about $0.073); Paris returned 36 actions and five open issues in 14m 16s (about $0.230). Costs are API-reported. Freetown covered the main pathways but retained citation, quotation, and evidence gaps. Paris omitted a heat-monitoring programme and showed bundled activities, incorrect detail associations, status problems, and incomplete evidence. These are preliminary findings, not formal quality scores.
 - **Remaining questions:** Independent references, formal quality assessment, and verifier performance are **Not yet tested**.
+
+### 2026-11-19 — Select DeepSeek V4.1 Flash 1017 as verifier
+
+- **Category:** Model / Code
+- **Problem:** E+V needed a different, affordable reasoning model to check and revise Inkling extractions.
+- **Decision/change:** Selected `deepseek-ai/DeepSeek-V4.1-Flash-1017` through Hugging Face, pinned to DeepInfra. Added a diagnostic model override and fictional tool round trip, plus a narrow fix accepting the documented response alias for this exact checkpoint. Inkling remains the extractor; the verifier profile and runner remain planned.
+- **Reason:** Low listed token prices and strong author-reported reasoning and agent benchmark results motivated the selection; they do not establish verification quality. See the [model card](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017) and [provider listing](https://deepinfra.com/deepseek-ai/DeepSeek-V4.1-Flash-1017/api).
+- **Observed result:** All five live compatibility checks passed: strict JSON, project schema, short output-limit probe, tool call, and result replay. API-reported cost was about $0.00083, with about 11 seconds across model requests. The focused adapter/diagnostic suite passed 123 tests. The initial alias-mismatch failure was preserved.
+- **Remaining questions:** Whole-plan capacity, acceptance of a 131,072-token output allowance, and verifier quality are **Not yet tested**. Implement the verifier and pilot it on both development plans.
+
+### 2026-11-19 — Build verification and pilot Freetown
+
+- **Category:** Code / Model
+- **Problem:** E+V needed an implemented verifier operating on an exact saved extraction.
+- **Decision/change:** Added the DeepSeek profile and prompt, validated E selection, shared API/tool execution, `run_verify_mode`, issue-continuity checks, and separate V records with preserved E/source snapshots. Selection defaults to the latest eligible successful E; retries retain their original input.
+- **Reason:** Check the whole answer, including unflagged content and possible omissions, while preserving the baseline for comparison.
+- **Observed result:** Freetown `run_verify_0001`, using `run_extract_0008`, succeeded without Python repairs in 3m 55s: 14 actions, 70 quotations, four open issues, and two claimed resolutions. Ten tool calls executed; two excess requests were denied. Preliminary review found quotation/page improvements and a new wrong-page campaign citation.
+- **Remaining questions:** Resolution claims need expert assessment; formal verifier quality and Paris verification remain pending.
+
+### 2026-11-19 — Increase tool calls and repeat Freetown verification
+
+- **Category:** Model / Code
+- **Problem:** The first verifier exhausted its tool allowance and still introduced a citation error.
+- **Decision/change:** Increased both E and V ceilings from 10 to 20 document-tool calls, refreshed remaining-budget instructions each turn, and strengthened final source-page checks. The output allowance stayed at 131,072 tokens per request.
+- **Reason:** Allow more source inspection and make remaining calls and citation requirements clear.
+- **Observed result:** `run_verify_0002` independently checked the same `run_extract_0008` and succeeded without Python repairs in 5m 40s: 14 actions, 89 quotations, five open issues, and two new claimed resolutions. All 20 calls executed with none denied. Review found useful detail/evidence corrections but three wrong-page quotations; source gaps remained.
+- **Remaining questions:** More tool calls did not eliminate citation errors. Prompt and budget changes were tested together, so their separate effects are unknown; formal quality assessment remains pending.
+
+### 2026-11-19 — Add Python quotation checks and citation correction
+
+- **Category:** Code / Research
+- **Problem:** Incorrect physical-page citations persisted despite model source-checking instructions.
+- **Decision/change:** Added quotation diagnostics and conservative citation correction after E and V. A single citation changes only when its available cited text does not match and the complete quotation uniquely matches another physical page after whitespace normalization. Raw responses, corrected candidates, and repairs are preserved; corrected answers are validated again. Ambiguous cases remain flagged.
+- **Reason:** Correct qualifying location errors consistently without additional model calls or changes to quotation wording and issue statuses.
+- **Observed result:** The focused regression suite passed 464 tests; 12 follow-up boundary/context checks passed. Read-only replay corrected all three known Freetown V2 page mismatches in memory, leaving two unmatched quotations. Historical artifacts remained unchanged; no paid requests were made for this implementation.
+- **Remaining questions:** New live runs with automatic correction are **Not yet tested**. Unmatched wording, source fidelity, and evidence adequacy still require review.
+
+### 2026-11-20 — Handle early JSON drafts before final generation
+
+- **Category:** Code
+- **Problem:** Paris `run_verify_0001` returned a JSON answer during investigation instead of the readiness signal, so execution stopped before the schema-constrained final request.
+- **Decision/change:** Added early JSON draft handling to the shared E/V controller. A normally completed, recognizable JSON draft can now end investigation; it is preserved but not accepted. The same model then receives the existing final request with tools disabled and the required schema. The two stages already existed; their transition changed while final acceptance checks stayed strict.
+- **Reason:** Handle premature answers without bypassing validation or repeatedly regenerating failed final answers.
+- **Observed result:** 328 regression tests passed. Paris `run_verify_0002`, retrying from the same `run_extract_0002`, submitted a draft on request 3 and completed final generation on request 4. It succeeded in 7m 1s with 41 actions. Quotation checks matched 63 of 121 passages, flagged 58 as unmatched, and made no page corrections. Earlier runs were preserved.
+- **Remaining questions:** Review revised actions and unmatched quotations against the PDF; successful execution does not establish quality. Early drafts can consume more tokens than a short readiness signal.
+
+### 2026-11-20 — Refine shared coding and verifier review prompts
+
+- **Category:** Model
+- **Problem:** Paris review found possible duplicate activities, incorrect date associations, quotation gaps, and an eligible activity left uncoded because quotation recovery was difficult.
+- **Decision/change:** Clarified activity-based grouping, source links for quantities and dates, faithful quotation handling, inclusion despite unresolved evidence gaps, and agreement between issues and final fields. The verifier now explicitly checks inherited evidence as well as additions and revisions.
+- **Reason:** Better represent the study's coding rules and address observed errors without adding plan-specific instructions.
+- **Observed result:** 174 focused tests and offline input checks passed; model settings and saved runs were preserved. Quality effects are **Not yet tested**.
+- **Remaining questions:** Whether subsequent outputs improve grouping, completeness, and source fidelity.
+
+### 2026-11-20 — Retry Paris verification after a connection failure
+
+- **Category:** Process / Code
+- **Problem:** Paris `run_verify_0003` failed with `peer closed connection without sending complete message body (incomplete chunked read)`.
+- **Decision/change:** Preserved the failure and started manual retry `run_verify_0004` using the same `run_extract_0002` and settings.
+- **Reason:** An upstream hosting/router timeout, service interruption, or network interruption could explain the closure; the cause is unconfirmed.
+- **Observed result:** Run `0003` stopped after 5m 13s on its first request, below the configured 30-minute timeout. HTTP 200 was received, but the body contained only whitespace; no tools ran or usable answer or token usage arrived.
+- **Remaining questions:** Retry `0004` was still running at this entry. Whether the connection failure recurs and where it originates remain unresolved.
+
+### 2026-11-20 — Refine quotation guidance and review repeated Paris verification
+
+- **Category:** Model / Research
+- **Problem:** Paris retry `0004` succeeded but split 137 draft excerpts into 361 fragments. Later review found persistent omissions and a premature issue resolution.
+- **Decision/change:** Clarified quotation continuity, context, search snippets, and preservation of checked draft excerpts in shared guidance and final instructions. Added section-by-section verifier omission review and source-supported discrepancy resolution. Agreed to keep the current prompts stable.
+- **Reason:** Address observed errors and consolidate findings before further prompt tuning.
+- **Observed result:** Paris `0004`–`0006` independently used `run_extract_0002` and unchanged model settings; all succeeded without Python repairs. After the quotation revision, `0005` kept 122 excerpts without tiny fragments. After the coverage/resolution revision, `0006` kept 130, left the courtyard discrepancy open, and added runoff-water cooling. Whitespace-normalized matches rose from 66/122 to 100/130; these are diagnostics, not evidence-adequacy scores. Runtime rose from 8m to 14m 5s and API-reported cost from about $0.066 to $0.129. Offline checks passed 174 then 126 tests, plus both-plan input checks.
+- **Remaining questions:** Omissions, bundling, quotation errors, and unstable statuses persist; `0006` described planned bathing sites as already opened. Individual repeats and differing tool activity do not isolate prompt effects. Expert reference scoring and confirmation of claimed resolutions remain pending.

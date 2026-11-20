@@ -23,6 +23,16 @@ unspecified. Verify that quotations copy continuous source passages without
 rewriting or silent omissions, and cite every physical PDF page containing their
 words. Check valid action links and issues for empty evidence or type lists.
 
+Before declaring investigation complete, perform a final source-page check for
+every evidence quotation. Locate the full continuous passage in the supplied
+page text or a returned source-tool passage, and confirm every cited physical
+PDF page from its boundary or returned page_number. Printed page labels are not
+citation positions. Use remaining tools for unresolved checks. If a passage
+cannot be located, remove that evidence item and retain the concern in a linked
+issue rather than guessing its wording or page. An empty evidence list requires
+a linked issue. Repeat this check for any quotation changed while writing the
+final answer.
+
 Return exactly one JSON object containing plan_data and plan_issues, with every required
 field and no surrounding Markdown or commentary. Python does not fill missing
 fields or make substantive corrections to your answer.

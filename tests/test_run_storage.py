@@ -77,15 +77,21 @@ def active_run(project: Path, run_record: dict) -> str:
 
 def preserve_source_input(project: Path, path: str, record: dict) -> None:
     """Represent the source snapshot published before normal model execution."""
-    destination = project / Path(path).parent / "artifacts/extractor_input.json"
+    active = json.loads((project / path).read_text())
+    relative = f"artifacts/{active['stage']}_input.json"
+    destination = project / Path(path).parent / relative
     if destination.exists():
         return
     _, preparation, pages = storage.load_plan_preparation(
         project, record["plan_id"], record["source_path"]
     )
-    storage.save_run_file(project, path, "artifacts/extractor_input.json", json.dumps({
-        "source_fingerprint": storage.preparation_text_fingerprint(preparation, pages),
-    }).encode())
+    saved_input = {"source_fingerprint": storage.preparation_text_fingerprint(preparation, pages)}
+    if active["stage"] == "verifier":
+        baseline_path = f"runs/{active['plan_id']}/{active['input_run_id']}/output.json"
+        saved_input.update(input_run_id=active["input_run_id"],
+            input_run=storage.load_run_record(project, baseline_path),
+            input_run_fingerprint=hashlib.sha256((project / baseline_path).read_bytes()).hexdigest())
+    storage.save_run_file(project, path, relative, json.dumps(saved_input).encode())
 
 
 def snapshot(root: Path) -> dict:

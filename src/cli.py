@@ -1,4 +1,4 @@
-"""Provide terminal commands for document preparation and saved extraction.
+"""Provide terminal commands for preparation, extraction, and verification.
 
 The CLI translates arguments into calls to shared modules, then displays results.
 Document identity, validation, and file-preservation rules stay in those modules.
@@ -15,11 +15,12 @@ from pathlib import Path, PurePosixPath
 import agents
 import documents
 import storage
+from quotation_diagnostics import QUOTATION_PAGE_REPORT_PATH
 
 
 # Start reading at main(): arguments choose an operation, documents.py performs
-# the work, and the small helpers below print its result. Extraction delegates
-# its model/tool lifecycle, validation and saving to agents.run_extractor.
+# the work, and the small helpers below print its result. Model commands delegate
+# their lifecycle, validation and saving to the corresponding agents.py runner.
 def main(argv: list[str] | None = None) -> int:
     """Run a command and return 0 on success or 1 when the requested operation fails.
 
@@ -46,8 +47,8 @@ def main(argv: list[str] | None = None) -> int:
             # A failed attempt can be saved successfully. Return its operation
             # status instead of treating every completed function call as success.
             return _prepare_plan(root, args.plan_id, ocr_enabled=args.ocr_enabled)
-        elif args.command == "run_extract_mode":
-            return _run_extract_mode(root, args)
+        elif args.command in {"run_extract_mode", "run_verify_mode"}:
+            return _run_model_mode(root, args)
         elif args.command == "list_plans":
             _list_plans(root)
     except (OSError, ValueError) as error:
@@ -62,7 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """Describe commands and arguments; argparse generates their help messages."""
     parser = argparse.ArgumentParser(
         prog="heat-adaptation-llm-dataset",
-        description="Register PDFs, update metadata, prepare pages, extract records, and list status.",
+        description="Register PDFs, update metadata, prepare pages, extract or verify records, and list status.",
         allow_abbrev=False,
     )
     # Explicit option names prevent a shortened flag from acquiring a different
@@ -112,31 +113,47 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run and save one hosted extractor attempt with local MCP document tools.",
         allow_abbrev=False,
     )
-    run_extract_mode_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
     run_extract_mode_parser.add_argument(
         "--source-path", required=True,
         help="Project-relative path to the exact saved preparation.json.",
     )
-    run_extract_mode_parser.add_argument("--profile", required=True, help="Exact extractor profile name in the configuration.")
-    run_extract_mode_parser.add_argument(
-        "--purpose", required=True, choices=["development", "comparison", "exploratory"],
-        help="Reason for this attempt; development/comparison must match the registered study set.",
+    _add_model_run_arguments(run_extract_mode_parser, stage="extractor")
+
+    run_verify_mode_parser = commands.add_parser(
+        "run_verify_mode",
+        help="Verify a saved extraction and preserve a separate revised answer.",
+        allow_abbrev=False,
     )
-    run_extract_mode_parser.add_argument(
-        "--retry-of-run-id",
-        help="Failed extractor run being manually retried; never resumes or overwrites it.",
+    run_verify_mode_parser.add_argument(
+        "--input-run-id",
+        help="Exact successful extractor run ID; default: latest validated, successful eligible E run. Retries retain their original E input.",
     )
-    run_extract_mode_parser.add_argument(
-        "--config-path", default="configs/profiles.json",
-        help="Project-relative profile configuration (default: configs/profiles.json).",
-    )
-    _add_project_argument(run_extract_mode_parser)
+    _add_model_run_arguments(run_verify_mode_parser, stage="verifier")
 
     list_plans_parser = commands.add_parser(
         "list_plans", help="List registered documents, saved preparation status, and links.", allow_abbrev=False
     )
     _add_project_argument(list_plans_parser)
     return parser
+
+
+def _add_model_run_arguments(parser: argparse.ArgumentParser, *, stage: str) -> None:
+    """Keep shared flags explicit and consistent across the two model commands."""
+    parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
+    parser.add_argument("--profile", required=True, help=f"Exact {stage} profile name in the configuration.")
+    parser.add_argument(
+        "--purpose", required=True, choices=["development", "comparison", "exploratory"],
+        help="Reason for this attempt; development/comparison must match the registered study set.",
+    )
+    parser.add_argument(
+        "--retry-of-run-id",
+        help=f"Failed {stage} run being manually retried; never resumes or overwrites it.",
+    )
+    parser.add_argument(
+        "--config-path", default="configs/profiles.json",
+        help="Project-relative profile configuration (default: configs/profiles.json).",
+    )
+    _add_project_argument(parser)
 
 
 def _add_project_argument(parser: argparse.ArgumentParser) -> None:
@@ -178,13 +195,16 @@ def _error_categories(error: Exception) -> list[str]:
     return sorted(categories & allowed) or ["other"]
 
 
-def _run_extract_mode(root: Path, args: argparse.Namespace) -> int:
+def _run_model_mode(root: Path, args: argparse.Namespace) -> int:
     """Bridge the synchronous terminal to one asynchronous saved run.
 
     Comparison plans stay blind even for exploratory repeats. The future expert
     workflow must establish a validated initial reference before feedback can be
     unlocked; a file merely named reference_initial.json is not sufficient.
     """
+    verifying = args.command == "run_verify_mode"
+    stage = "verifier" if verifying else "extractor"
+    operation = "Verification" if verifying else "Extraction"
     blind = True  # Fail closed until registry identity/study set can be checked.
     try:
         registry = storage.load_registry(root)
@@ -192,25 +212,28 @@ def _run_extract_mode(root: Path, args: argparse.Namespace) -> int:
         if entry is None:
             raise ValueError("Select an existing registered plan ID.")
         blind = entry["study_set"] == "comparison" or args.purpose == "comparison"
-        print(f"Starting extractor for {_display_text(args.plan_id)}.", flush=True)
+        print(f"Starting {stage} for {_display_text(args.plan_id)}.", flush=True)
         async def execute():
             try:
-                result = await agents.run_extractor(root, args.plan_id, source_path=args.source_path,
-                    profile_name=args.profile, purpose=args.purpose, retry_of_run_id=args.retry_of_run_id,
-                    config_path=args.config_path)
+                options = dict(profile_name=args.profile, purpose=args.purpose,
+                    retry_of_run_id=args.retry_of_run_id, config_path=args.config_path)
+                if verifying:
+                    result = await agents.run_verifier(root, args.plan_id, input_run_id=args.input_run_id, **options)
+                else:
+                    result = await agents.run_extractor(root, args.plan_id, source_path=args.source_path, **options)
                 return result, False
-            except agents.SavedExtractorCancelled as cancelled:
+            except agents.SavedAgentCancelled as cancelled:
                 # Catch inside asyncio.run: its SIGINT handler can otherwise
                 # convert cancellation to KeyboardInterrupt and lose this result.
                 return cancelled.result, True
         with _comparison_logging(blind):
             saved, cancelled = asyncio.run(execute())
     except KeyboardInterrupt:
-        print("Extraction interrupted; final saved status is unknown. Inspect existing run records before retrying.", file=sys.stderr)
+        print(f"{operation} interrupted; final saved status is unknown. Inspect existing run records before retrying.", file=sys.stderr)
         return 130
     except Exception as error:
         if blind:
-            print("Extraction setup failed.", file=sys.stderr)
+            print(f"{operation} setup failed.", file=sys.stderr)
             print("Error categories: " + ", ".join(_error_categories(error)), file=sys.stderr)
             print("Comparison details withheld until the reference workflow can validate an initial reference.", file=sys.stderr)
         elif isinstance(error, (OSError, ValueError)):
@@ -222,13 +245,22 @@ def _run_extract_mode(root: Path, args: argparse.Namespace) -> int:
     record = saved.record  # Last published status, even when completion could not be saved.
     print(f"Status: {record['status']}")
     print(f"Run record: {saved.record_path}")
+    if verifying:
+        print(f"Extractor input: {_display_text(record['input_run_id'])}")
     folder = PurePosixPath(saved.record_path).parent
     report = saved.execution.final_validation.report if saved.execution and saved.execution.final_validation else None
+    diagnostic = getattr(saved.execution, "quotation_diagnostics", None)
     if report is not None:
         if storage.resolve_project_path(root, f"{folder}/validation_report.json").is_file():
             print(f"Validation report: {folder}/validation_report.json")
         else:
             print("Validation report: not saved.")
+    if diagnostic is not None:
+        diagnostic_path = f"{folder}/{QUOTATION_PAGE_REPORT_PATH}"
+        if storage.resolve_project_path(root, diagnostic_path).is_file():
+            print(f"Quotation/page diagnostic: {diagnostic_path}")
+        else:
+            print("Quotation/page diagnostic: not saved.")
     if blind:
         categories = {e["category"] for e in report["remaining_errors"]} if report else set()
         if (record["error"] and not categories) or saved.persistence_error or cancelled:
@@ -238,6 +270,13 @@ def _run_extract_mode(root: Path, args: argparse.Namespace) -> int:
         print("Comparison details withheld until the reference workflow can validate an initial reference.")
     else:
         print(f"Model requests: {len(record['model_calls'])}")
+        if diagnostic is not None:
+            summary = diagnostic["summary"]
+            if summary.get("corrected", 0):
+                print(f"Quotation/page corrections: {summary['corrected']}")
+            print(f"Quotation/page flags: {summary['possible_page_mismatch']} possible page mismatches; "
+                  f"{summary['unmatched_quote']} unmatched quotations; "
+                  f"{summary['unconfirmed_page_span']} unconfirmed spans.")
         if record["tool_log_path"] is not None:
             print(f"Tool log: {record['tool_log_path']}")
         if report is not None:
@@ -250,7 +289,7 @@ def _run_extract_mode(root: Path, args: argparse.Namespace) -> int:
         if saved.persistence_error:
             print(f"Saving error: {saved.persistence_error}", file=sys.stderr)
         if cancelled:
-            print("Extraction cancelled; available evidence was retained where saving succeeded.", file=sys.stderr)
+            print(f"{operation} cancelled; available evidence was retained where saving succeeded.", file=sys.stderr)
     # A valid answer in memory is not a saved success. Running/failed records,
     # persistence failures and cancellation always produce a nonzero exit code.
     return 130 if cancelled else (0 if record["status"] == "succeeded" and not saved.persistence_error else 1)

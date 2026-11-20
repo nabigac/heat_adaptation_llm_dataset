@@ -2,7 +2,7 @@
 
 this research project examines how heat adaptation experts and open-weight large language models (LLMs) can be paired to build an extraction workflow. it will share practical lessons from the expert judgments, model outputs, and revisions involved in developing that workflow. the project uses open-weight models through hugging face.
 
-the workflow extracts heat adaptation actions from government and public agency plans into structured records with supporting quotations. the study explores two configurations: **E** (extraction) and **E+V** (extraction + verification). **E+V** begins with that exact saved extraction, checked and revised by a different hosted open-weight model. **inkling 2 small** is the extractor in both configurations; the verifier model remains to be selected and implemented. expert-curated answers will also support a pilot instruction dataset for possible future fine-tuning.
+the workflow extracts heat adaptation actions from government and public agency plans into structured records with supporting quotations. the study explores two configurations: **E** (extraction) and **E+V** (extraction + verification). **inkling 2 small** is the extractor in both configurations. **deepseek v4.1 flash 1017** checks and revises that exact saved extraction. both models use hugging face with deepinfra as the fixed host; formal assessment of verification quality remains pending. expert-curated answers will also support a pilot instruction dataset for possible future fine-tuning.
 
 for setup and commands, see [getting started](#getting-started) and the [command line interface](#command-line-interface).
 
@@ -31,13 +31,15 @@ issues retain stable IDs and origins through verification and curation. expert f
 | stage | procedure and saved result | status |
 | --- | --- | --- |
 | 1. registration and preparation | the original PDF, collection metadata, page text, and preparation problems are preserved. native text extraction and selective optical character recognition (OCR) run locally. | implemented. |
-| 2. extraction (E) | inkling 2 small receives the whole prepared plan through the hugging face API, pinned to deepinfra. its answer, issues, settings, tool activity, and execution records are saved. | implemented; compatibility checks and a freetown development extraction succeeded. |
-| 3. verification (E+V) | a different hosted model through hugging face will check the latest validated, successful E output unless another run is specified, including unflagged content and possible omissions. the chosen E run ID and full revised answer will be saved. | planned; verifier model not yet selected. |
+| 2. extraction (E) | inkling 2 small receives the whole prepared plan through the hugging face API, pinned to deepinfra. its answer, issues, settings, tool activity, and execution records are saved. | implemented; freetown and paris development extractions succeeded. |
+| 3. verification (E+V) | deepseek v4.1 flash 1017 through hugging face/deepinfra checks the latest validated, successful E output unless another run is specified, including unflagged content and possible omissions. the chosen E run ID and full revised answer are saved. | implemented; freetown pilots completed at 10 and 20 tool calls. paris retry pending. |
 | 4. independent reference preparation | after successful E and V runs, experts will code the original PDF before viewing model outputs. this independent initial reference will be preserved. | planned. |
 | 5. expert assessment | experts will match activities by meaning, review possible reference corrections, and assess both outputs against one shared final reference. revisions will record reasons and source evidence. | planned. |
 | 6. analysis and dataset assembly | lessons about pairing experts and LLMs will be synthesized, paired outputs compared, and instruction examples assembled from expert-curated answers and their supporting inputs. | planned. |
 
-JSON validation is implemented for extracted and expert-curated answers, including issue links and expert resolutions. source accuracy and completeness require expert assessment. model context protocol (MCP) connects the extractor to local tools for page text, quotation lookup, and OCR.
+JSON validation is implemented for extracted and expert-curated answers, including issue links and expert resolutions. source accuracy and completeness require expert assessment. model context protocol (MCP) connects both model stages to local tools for page text, quotation lookup, and OCR.
+
+after E and V, python checks quotation locations against prepared text and saved OCR. it corrects only qualifying page citations, preserves quotation wording, and validates the corrected candidate again. raw responses stay unchanged. the terminal prints corrections and remaining flags; `artifacts/quotation_page_report.json` records details. see the [correction rules](IMPLEMENTATION.MD#automatic-quotationpage-checks-and-corrections). this adds no API calls; live runs with this new step remain untested.
 
 see the [development checkpoint](IMPLEMENTATION.MD#current-development-checkpoint) for engineering evidence and next steps.
 
@@ -93,9 +95,19 @@ uv run --locked python -m huggingface_check
 
 this defaults to `inkling2_small_hf_extractor` and makes up to three **paid requests** using fictional inputs. reports are saved under `artifacts/huggingface_checks/`. an already validated setup does not need this check repeated for each plan. see the [diagnostic details](IMPLEMENTATION.MD#compatibility-diagnostics) for checks, limits, and interpretation.
 
+to check the selected deepseek verifier through the same host without changing the extractor profile:
+
+```bash
+uv run --locked python -m huggingface_check \
+  --model deepseek-ai/DeepSeek-V4.1-Flash-1017 \
+  --check-tools
+```
+
+`--model` applies only to the diagnostic. `--check-tools` adds a fictional tool-call round trip, for up to five paid requests in total. deepseek passed all five checks. full-plan quality requires separate assessment; see the [development checkpoint](IMPLEMENTATION.MD#current-development-checkpoint) for pilot results.
+
 ## command line interface
 
-the usual workflow is `add_plan` → `prepare_plan` → `run_extract_mode`. use `list_plans` to find document IDs and preparation paths, and `update_plan_data` to correct collection metadata. commands use the current project directory unless `--project-root` is supplied.
+the usual workflow is `add_plan` → `prepare_plan` → `run_extract_mode` → `run_verify_mode`. use `list_plans` to find document IDs and preparation paths, and `update_plan_data` to correct collection metadata. commands use the current project directory unless `--project-root` is supplied.
 
 ### add_plan: register a new PDF
 
@@ -137,13 +149,26 @@ uv run --locked heat-adaptation-llm-dataset run_extract_mode plan_0001 \
   --purpose development
 ```
 
-inkling receives the prepared plan and can request local document tools. python validates its JSON answer before accepting the run. the terminal prints the saved status and paths. each attempt creates a new folder under `runs/<plan_id>/run_extract_NNNN/`, containing `output.json`, responses, and available tool/validation reports. source accuracy still requires expert review.
+inkling receives the prepared plan and can request local document tools. after investigation, python requests a separate final JSON answer under the schema; an early JSON draft is preserved and cannot be accepted directly. the terminal prints the saved status and paths. each attempt creates a new folder under `runs/<plan_id>/run_extract_NNNN/`, containing `output.json`, responses, and available tool/validation reports. source accuracy still requires expert review.
 
 - **purpose:** use `development` for development plans. `exploratory` labels additional investigations outside the formal comparison. formal `comparison` execution remains disabled; comparison-plan feedback stays restricted pending the reference workflow.
 - **retry:** after fixing a failure, repeat the command with `--retry-of-run-id run_extract_0001`, using the actual failed run ID. earlier attempts are preserved; retries are manual.
 - **cancel:** press ctrl+c to retain available evidence and stop. if a record remains `running`, confirm the process has stopped and inspect the files before recovery.
 
-profiles define model settings independently of study set and purpose. see [model configuration and request checks](IMPLEMENTATION.MD#4-hugging-face-configuration-and-requests) and [saved execution details](IMPLEMENTATION.MD#saved-extractor-execution) for limits, schemas, capacity estimates, and failure handling.
+profiles define model settings independently of study set and purpose. each stage allows up to 20 document-tool calls and can finish earlier. see [model configuration and request checks](IMPLEMENTATION.MD#4-hugging-face-configuration-and-requests) and [saved execution details](IMPLEMENTATION.MD#saved-execution) for limits, schemas, capacity estimates, and failure handling.
+
+### run_verify_mode: verify a saved extraction
+
+```bash
+uv run --locked heat-adaptation-llm-dataset run_verify_mode plan_0001 \
+  --profile deepseek_v4_1_flash_1017_hf_verifier \
+  --purpose development
+```
+
+deepseek receives the latest validated, successful eligible extraction and its exact prepared source. the terminal prints the selected E run ID and saved status. the full revised answer and execution evidence are saved separately under `runs/<plan_id>/run_verify_NNNN/`; the original extraction is preserved. purpose and cancellation follow the extraction rules above. the same final-generation, validation, and quotation checks apply before saving an accepted answer.
+
+- **select an extraction:** add `--input-run-id run_extract_0008`, using the actual successful E run ID.
+- **retry verification:** add `--retry-of-run-id run_verify_0001`, using the actual failed V run ID. the new attempt keeps that verifier's original E input, even if a newer extraction exists.
 
 ### list_plans: find registered plans and preparation paths
 
@@ -168,6 +193,7 @@ editable fields are `--title`, `--source-url`, `--date-accessed`, and `--study-s
 ```bash
 uv run --locked heat-adaptation-llm-dataset --help
 uv run --locked heat-adaptation-llm-dataset run_extract_mode --help
+uv run --locked heat-adaptation-llm-dataset run_verify_mode --help
 uv run --locked pytest -q
 ```
 

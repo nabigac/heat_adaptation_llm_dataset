@@ -181,6 +181,9 @@ def test_readiness_then_schema_final_preserves_inputs_and_closes_client(project,
     assert "response_format" not in scripted.requests[0] and len(scripted.requests[0]["tools"]) == 2
     assert scripted.requests[1]["response_format"]["json_schema"]["schema"] == hf.prepare_deepinfra_response_schema(result.extractor_input.response_format)
     assert "tools" not in scripted.requests[1]
+    assert "2 total; 0 submitted; 2 remaining" in scripted.requests[0]["messages"][1]["content"]
+    assert any("Final source-page check: compare every evidence quotation" in m["content"]
+               for m in scripted.requests[-1]["messages"] if m["role"] == "system")
     assert result.messages[0] == result.extractor_input.messages[0]
     assert result.extractor_input.messages[-1] in result.messages
     assert result.tool_calls_started == 0 and result.tool_log == []
@@ -202,17 +205,61 @@ def test_automatic_tool_result_returns_in_history_before_readiness_and_final(pro
     assert result.tool_log[0]["result"]["structuredContent"]["page_number"] == 1
 
 
-def test_budget_limits_actual_executions_and_denied_batch_calls_receive_error_results(project, scripted, run_record):
-    configure(project, max_tool_calls=1)
-    scripted.replies = [message(calls=[call(identifier="one"), call(2, identifier="two")]), message(answer(run_record))]
+@pytest.mark.parametrize("use_tool_first", [False, True])
+def test_early_json_draft_transitions_to_one_strict_final_request(project, scripted, run_record, use_tool_first):
+    draft = json.loads(answer(run_record))
+    draft["plan_data"]["metadata"]["draft_only"] = True
+    raw_draft = json.dumps(draft)
+    scripted.replies = ([message(calls=[call()])] if use_tool_first else []) + [
+        message(raw_draft), message(answer(run_record))]
+    result = run(project, scripted)
+    assert result.status == "succeeded" and result.final_validation.report["valid"] is True
+    assert result.final_validation.response["plan_data"] == run_record["plan_data"]
+    assert [attempt.phase for attempt in result.model_attempts] == ["tool_use"] * (1 + use_tool_first) + ["final"]
+    assert len(scripted.requests) == 2 + use_tool_first
+    assert result.tool_calls_started == use_tool_first
+    assert "tools" not in scripted.requests[-1] and scripted.requests[-1]["response_format"]["type"] == "json_schema"
+    assert any(m["role"] == "assistant" and m["content"] == raw_draft for m in scripted.requests[-1]["messages"])
+    assert any("unvalidated JSON draft" in m["content"] for m in scripted.requests[-1]["messages"] if m["role"] == "system")
+    assert result.final_validation.report["raw_response_path"].endswith(f"response_{2 + use_tool_first:02d}.txt")
+    assert scripted.client.closed
+
+
+def test_tool_calls_still_run_when_the_same_message_contains_a_draft(project, scripted, run_record):
+    scripted.replies = [message(answer(run_record), calls=[call()]),
+                        message(agents.FINAL_READY_SIGNAL), message(answer(run_record))]
     result = run(project, scripted)
     assert result.status == "succeeded" and result.tool_calls_started == 1
-    assert len(scripted.client.calls) == 1 and len(result.tool_log) == 2
-    assert result.tool_log[1]["result"] is None and "not executed" in result.tool_log[1]["error"]
+    assert len(scripted.requests) == 3 and scripted.client.calls
+    assert "tools" in scripted.requests[1]
+
+
+@pytest.mark.parametrize("bad_final", ["not JSON", '{"plan_data":{},"plan_issues":{"issues":[]}}'])
+def test_early_draft_cannot_replace_a_failed_final_answer(project, scripted, run_record, bad_final):
+    scripted.replies = [message(answer(run_record)), message(bad_final)]
+    result = run(project, scripted)
+    assert result.status == "failed" and result.final_validation.report["valid"] is False
+    assert result.final_validation.response is None and len(scripted.requests) == 2
+    assert result.final_validation.raw_text == bad_final
+
+
+@pytest.mark.parametrize("limit", [1, 20])
+def test_budget_limits_actual_executions_and_denied_batch_calls_receive_error_results(project, scripted, run_record, limit):
+    # The larger conversation needs headroom in this fictional test profile.
+    configure(project, max_tool_calls=limit, context_limit=131072)
+    calls = [call(identifier=f"request_{n}") for n in range(limit + 1)]
+    scripted.replies = [message(calls=calls), message(answer(run_record))]
+    result = run(project, scripted)
+    assert result.status == "succeeded" and result.tool_calls_started == limit
+    assert len(scripted.client.calls) == limit and len(result.tool_log) == limit + 1
+    assert result.tool_log[-1]["result"] is None and "not executed" in result.tool_log[-1]["error"]
     returned = [m for m in scripted.requests[-1]["messages"] if m["role"] == "tool"]
-    assert [m["tool_call_id"] for m in returned] == ["one", "two"]
-    assert json.loads(returned[1]["content"])["is_error"] is True
+    assert [m["tool_call_id"] for m in returned] == [call["id"] for call in calls]
+    assert json.loads(returned[-1]["content"])["is_error"] is True
     assert any("budget is exhausted" in m["content"] for m in scripted.requests[-1]["messages"])
+    assert f"{limit} total; {limit} submitted; 0 remaining" in scripted.requests[-1]["messages"][1]["content"]
+    # Updating the current allowance must not change earlier prepared requests.
+    assert f"{limit} total; 0 submitted; {limit} remaining" in scripted.requests[0]["messages"][1]["content"]
     assert [a.phase for a in result.model_attempts] == ["tool_use", "final"]
     assert not validation.validate_tool_log(result.tool_log)
 
@@ -225,6 +272,9 @@ def test_multiple_calls_and_rounds_preserve_call_order(project, scripted, run_re
     assert result.status == "succeeded" and result.tool_calls_started == 3
     assert [name for name, _ in scripted.client.calls] == ["get_page_text", "find_quote", "get_page_text"]
     assert len(result.model_attempts) == 3
+    assert "3 total; 0 submitted; 3 remaining" in scripted.requests[0]["messages"][1]["content"]
+    assert "3 total; 2 submitted; 1 remaining" in scripted.requests[1]["messages"][1]["content"]
+    assert "3 total; 3 submitted; 0 remaining" in scripted.requests[2]["messages"][1]["content"]
 
 
 def test_recoverable_mcp_error_is_logged_and_returned_to_model(project, scripted, run_record):
@@ -235,6 +285,7 @@ def test_recoverable_mcp_error_is_logged_and_returned_to_model(project, scripted
     assert result.tool_log[0]["error"] == "Page is out of range."
     payload = json.loads(next(m for m in scripted.requests[1]["messages"] if m["role"] == "tool")["content"])
     assert payload == {"is_error": True, "messages": ["Page is out of range."]}
+    assert "2 total; 1 submitted; 1 remaining" in scripted.requests[1]["messages"][1]["content"]
 
 
 def test_nontext_result_is_preserved_but_not_forwarded_as_untested_image_input(project, scripted):
@@ -304,8 +355,10 @@ def test_model_output_truncation_stops_immediately_and_retains_available_bytes(p
     assert result.final_validation is None and scripted.client.closed
 
 
-def test_unconfirmed_tool_phase_completion_cannot_trigger_execution(project, scripted):
-    scripted.replies = [message(agents.FINAL_READY_SIGNAL, finish="unknown")]
+@pytest.mark.parametrize("content", [agents.FINAL_READY_SIGNAL,
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[]}}'])
+def test_unconfirmed_tool_phase_completion_cannot_trigger_execution(project, scripted, content):
+    scripted.replies = [message(content, finish="unknown")]
     result = run(project, scripted)
     assert result.status == "failed" and "completion reason" in result.error
     assert scripted.client.calls == [] and len(scripted.requests) == 1

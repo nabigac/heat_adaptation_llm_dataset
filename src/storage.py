@@ -305,7 +305,7 @@ def _check_stored_run(
 ) -> None:
     # A trusted page count comes from the exact preserved preparation. The model
     # cannot choose its own count to make out-of-range evidence appear valid.
-    preparation = _check_run_source(project_root, record)
+    preparation, saved_input = _check_run_source(project_root, record)
     problems = validate_run_record(record, page_count=preparation["page_count"])
     if problems:
         raise RunValidationError(problems)
@@ -321,9 +321,11 @@ def _check_stored_run(
     problems = validate_run_links(record, **targets)
     if problems:
         raise RunValidationError(problems)
+    if record["stage"] == "verifier" and saved_input is not None:
+        _check_verifier_snapshot(project_root, record, saved_input, targets["input_run"])
 
 
-def _check_run_source(project_root: Path | str, record: dict) -> dict:
+def _check_run_source(project_root: Path | str, record: dict) -> tuple[dict, dict | None]:
     """Use the preserved preparation, allowing later collection metadata corrections."""
     try:
         entry, preparation, pages = load_plan_preparation(
@@ -333,8 +335,9 @@ def _check_run_source(project_root: Path | str, record: dict) -> dict:
         # Reuse the same source checks as input assembly, while retaining the
         # run API's exception type and its structured error locations.
         raise RunValidationError(error.problems) from error
-    input_path = f"runs/{record['plan_id']}/{record['run_id']}/artifacts/extractor_input.json"
+    input_path = f"runs/{record['plan_id']}/{record['run_id']}/artifacts/{record['stage']}_input.json"
     input_file = resolve_project_path(project_root, input_path)
+    saved_input = None
     if input_file.exists():
         try:
             saved_input = json.loads(input_file.read_text(encoding="utf-8"))
@@ -351,7 +354,7 @@ def _check_run_source(project_root: Path | str, record: dict) -> dict:
         # retain the snapshot that ties their answer to the exact prepared text.
         _run_problem(
             input_path,
-            "A successful run requires its preserved extractor input."
+            f"A successful run requires its preserved {record['stage']} input."
         )
     if record["purpose"] in {"development", "comparison"} and entry["study_set"] != record["purpose"]:
         _run_problem("$.purpose", "Development/comparison work must match the plan's study-set assignment.")
@@ -364,7 +367,17 @@ def _check_run_source(project_root: Path | str, record: dict) -> dict:
                     f"$.plan_data.metadata.{field}",
                     "Collection values must match the selected preparation snapshot."
                 )
-    return preparation
+    return preparation, saved_input
+
+
+def _check_verifier_snapshot(project_root: Path | str, record: dict, saved_input: dict, baseline: dict) -> None:
+    """Tie V's preserved input to the exact E bytes, not only a mutable path."""
+    baseline_path = f"runs/{record['plan_id']}/{record['input_run_id']}/output.json"
+    fingerprint = hashlib.sha256(resolve_project_path(project_root, baseline_path).read_bytes()).hexdigest()
+    if (saved_input.get("input_run_id") != record["input_run_id"]
+            or saved_input.get("input_run") != baseline
+            or saved_input.get("input_run_fingerprint") != fingerprint):
+        _run_problem(baseline_path, "The extractor differs from the verifier's preserved input snapshot.")
 
 
 def preparation_text_fingerprint(preparation: dict, pages: list[dict]) -> str:

@@ -30,7 +30,33 @@
         "prompts/field_definitions.md",
         "prompts/extractor.md"
       ],
-      "max_tool_calls": 10,
+      "max_tool_calls": 20,
+      "model_timeout_seconds": 1800,
+      "image_input_enabled": false
+    },
+    {
+      "name": "deepseek_v4_1_flash_1017_hf_verifier",
+      "stage": "verifier",
+      "model": {
+        "name": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        "execution_mode": "hosted_api",
+        "endpoint": "https://router.huggingface.co/v1",
+        "api_service": "huggingface",
+        "provider": "deepinfra"
+      },
+      "generation": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "max_output_tokens": 131072
+      },
+      "context_limit": 1048576,
+      "prompt_paths": [
+        "prompts/shared_coding.md",
+        "prompts/field_definitions.md",
+        "prompts/verifier.md"
+      ],
+      "max_tool_calls": 20,
       "model_timeout_seconds": 1800,
       "image_input_enabled": false
     }

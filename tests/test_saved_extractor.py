@@ -84,6 +84,12 @@ def test_success_is_saved_incrementally_and_loads_with_all_evidence(project, scr
     assert b"".join(path.read_bytes() for path in chunks) == (expected / "responses/response_01.json").read_bytes()
     report = json.loads((expected / "validation_report.json").read_text())
     assert report["raw_response_path"] == f"runs/{loop.PLAN_ID}/run_extract_0001/responses/response_03.txt"
+    diagnostic = json.loads((expected / agents.QUOTATION_PAGE_REPORT_PATH).read_text())
+    assert diagnostic == saved.execution.quotation_diagnostics
+    assert diagnostic["source_path"] == loop.SOURCE
+    assert diagnostic["source_fingerprint"] == saved.execution.extractor_input.source_fingerprint
+    assert diagnostic["summary"]["checked"] == diagnostic["summary"]["matched"] == 1
+    assert diagnostic["findings"] == []
     assert saved.record["settings"]["prompt_texts"] == saved.execution.extractor_input.settings["prompt_texts"]
 
 
@@ -99,6 +105,72 @@ def test_permitted_repairs_preserve_raw_assistant_and_candidate_separately(proje
     assert len(scripted.requests) == 2
 
 
+def test_early_draft_is_preserved_but_only_the_strict_final_answer_is_saved(
+    project, scripted, facts, run_record,
+):
+    draft = json.loads(loop.answer(run_record))
+    draft["plan_data"]["metadata"]["draft_only"] = True
+    raw_draft = json.dumps(draft)
+    scripted.replies = [loop.message(raw_draft), loop.message(loop.answer(run_record))]
+    result = execute(project, scripted)
+    root = folder(project, result)
+    assert result.record["status"] == "succeeded" and result.record["plan_data"] == run_record["plan_data"]
+    assert (root / "responses/response_01.txt").read_text() == raw_draft
+    first_request = json.loads((root / "responses/attempt_01/request.json").read_text())
+    final_request = json.loads((root / "responses/attempt_02/request.json").read_text())
+    assert first_request["phase"] == "tool_use" and "response_format" not in first_request["body"]
+    assert final_request["phase"] == "final" and final_request["body"]["response_format"]["type"] == "json_schema"
+    assert "tools" not in final_request["body"]
+    assert any(m["role"] == "assistant" and m["content"] == raw_draft for m in final_request["body"]["messages"])
+    report = json.loads((root / "validation_report.json").read_text())
+    assert report["raw_response_path"].endswith("responses/response_02.txt")
+    assert report["valid"] is True and report["repairs"] == []
+    assert json.loads((root / agents.QUOTATION_PAGE_REPORT_PATH).read_text())["summary"]["checked"] == 1
+    assert storage.load_run_record(project, result.record_path) == result.record
+    assert len(scripted.requests) == len(result.record["model_calls"]) == 2
+
+
+def test_format_and_page_corrections_share_the_audit_but_preserve_the_raw_answer(
+    project, scripted, facts, run_record,
+):
+    pages_path = project / loop.SOURCE.replace("preparation.json", "pages.json")
+    pages = json.loads(pages_path.read_text())
+    pages[1]["text"] = "Other activity on page 2."
+    pages_path.write_text(json.dumps(pages))
+    response = json.loads(loop.answer(run_record))
+    response["plan_data"]["actions"][0]["evidence"][0]["page_numbers"] = [2]
+    raw = "```json\n" + json.dumps(response) + "\n```"
+    scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message(raw)]
+    result = execute(project, scripted)
+    assert result.record["status"] == "succeeded"
+    root = folder(project, result)
+    assert (root / "responses/response_02.txt").read_text() == raw
+    candidate = json.loads((root / "responses/repaired_final.txt").read_text())
+    assert candidate["plan_data"] == result.record["plan_data"]
+    assert candidate["plan_data"]["actions"][0]["evidence"][0]["page_numbers"] == [1]
+    report = json.loads((root / "validation_report.json").read_text())
+    assert [change["rule"] for change in report["repairs"]] == ["json_code_fence", "quotation_page_number"]
+    assert report["valid"] is True and report["initial_errors"] and report["remaining_errors"] == []
+    assert storage.load_run_record(project, result.record_path) == result.record
+    assert len(scripted.requests) == 2
+
+
+@pytest.mark.parametrize("bad_page", [0, 99])
+def test_invalid_page_range_fails_before_source_based_correction(
+    project, scripted, facts, run_record, bad_page,
+):
+    response = json.loads(loop.answer(run_record))
+    response["plan_data"]["actions"][0]["evidence"][0]["page_numbers"] = [bad_page]
+    scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message(json.dumps(response))]
+    result = execute(project, scripted)
+    assert result.record["status"] == "failed" and result.record["plan_data"] is None
+    assert result.execution.quotation_diagnostics is None
+    report = json.loads((folder(project, result) / "validation_report.json").read_text())
+    assert report["valid"] is False and report["repairs"] == []
+    assert not (folder(project, result) / "responses/repaired_final.txt").exists()
+    assert len(scripted.requests) == 2
+
+
 @pytest.mark.parametrize("failure", ["invalid-final", "truncated-final", "model-connection"])
 def test_failed_attempts_save_available_evidence_without_retry(project, scripted, facts, run_record, failure):
     if failure == "model-connection":
@@ -110,6 +182,7 @@ def test_failed_attempts_save_available_evidence_without_retry(project, scripted
     saved = execute(project, scripted)
     assert saved.persistence_error is None and saved.record["status"] == "failed"
     assert saved.record["plan_data"] is None and saved.record["plan_issues"] is None
+    assert saved.execution.quotation_diagnostics is None
     assert storage.load_run_record(project, saved.record_path) == saved.record
     assert len(scripted.requests) == (1 if failure == "model-connection" else 2)
     assert len(saved.record["model_calls"]) == len(scripted.requests)

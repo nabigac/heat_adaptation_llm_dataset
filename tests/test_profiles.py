@@ -1,7 +1,7 @@
 """Check profile selection and exact prompt snapshots without starting models.
 
-All configurable settings in fixtures are fictional. The repository's starter
-profile is also loaded as a file-format check, not a model capability test.
+All configurable settings in fixtures are fictional. The repository's profiles
+are also loaded as file-format checks, not model capability tests.
 """
 # The fixtures create a small temporary project. Tests modify only its files,
 # then check user-visible loading failures and preservation of loaded settings.
@@ -380,10 +380,14 @@ def test_missing_shared_schema_is_a_visible_setup_failure(configuration: dict, t
     assert problems and problems[0].category == "other"
 
 
-def test_repository_starter_profile_loads_but_does_not_claim_environment_observations() -> None:
+@pytest.mark.parametrize("profile_name,stage", [
+    ("inkling2_small_hf_extractor", "extractor"),
+    ("deepseek_v4_1_flash_1017_hf_verifier", "verifier"),
+])
+def test_repository_profiles_load_but_do_not_claim_environment_observations(profile_name, stage) -> None:
     root = Path(__file__).resolve().parents[1]
-    settings = agents.load_profile(root, "inkling2_small_hf_extractor", stage="extractor")
-    assert settings["stage"] == "extractor"
+    settings = agents.load_profile(root, profile_name, stage=stage)
+    assert settings["stage"] == stage
     assert len(settings["prompt_paths"]) == len(settings["prompt_texts"]) == 3
     assert all(text.strip() for text in settings["prompt_texts"])
     assert settings["image_input_enabled"] is False

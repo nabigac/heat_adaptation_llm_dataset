@@ -232,7 +232,7 @@ def validate_run_links(
                 record["plan_issues"] is not None
                 and input_run["plan_issues"] is not None
             ):
-                problems.extend(_validate_verifier_issue_continuity(
+                problems.extend(validate_verifier_issue_continuity(
                     record["plan_issues"], input_run["plan_issues"],
                 ))
     if record["retry_of_run_id"] is not None:
@@ -251,10 +251,14 @@ def validate_run_links(
     return problems
 
 
-def _validate_verifier_issue_continuity(
+def validate_verifier_issue_continuity(
     plan_issues: dict, baseline: dict
 ) -> list[ValidationProblem]:
-    """Keep provenance and claimed resolutions tied to the exact saved E answer."""
+    """Check issue provenance against E after both issue lists pass field checks.
+
+    Shared by final-response checking and saved-run loading. These checks retain
+    identities and claimed-resolution provenance; experts judge semantic support.
+    """
     baseline_issues = {issue["issue_id"]: issue for issue in baseline["issues"]}
     retained_issue_ids = {issue["issue_id"] for issue in plan_issues["issues"]}
     issues_location = "$.plan_issues.issues"
@@ -706,6 +710,35 @@ def parse_agent_response_json(
         text, lambda data: validate_agent_response(
             data, page_count=page_count, stage=stage
         )
+    )
+
+
+def is_agent_response_draft(text: str) -> bool:
+    """Recognize a complete JSON draft for the investigation-to-final transition.
+
+    Require strict, finite JSON with the expected answer containers and object
+    records. This is NOT acceptance validation: metadata/action/issue fields may
+    still be missing or invalid. The runner must request a separate final answer
+    under the full schema and validate it. No repairs or file operations occur.
+    """
+    try:
+        data = _decode_json(text)
+        if _nonfinite_json_numbers(data):
+            return False
+    except (ValueError, RecursionError):
+        return False
+    if not isinstance(data, dict) or set(data) != {"plan_data", "plan_issues"}:
+        return False
+    plan_data, plan_issues = data["plan_data"], data["plan_issues"]
+    if (not isinstance(plan_data, dict) or set(plan_data) != {"metadata", "actions"}
+            or not isinstance(plan_issues, dict) or set(plan_issues) != {"issues"}):
+        return False
+    return (
+        isinstance(plan_data["metadata"], dict)
+        and isinstance(plan_data["actions"], list)
+        and all(isinstance(action, dict) for action in plan_data["actions"])
+        and isinstance(plan_issues["issues"], list)
+        and all(isinstance(issue, dict) for issue in plan_issues["issues"])
     )
 
 

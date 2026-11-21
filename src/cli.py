@@ -1,4 +1,4 @@
-"""Provide terminal commands for preparation, extraction, and verification.
+"""Provide terminal commands for document processing and expert reference setup.
 
 The CLI translates arguments into calls to shared modules, then displays results.
 Document identity, validation, and file-preservation rules stay in those modules.
@@ -14,11 +14,12 @@ from pathlib import Path, PurePosixPath
 
 import agents
 import documents
+import expert_files
 import storage
 from quotation_diagnostics import QUOTATION_PAGE_REPORT_PATH
 
 
-# Start reading at main(): arguments choose an operation, documents.py performs
+# Start reading at main(): arguments choose an operation, workflow modules perform
 # the work, and the small helpers below print its result. Model commands delegate
 # their lifecycle, validation and saving to the corresponding agents.py runner.
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +52,10 @@ def main(argv: list[str] | None = None) -> int:
             return _run_model_mode(root, args)
         elif args.command == "list_plans":
             _list_plans(root)
+        elif args.command == "create_expert_reference":
+            _create_expert_reference(root, args)
+        elif args.command == "validate_expert_reference":
+            _validate_expert_reference(root, args.plan_id)
     except (OSError, ValueError) as error:
         # Expected file and data failures become readable terminal messages.
         # Unexpected programming errors still raise, making them visible in development.
@@ -63,7 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """Describe commands and arguments; argparse generates their help messages."""
     parser = argparse.ArgumentParser(
         prog="heat-adaptation-llm-dataset",
-        description="Register PDFs, update metadata, prepare pages, extract or verify records, and list status.",
+        description="Register and prepare PDFs, extract or verify records, create or check expert forms, and list status.",
         allow_abbrev=False,
     )
     # Explicit option names prevent a shortened flag from acquiring a different
@@ -134,6 +139,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "list_plans", help="List registered documents, saved preparation status, and links.", allow_abbrev=False
     )
     _add_project_argument(list_plans_parser)
+
+    reference_parser = commands.add_parser(
+        "create_expert_reference",
+        help="Create an empty expert reference form from registered collection metadata.",
+        allow_abbrev=False,
+    )
+    reference_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
+    reference_parser.add_argument(
+        "--prepared-by", action="append", required=True,
+        help="Expert name or study ID; repeat for multiple experts.",
+    )
+    _add_project_argument(reference_parser)
+
+    validate_reference_parser = commands.add_parser(
+        "validate_expert_reference",
+        help="Check an expert form against its registered source and physical PDF pages.",
+        allow_abbrev=False,
+    )
+    validate_reference_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
+    _add_project_argument(validate_reference_parser)
     return parser
 
 
@@ -371,6 +396,27 @@ def _update_plan_data(root: Path, args: argparse.Namespace) -> None:
     print("Registry: data/registry/plans.json")
 
 
+def _create_expert_reference(root: Path, args: argparse.Namespace) -> None:
+    """Create a form without model calls, then show where the expert can edit it."""
+    path = expert_files.create_expert_reference(
+        root, args.plan_id, prepared_by=args.prepared_by
+    )
+    print(f"Expert reference: {path}")
+    print("Actions are empty; complete the form from the original PDF.")
+    print("For comparison plans, complete it before viewing model outputs.")
+
+
+def _validate_expert_reference(root: Path, plan_id: str) -> None:
+    """Report checks without marking the expert's scientific assessment complete."""
+    reference = expert_files.validate_expert_reference(root, plan_id)
+    actions = reference["plan_data"]["actions"]
+    print(f"Expert reference validation passed for {_display_text(plan_id)}.")
+    print(f"Actions: {len(actions)}")
+    if not actions:
+        print("Actions are empty; the form still needs expert completion.")
+    print("Checks cover structure, source links, and page bounds. Experts still assess accuracy and completeness.")
+
+
 def _list_plans(root: Path) -> None:
     """Display records without creating files or inventing preparation readiness."""
     entries = documents.list_documents(root)
@@ -397,9 +443,11 @@ def _display_text(value: str) -> str:
 def _display_error(error: Exception) -> None:
     """Send problems and any recovery notes to stderr, separate from normal output."""
     if isinstance(error, (storage.RegistryValidationError, storage.PreparationValidationError,
-                          storage.RunValidationError, agents.ProfileValidationError, agents.ExtractorInputError)):
+                          storage.RunValidationError, storage.ExpertReferenceValidationError,
+                          agents.ProfileValidationError, agents.ExtractorInputError)):
         label = ("Registry" if isinstance(error, storage.RegistryValidationError) else
-                 "Preparation" if isinstance(error, storage.PreparationValidationError) else "Extraction")
+                 "Preparation" if isinstance(error, storage.PreparationValidationError) else
+                 "Expert reference" if isinstance(error, storage.ExpertReferenceValidationError) else "Extraction")
         print(f"{label} validation failed:", file=sys.stderr)
         for problem in error.problems:
             location = problem.location or "unknown location"

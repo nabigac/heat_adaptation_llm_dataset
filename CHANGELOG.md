@@ -171,3 +171,21 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Reason:** Address observed errors and consolidate findings before further prompt tuning.
 - **Observed result:** Paris `0004`–`0006` independently used `run_extract_0002` and unchanged model settings; all succeeded without Python repairs. After the quotation revision, `0005` kept 122 excerpts without tiny fragments. After the coverage/resolution revision, `0006` kept 130, left the courtyard discrepancy open, and added runoff-water cooling. Whitespace-normalized matches rose from 66/122 to 100/130; these are diagnostics, not evidence-adequacy scores. Runtime rose from 8m to 14m 5s and API-reported cost from about $0.066 to $0.129. Offline checks passed 174 then 126 tests, plus both-plan input checks.
 - **Remaining questions:** Omissions, bundling, quotation errors, and unstable statuses persist; `0006` described planned bathing sites as already opened. Individual repeats and differing tool activity do not isolate prompt effects. Expert reference scoring and confirmation of claimed resolutions remain pending.
+
+### 2026-11-21 — Add expert reference forms and validation
+
+- **Category:** Code / Research
+- **Problem:** The study needed a clear expert reference format and practical checks before manual assessment.
+- **Decision/change:** Defined one `expert_reference.json` per plan and added `create_expert_reference` and `validate_expert_reference`. Forms live in `expert_references/<plan_id>/`, excluded from Git, with expert identity and shared metadata/action/evidence fields. Creation supplies collection metadata and empty actions and refuses overwrites. Read-only validation checks JSON, fields, registration links, unique action IDs, and physical PDF page bounds. Removed the unused `examples/` folder and aligned documentation.
+- **Reason:** Support manual comparison against one independent expert form completed from the PDF before viewing comparison outputs. Separate initial/final reference versions and assessment JSON files were removed from the planned workflow.
+- **Observed result:** 836 focused/regression tests passed; existing PDFs, preparations, and runs were preserved. No API requests were made. Validation establishes technical consistency; empty actions are flagged, and experts establish accuracy and completeness.
+- **Remaining questions:** Real-plan reference completion and the manual assessment pilot are **Not yet tested**.
+
+### 2026-11-21 — Plan collaboration with a GLM coordinator
+
+- **Category:** Research / Model
+- **Problem:** E/E+V examines sequential verification but does not test dynamic coordination among agents.
+- **Decision/change:** Added C as study stage 4, with `zai-org/GLM-5.3-Flash` selected through Hugging Face/DeepInfra to coordinate Inkling and DeepSeek. Planned `run_collaboration_mode` starts independently from the same prepared plan. The coordinator assigns parallel or dependent tasks, requests follow-up, reconciles findings, and produces complete JSON. The protocol defines shared guidance, messages, draft ownership, global budgets, stopping/failure rules, and saved evidence. All three outputs use the same expert reference and quality measures; E-issue resolution confirmation remains specific to E+V.
+- **Reason:** Explore whether coordinated collaboration improves extraction and evidence quality, with its computational tradeoffs. GLM's low listed cost, long context, and listed tool/structured-output support motivated selection. Comparisons assess the complete workflow, including model and computation differences.
+- **Observed result:** DESIGN.md and IMPLEMENTATION.MD were updated and 47 local links checked. C's command, profiles, and runtime remain unimplemented; GLM compatibility and coordination quality are **Not yet tested**.
+- **Remaining questions:** Check GLM compatibility, establish numerical budgets, implement/test C, and pilot it on Freetown and Paris before freezing comparison settings.

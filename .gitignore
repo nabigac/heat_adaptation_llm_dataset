@@ -27,6 +27,7 @@ dist/
 # Local documents, model weights, and generated run artifacts
 /data/raw/
 /data/processed/
+/expert_references/
 /models/
 /runs/
 /artifacts/

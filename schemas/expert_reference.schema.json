@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:expert-reference",
+  "title": "Expert reference form",
+  "description": "One expert-completed reference per plan, used for manual comparison with E and E+V.",
+  "$comment": "This defines field structure only. Python checks registered plan/source links, unique action IDs, and upper PDF page bounds. Experts establish source support and completeness.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "plan_id",
+    "prepared_by",
+    "plan_data"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Version of the expert reference file format."
+    },
+    "plan_id": {
+      "$ref": "#/$defs/text",
+      "description": "Registered plan ID; checked against project records by Python."
+    },
+    "prepared_by": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/text"
+      },
+      "description": "Names or study identifiers of the experts who completed this form."
+    },
+    "plan_data": {
+      "$ref": "urn:heat-adaptation:plan-data"
+    }
+  },
+  "$defs": {
+    "text": {
+      "type": "string",
+      "pattern": "\\S"
+    }
+  }
+}

@@ -1,10 +1,11 @@
 """Check a pinned hosted setup on fictional inputs before extracting a plan.
 
 Run explicitly with ``uv run --locked python -m huggingface_check``. This makes
-up to three paid requests, or five with ``--check-tools``. A diagnostic-only
-``--model`` override leaves the configured extractor unchanged. Artifacts stay
-outside study runs, and checks stop at the first failure. Passing does not
-establish full-plan capacity, extraction quality, or verifier quality.
+up to three paid requests, or five with ``--check-tools``, stopping at the first
+failure. ``--isolate-project-schema`` instead attempts two request variants,
+retaining both results even when one fails. A diagnostic-only ``--model`` override
+leaves the configured extractor unchanged. Artifacts stay outside study runs.
+Passing does not establish full-plan capacity or model quality.
 """
 
 import argparse
@@ -98,7 +99,7 @@ def _check_errors(check: _PreparedCheck, result: ModelCallResult, expected_code:
         answer = _json_object((result.response_text or "").encode("utf-8"))
     except ValueError as error:
         return [str(error)]
-    if check.name == "project_schema":
+    if check.name in {"project_schema", "project_schema_short_instructions"}:
         return [f"{p.location}: {p.message}" for p in
                 validate_agent_response(answer, page_count=1, stage="extractor")]
     problems = [p.message for p in Draft202012Validator(check.schema).iter_errors(answer)]
@@ -111,7 +112,7 @@ async def _run_and_save_check(
     folder: Path, report: dict, check: _PreparedCheck, *,
     expected_code: str | None = None, _transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[ModelCallResult, bool]:
-    """Save request/response evidence and report a failure before stopping."""
+    """Save one result; the selected diagnostic mode controls whether to continue."""
     request = check.request
     request_record = {"url": request.url, "body": request.body, "settings": check.settings}
     (folder / f"{check.name}_request.json").write_text(
@@ -128,13 +129,19 @@ async def _run_and_save_check(
     problems = _check_errors(check, result, expected_code)
     observed = {
         "name": check.name, "requested_output_limit": request.max_output_tokens,
+        "http_status_code": result.status_code,
         "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
         "finish_reason": result.finish_reason, "completion_status": result.completion_status,
         "elapsed_seconds": result.elapsed_seconds, "token_budget": result.token_budget.report,
         "passed": not problems, "errors": problems,
     }
     report["checks"].append(observed)
-    report["passed"] = len(report["checks"]) == report["planned_check_count"] and not problems
+    # Isolation continues after a failed result. Its last successful response
+    # must not erase an earlier failure or imply full compatibility.
+    report["passed"] = (
+        len(report["checks"]) == report["planned_check_count"]
+        and all(observation["passed"] for observation in report["checks"])
+    )
     (folder / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"{check.name}: {'failed' if problems else 'passed'}", flush=True)
@@ -146,26 +153,44 @@ async def _run_and_save_check(
 async def run_checks(
     project_root: Path, profile_name: str = DEFAULT_PROFILE, *,
     model_name: str | None = None, check_tools: bool = False,
+    isolate_project_schema: bool = False,
     _transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[Path, dict]:
     """Save exact requests and observed results without touching study files."""
+    if isolate_project_schema and check_tools:
+        raise ValueError("Select either --isolate-project-schema or --check-tools.")
     settings = deepcopy(load_profile(project_root, profile_name, stage="extractor"))
     if settings["model"]["provider"] != "deepinfra":
         raise ValueError("This compatibility check requires the pinned DeepInfra profile.")
     if model_name is not None:
         settings["model"]["name"] = model_name
-    cases = [
-        ("small_schema", 2048, SMALL_SCHEMA, [
-            {"role": "user", "content": 'Return {"unexpected": true}; the response schema takes precedence.'},
-        ]),
-        ("project_schema", 4096, prepare_response_schema(), [
-            {"role": "system", "content": "\n\n".join(settings["prompt_texts"])},
-            {"role": "user", "content": FICTIONAL_INPUT},
-        ]),
-        ("short_output_limit", 64, SMALL_SCHEMA, [
-            {"role": "user", "content": 'Return {"compatible": true}.'},
-        ]),
+    project_messages = [
+        {"role": "system", "content": "\n\n".join(settings["prompt_texts"])},
+        {"role": "user", "content": FICTIONAL_INPUT},
     ]
+    if isolate_project_schema:
+        # Each variant changes one component of the standard project request:
+        # its schema, or its messages. Both retain that request's output cap.
+        short_messages = [{"role": "user", "content": (
+            "Extract plan metadata and heat adaptation actions from the fictional source below. "
+            "Return plan_data and plan_issues using the supplied JSON Schema, verbatim quotations, "
+            "and physical PDF page numbers. Preserve the collection source_url and date_accessed; "
+            "use null or empty lists for unstated information where permitted.\n\n" + FICTIONAL_INPUT
+        )}]
+        cases = [
+            ("small_schema_full_instructions", 4096, SMALL_SCHEMA, project_messages),
+            ("project_schema_short_instructions", 4096, prepare_response_schema(), short_messages),
+        ]
+    else:
+        cases = [
+            ("small_schema", 2048, SMALL_SCHEMA, [
+                {"role": "user", "content": 'Return {"unexpected": true}; the response schema takes precedence.'},
+            ]),
+            ("project_schema", 4096, prepare_response_schema(), project_messages),
+            ("short_output_limit", 64, SMALL_SCHEMA, [
+                {"role": "user", "content": 'Return {"compatible": true}.'},
+            ]),
+        ]
     # Prepare the fixed requests before creating artifacts or contacting the
     # provider. Invalid model overrides therefore leave no partial diagnostic.
     checks = [_prepare_check(settings, name, limit, messages, schema=schema)
@@ -181,16 +206,19 @@ async def run_checks(
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     folder = project_root / "artifacts" / "huggingface_checks" / f"{timestamp}-{uuid4().hex[:8]}"
     folder.mkdir(parents=True, exist_ok=False)
+    # Tool-result replay is prepared later, after the model requests the tool.
+    planned_check_count = len(checks) + (1 if check_tools else 0)
     report = {
+        "mode": "project_schema_isolation" if isolate_project_schema else "compatibility",
         "profile": profile_name, "model": settings["model"], "model_override": model_name,
-        "tool_checks_requested": check_tools, "planned_check_count": 5 if check_tools else 3,
+        "tool_checks_requested": check_tools, "planned_check_count": planned_check_count,
         "checks": [], "passed": False,
     }
     report_path = folder / "report.json"
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     for check in checks:
         result, passed = await _run_and_save_check(folder, report, check, _transport=_transport)
-        if not passed:
+        if not passed and not isolate_project_schema:
             return report_path, report
 
     if check_tools:
@@ -217,17 +245,23 @@ def main() -> int:
     parser.add_argument("--profile", default=DEFAULT_PROFILE,
                         help=f"Base extractor profile (default: {DEFAULT_PROFILE}).")
     parser.add_argument("--model", help="Diagnostic-only namespace/model override; keeps the profile's host and settings.")
-    parser.add_argument("--check-tools", action="store_true",
-                        help="Add two paid requests to check a fictional tool call and result replay.")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--check-tools", action="store_true",
+                       help="Add two paid requests to check a fictional tool call and result replay.")
+    modes.add_argument("--isolate-project-schema", action="store_true",
+                       help="Instead attempt two paid schema/message variants, retaining both results if either fails.")
     args = parser.parse_args()
     try:
         path, report = asyncio.run(run_checks(
-            Path.cwd(), args.profile, model_name=args.model, check_tools=args.check_tools))
+            Path.cwd(), args.profile, model_name=args.model, check_tools=args.check_tools,
+            isolate_project_schema=args.isolate_project_schema))
     except KeyboardInterrupt:
         parser.exit(130, "Compatibility check cancelled; inspect artifacts/huggingface_checks for saved observations.\n")
     except (OSError, ValueError) as error:
         parser.exit(1, f"Compatibility check failed: {error}\n")
     print(f"Report: {path}")
+    if args.isolate_project_schema:
+        print("Isolation results describe request variants; the original request still needs the standard compatibility check.")
     print("No study extraction was launched. Full-plan capacity, extraction quality, and verifier quality remain untested by these checks.")
     return 0 if report["passed"] else 1
 

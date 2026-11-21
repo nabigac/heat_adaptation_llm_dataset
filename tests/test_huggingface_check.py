@@ -13,6 +13,7 @@ from agents import load_profile
 from test_agent_loop import PROFILE, answer
 from test_huggingface_api import (
     MODEL, TOKEN, DEEPSEEK_MODEL, DEEPSEEK_ROUTER_MODEL,
+    GLM_MODEL, GLM_ROUTER_MODEL,
     envelope, hosted_project, project, tool_call,
 )
 
@@ -60,12 +61,14 @@ def test_diagnostic_saves_schema_usage_and_caps_without_changing_study(project, 
 
 
 @pytest.mark.parametrize("failure", ["schema", "token-overrun"])
-def test_diagnostic_stops_and_saves_failures_without_retry(project, monkeypatch, failure):
-    hosted_project(project, "deepinfra")
+@pytest.mark.parametrize("model,reported_model", [(MODEL, MODEL), (GLM_MODEL, GLM_ROUTER_MODEL)])
+def test_diagnostic_stops_and_saves_failures_without_retry(project, monkeypatch, failure, model, reported_model):
+    hosted_project(project, "deepinfra", model)
     monkeypatch.setenv("HF_TOKEN", TOKEN)
-    data = envelope('{"unexpected": true}')
+    data = envelope('{"unexpected": true}', model=reported_model)
     if failure == "token-overrun":
-        data = envelope('{"compatible": true}', usage={"prompt_tokens": 100, "completion_tokens": 2049})
+        data = envelope('{"compatible": true}', model=reported_model,
+                        usage={"prompt_tokens": 100, "completion_tokens": 2049})
     sent = []
     def handler(request):
         sent.append(request)
@@ -73,6 +76,7 @@ def test_diagnostic_stops_and_saves_failures_without_retry(project, monkeypatch,
     path, report = asyncio.run(check.run_checks(project, PROFILE, _transport=httpx.MockTransport(handler)))
     assert not report["passed"] and len(sent) == 1
     assert report["checks"][0]["errors"]
+    assert all("model identity" not in error for error in report["checks"][0]["errors"])
     assert (path.parent / "small_schema_response.json").exists()
 
 
@@ -142,9 +146,12 @@ def successful_tool_reply(model=DEEPSEEK_MODEL):
                     finish="tool_calls", model=model)
 
 
-@pytest.mark.parametrize("reported_model", [DEEPSEEK_MODEL, DEEPSEEK_ROUTER_MODEL])
+@pytest.mark.parametrize("model,reported_model", [
+    (DEEPSEEK_MODEL, DEEPSEEK_MODEL), (DEEPSEEK_MODEL, DEEPSEEK_ROUTER_MODEL),
+    (GLM_MODEL, GLM_MODEL), (GLM_MODEL, GLM_ROUTER_MODEL),
+])
 def test_model_override_and_tool_round_trip_preserve_profile_and_study(
-    project, run_record, monkeypatch, reported_model,
+    project, run_record, monkeypatch, model, reported_model,
 ):
     hosted_project(project, "deepinfra")
     monkeypatch.setenv("HF_TOKEN", TOKEN)
@@ -165,14 +172,14 @@ def test_model_override_and_tool_round_trip_preserve_profile_and_study(
             json.dumps({"confirmation_code": supplied["confirmation_code"]}), model=reported_model))
 
     path, report = asyncio.run(check.run_checks(
-        project, PROFILE, model_name=DEEPSEEK_MODEL, check_tools=True,
+        project, PROFILE, model_name=model, check_tools=True,
         _transport=httpx.MockTransport(handler)))
     assert report["passed"] and not replies and len(sent) == 5
-    assert report["model"]["name"] == report["model_override"] == DEEPSEEK_MODEL
+    assert report["model"]["name"] == report["model_override"] == model
     assert report["profile"] == PROFILE and report["tool_checks_requested"]
     assert report["planned_check_count"] == 5
     assert [body["max_tokens"] for body in sent] == [2048, 4096, 64, 2048, 2048]
-    assert all(body["model"] == DEEPSEEK_MODEL + ":deepinfra" for body in sent)
+    assert all(body["model"] == model + ":deepinfra" for body in sent)
     assert sent[3]["tools"] == check.FICTIONAL_TOOLS
     assert "response_format" not in sent[3] and "tools" not in sent[4]
     assistant = next(m for m in sent[4]["messages"] if m["role"] == "assistant")
@@ -282,5 +289,7 @@ def test_cli_passes_model_override_and_tool_flag(project, monkeypatch, capsys):
 
     monkeypatch.setattr(check, "run_checks", fake_checks)
     assert check.main() == 0
-    assert received == [(project, PROFILE, {"model_name": DEEPSEEK_MODEL, "check_tools": True})]
+    assert received == [(project, PROFILE, {
+        "model_name": DEEPSEEK_MODEL, "check_tools": True, "isolate_project_schema": False,
+    })]
     assert "verifier quality remain untested" in capsys.readouterr().out

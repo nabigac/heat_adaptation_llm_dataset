@@ -21,6 +21,8 @@ project = loop.project
 MODEL = "thinkingmachines/Inkling-2-Small"
 DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
 DEEPSEEK_ROUTER_MODEL = "deepseek/deepseek-v4.1-flash-1017"
+GLM_MODEL = "zai-org/GLM-5.3-Flash"
+GLM_ROUTER_MODEL = "z-ai/glm-5.3-flash"
 TOKEN = "fictional-hf-token-for-tests"
 TOOLS = [{"type": "function", "function": {
     "name": "get_page_text", "description": "Read a page.", "parameters": {
@@ -113,11 +115,50 @@ def test_deepseek_alias_does_not_accept_other_models_namespaces_or_checkpoints(s
     assert len(sent) == 1 and json.loads(result.raw_response)["model"] == reported
 
 
-@pytest.mark.parametrize("expected", [MODEL, "deepseek-ai/DeepSeek-V4.1-Flash",
+@pytest.mark.parametrize("expected", [MODEL, GLM_MODEL, "deepseek-ai/DeepSeek-V4.1-Flash",
                                      "deepseek-ai/DeepSeek-V4.1-Flash-1018"])
 def test_verified_alias_is_not_reused_for_other_selected_models(settings, expected):
     settings["model"]["name"] = expected
     result, _ = request(settings, envelope(model=DEEPSEEK_ROUTER_MODEL))
+    assert result.completion_status == "failed" and "model identity" in result.error
+
+
+@pytest.mark.parametrize("reported", [
+    GLM_MODEL, GLM_MODEL.lower(), GLM_MODEL + ":deepinfra",
+    GLM_ROUTER_MODEL, GLM_ROUTER_MODEL.upper(),
+])
+def test_glm_exact_identity_and_verified_alias_preserve_wire_and_raw_names(settings, reported):
+    settings["model"]["name"] = GLM_MODEL
+    data = envelope('{"compatible":true}', model=reported)
+
+    result, sent = request(settings, data)
+
+    assert result.error is None and result.completion_status == "normal"
+    assert json.loads(sent[0].content)["model"] == GLM_MODEL + ":deepinfra"
+    assert json.loads(result.raw_response)["model"] == reported
+    assert result.response_text == '{"compatible":true}'
+
+
+@pytest.mark.parametrize("reported", [
+    "z-ai/glm-5.3", "z-ai/glm-5.2-flash", "z-ai/glm-5.3-flashx",
+    "z-ai/glm-5.3-flash-uncensored", "other-owner/glm-5.3-flash",
+    GLM_ROUTER_MODEL + ":other-host", DEEPSEEK_ROUTER_MODEL, MODEL, 123,
+])
+def test_glm_alias_rejects_other_models_namespaces_and_variants(settings, reported):
+    settings["model"]["name"] = GLM_MODEL
+
+    result, sent = request(settings, envelope(model=reported))
+
+    assert result.completion_status == "failed" and "model identity" in result.error
+    assert len(sent) == 1 and json.loads(result.raw_response)["model"] == reported
+
+
+@pytest.mark.parametrize("expected", [MODEL, DEEPSEEK_MODEL, "zai-org/GLM-5.3", "zai-org/GLM-5.2-Flash"])
+def test_glm_alias_is_not_reused_for_other_selected_models(settings, expected):
+    settings["model"]["name"] = expected
+
+    result, _ = request(settings, envelope(model=GLM_ROUTER_MODEL))
+
     assert result.completion_status == "failed" and "model identity" in result.error
 
 

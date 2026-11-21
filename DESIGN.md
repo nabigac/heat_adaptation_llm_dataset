@@ -1,6 +1,6 @@
 # Design Doc: Heat Adaptation LLM Dataset
 
-**Research design · updated 2026-11-18**
+**Research design · updated 2026-11-21**
 
 ## 1. Context and problem
 
@@ -15,7 +15,7 @@ The study will develop and evaluate a workflow pairing heat adaptation experts w
 The study has two objectives.
 
 1. **To show how experts and LLMs can be paired to build an extraction workflow.** The study will examine how expert knowledge, model outputs, and successive revisions shape the workflow and identify practical lessons for researchers developing similar workflows.
-2. **To evaluate added verification.** The study will compare an extractor alone (E) with that same extraction revised by a different open-weight model (E+V). The comparison will assess corrected errors, recovered omissions, introduced errors, unresolved issues, and computational requirements.
+2. **To evaluate verification and collaboration.** The study will compare an extractor alone (E), that extraction revised by a different model (E+V), and a collaborative multi-agent configuration (C). The comparison will examine accuracy, completeness, supporting evidence, unresolved issues, and computational requirements.
 
 ## 3. Methods
 
@@ -34,14 +34,14 @@ Experts will screen eligibility, with preference for recent versions. City, coun
 | Study set | Planned size | Purpose |
 | --- | --- | --- |
 | Development | 2 plans | Refinement of how experts and LLMs work together, with observed problems and revisions informing practical lessons. |
-| Comparison | 5 separate plans | Comparison of E and E+V against independent expert work under fixed settings. |
+| Comparison | 5 separate plans | Comparison of E, E+V, and C against independent expert work under fixed settings. |
 | Expansion | Deferred | Possible dataset expansion after evaluation of the workflow. |
 
 Plans will be selected to provide variation in length, layout, and type, with near-duplicates excluded. The comparison set will be selected before comparison runs and will be separate from the development documents. The selection rationale and document characteristics will be recorded.
 
 ### Extracted dataset and action records
 
-Each extraction will produce one JSON dataset for a plan, containing plan information, action records, and review issues. JSON stores named fields in objects and lists of objects in arrays.
+Each configuration will produce one JSON dataset for a plan, containing plan information, action records, and review issues. JSON stores named fields in objects and lists of objects in arrays.
 
 Within a plan, actions are grouped by the specific activity undertaken. For example, all tree planting belongs in one action object, including planting in different neighborhoods or phases. Details associated with each location or phase are preserved. Tree planting and drinking fountain installation form separate actions. The broad `action_type` categories classify each activity and may overlap.
 
@@ -60,7 +60,7 @@ One source heading, pathway, or programme may contain several distinct activitie
 
 | Action field | Meaning and information gathered | JSON representation |
 | --- | --- | --- |
-| Action identifier | Stable ID followed through verification. | `action_id` |
+| Action identifier | Stable local ID followed through revisions within a workflow. | `action_id` |
 | Action description | Activity, implementers, quantities, timing, conditions, and phase-specific details. | `action` |
 | Action type | Infrastructural, institutional, behavioral/cultural, and/or nature-based. | `action_type` |
 | Action status | Unspecified unless the source clearly establishes that the grouped activity is planned, underway, or completed. | `action_status` |
@@ -76,7 +76,7 @@ Costs, benefits, and evidence are attached to the activity they describe. The [a
 
 Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Quotations preserve the source wording and punctuation without rewriting or silent omissions. Every page containing quoted words is cited. Separate passages are represented by separate evidence entries, including relevant headings or footnotes. Adequate evidence collectively supports the activity and its stated details.
 
-Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains existing issue IDs, may add issues, and explains claimed resolutions for expert assessment. Experts may subsequently resolve issues in curated copies. Expert curation corrects or excludes unsupported material.
+Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains E issue IDs, may add issues, and explains claimed resolutions. C maintains its own action and issue IDs, with the role that raised or resolved each issue recorded. Experts may subsequently resolve issues in curated copies. Expert curation corrects or excludes unsupported material.
 
 ### Example data output
 
@@ -131,36 +131,41 @@ This fictional example groups tree planting across two wards. A linked issue rec
 
 During development, models will draft action records and flag uncertainties. Experts will examine the outputs against the plans and identify changes needed in coding rules, prompts, tools, and review procedures. Examples showing what prompted a revision, how it was addressed, and what was observed afterwards will be preserved. These examples will support the study's account of building the workflow and the lessons drawn from that process.
 
-Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) is the extractor for both study configurations. DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) is the selected verifier. Both open-weight models are accessed through Hugging Face Inference Providers with DeepInfra as the fixed hosting provider. E consists of the Inkling extraction with the shared Python processing described below. E+V will begin with that exact saved extraction, which DeepSeek will check and revise.
+Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) is the extractor, DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) is the verifier, and GLM-5.3-Flash (`zai-org/GLM-5.3-Flash`) is the selected coordinator for C. All three models will be accessed through Hugging Face Inference Providers with DeepInfra as the fixed host. E consists of the Inkling extraction with shared Python processing. E+V begins with that exact saved extraction, which DeepSeek checks and revises.
 
-DeepSeek was selected for its low listed cost and strong author-reported reasoning and agent benchmark results. It has passed compatibility checks with fictional inputs; its verification quality on whole plans remains to be assessed during development before comparison settings are fixed. PDF preparation, optical character recognition (OCR) with EasyOCR, and document tools run on the researcher's computer. LLM inference is hosted.
+C will start independently from the same prepared plan, without access to the selected E/E+V outputs or expert reference. The coordinator will assign tasks to the extractor and verifier, arrange parallel work where tasks are independent, request follow-up checks, and maintain a working answer. Both workers will contribute findings and source evidence. The coordinator will assemble one complete JSON answer, retaining unresolved concerns as issues. Task order and the number of exchanges may vary within fixed execution budgets.
 
-Model and hosting details, response format controls, context and output limits, tool use, runtime, and provider-reported tokens are recorded. Generation is constrained by a provider-compatible schema, with compatibility assessed separately using fictional inputs. The provider constrains record structure and permitted values; list uniqueness and conditional issue-status rules are checked after generation. Every output undergoes the same complete Python acceptance checks. Structural compliance does not establish substantive accuracy. Earlier local and hosted trials are retained as development evidence for model selection; they do not form the planned E versus E+V comparison.
+DeepSeek was selected for its low listed cost and strong author-reported reasoning and agent benchmark results. GLM was selected for its low listed cost, long context, and listed tool and structured-output support. E and V have passed compatibility checks and completed development runs; formal quality assessment remains pending. C is planned; GLM compatibility and coordination quality are **Not yet tested**. PDF preparation, optical character recognition (OCR) with EasyOCR, and document tools run locally; LLM inference is hosted.
 
-The extractor and verifier will use the same source preparation and document tool capabilities through Model Context Protocol (MCP), the interface connecting agents to tools.
+Model and hosting details, prompts, response controls, execution budgets, tool use, runtime, and provider-reported tokens will be recorded. Generation will use a provider-compatible schema, with compatibility checked separately using fictional inputs. Python will enforce the complete field and relationship rules for every final output. Structural compliance does not establish substantive accuracy. Earlier trials remain development evidence and are outside the formal comparison.
 
-Both stages include the same automatic check of quotation locations after structural validation. A single-page citation is corrected only when its cited page has available text, the quotation does not match there, and the complete quotation matches exactly one other physical page in the prepared text or successful OCR readings. Matching allows whitespace differences while preserving wording and punctuation. Ambiguous locations and unmatched quotations remain flagged for review. Raw responses, corrected candidates, and repair records are preserved. The verifier receives the processed E answer, and expert assessment covers the processed E and E+V outputs. Citation corrections do not establish evidence adequacy or change model-reported issue statuses.
+All agents will use the same preparation and document tool capabilities through Model Context Protocol (MCP), the interface connecting agents to tools. C agents will receive the shared coding rules and field definitions; assignments and relevant findings will be exchanged through the coordinator.
+
+The final E, E+V, and C answers will receive the same automatic quotation-location checks. A single-page citation is corrected only when its cited page has available text, the quotation does not match there, and the complete quotation matches exactly one other physical page in the prepared text or successful OCR readings available within that workflow. Matching allows whitespace differences while preserving wording and punctuation. Ambiguous locations and unmatched quotations remain flagged. Raw responses, corrected candidates, and repair records will be preserved. V receives the processed E answer; expert assessment covers each configuration's processed output. Citation corrections do not establish evidence adequacy or change model-reported issue statuses.
 
 | Stage | Procedure and saved result |
 | --- | --- |
 | 1. Registration and preparation | The original PDF, collection metadata, page text, and preparation problems will be preserved. |
 | 2. Extraction (E) | Inkling 2 Small will receive the whole prepared plan through the Hugging Face API. Its answer, issues, settings, tool activity, and execution records will be saved. |
 | 3. Verification (E+V) | DeepSeek V4.1 Flash 1017 will check a copy of that exact Inkling extraction, including unflagged content and possible omissions. Its full revised answer will be saved. |
-| 4. Independent reference preparation | After successful E and V runs, experts will code the original PDF before viewing model outputs. This initial reference will be preserved. |
-| 5. Expert assessment | Experts will match activities by meaning, review possible reference corrections, and assess both outputs against one shared final reference. Revisions will be recorded with reasons and source evidence. |
-| 6. Analysis and dataset assembly | Lessons about pairing experts and LLMs to build the workflow will be synthesized. Paired outputs will be compared, and instruction examples will be assembled from expert-curated answers and their supporting inputs. |
+| 4. Collaboration (C) | GLM-5.3-Flash will dynamically coordinate Inkling and DeepSeek from the prepared plan to explore multi-agent extraction. C will run independently of E/E+V, preserving task exchanges, execution evidence, and one complete JSON answer. |
+| 5. Expert reference preparation | Experts will complete one reference form per plan from the original PDF before viewing any comparison output. The completed form will be preserved. |
+| 6. Manual expert assessment | Experts will match activities by meaning and assess E, E+V, and C against the same completed reference form, using the agreed rubric, evidence judgments, and issue checks. |
+| 7. Analysis and dataset assembly | Lessons about pairing experts and LLMs will be synthesized, the three configurations compared, and instruction examples assembled from expert-curated answers and supporting inputs. |
 
 Verification will default to the most recent validated, successful E run for the plan unless a specific E run is selected. The same selection rule applies to development, comparison, and later expansion. The selected E run ID will be saved with V, and verifier retries will retain that input.
 
-Each comparison will use the selected E output and the first successful V run linked to it under fixed settings. The pair will be recorded before expert assessment and retained when later extractions become available. Successful execution means that format and execution checks have passed. Failed attempts and repeated runs will be preserved, with manual retries linked to the earlier attempt.
+Each comparison will use the selected E output, the first successful V run linked to it, and the first successful independent C run under fixed settings and the same preparation. The selected run IDs will be recorded before assessment and retained when newer runs appear. Successful execution means that format and execution checks have passed. Failures and repeated runs will be preserved, with manual retries linked to earlier attempts.
 
-Models, prompts, preparation, tools, coding rules, and scoring will be fixed before comparison. Any subsequent changes and the affected runs will be documented. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) describes current software and planned work, and [README.md](README.md) provides available commands.
+Models, prompts, preparation, tools, coding rules, budgets, stopping rules, and scoring will be fixed before comparison. C's task sequence may adapt within that fixed protocol. Subsequent changes and affected runs will be documented. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) describes current software and planned work, and [README.md](README.md) provides available commands.
 
 ## 4. Evaluation
 
 ### Expert reference and scoring
 
-Experts will use the same rules for grouping activities as the models. Once the independent initial reference has been preserved, supported additions and other reference corrections identified from both outputs will be reviewed. Every revision will be recorded with its reason and source evidence. Both saved outputs will then be scored against the shared final reference.
+Experts will complete one reference form per plan using the same grouping and coding rules as the models. The form will contain expert-coded activities, details, and source evidence from the original PDF. For comparison plans, the expert will complete it before viewing any E, E+V, or C output. All three saved outputs will be assessed manually against that same completed form.
+
+Development forms will pilot coding and assessment procedures. Prior exposure to development outputs will be recorded, and those forms will not provide independent comparison evidence.
 
 Actions will be matched by activity and meaning. Split or duplicate records will be assessed together, with each reference activity counted once. All substantive claims in matched records, including conflicting or unsupported details, will be considered in scoring. If a record bundles different activities, its relevant content will be assessed against each matching reference activity.
 
@@ -178,10 +183,10 @@ This study-specific rubric will be piloted on development plans. A worked scorin
 
 | Outcome | Measure and purpose |
 | --- | --- |
-| Action accuracy and completeness | **Action score percentage**, using the 0/0.5/1 scores for final reference activities. |
+| Action accuracy and completeness | **Action score percentage**, using the 0/0.5/1 scores for activities in the expert reference form. |
 | Unsupported activities | **Unsupported action count**, reported alongside the total distinct output activities. This captures invented or ineligible activities outside the reference-based score. |
 | Evidence quality | **Actions with adequate evidence**, the percentage of output activities whose supplied evidence supports all recorded substantive details and uses faithful quotations with correct pages. |
-| Issues requiring review | **Open issues** in E and E+V, and **expert-confirmed verifier resolutions** reported against resolutions claimed for initially open E issues. |
+| Issues requiring review | **Open issues** in all three outputs, and **expert-confirmed verifier resolutions** reported against resolutions claimed for initially open E issues in E+V. C's issue handling will be described in review notes. |
 | Computational requirements | Successful processing runtime, provider-reported tokens, and failed executions as supporting information. |
 
 The [evaluation appendix](#g-evaluation-measures-and-calculations) defines calculations and denominators. Assessment notes explain errors and corrections without requiring separate scores for every quotation or page.
@@ -190,9 +195,9 @@ The [evaluation appendix](#g-evaluation-measures-and-calculations) defines calcu
 
 The analysis will examine how heat adaptation experts and LLMs work together to develop the extraction workflow. Examples of decisions, revisions, and failures will help identify practical lessons about combining expert knowledge with model outputs to build and refine the workflow.
 
-The paired comparison will examine whether verification improves the accuracy and completeness of action records, the adequacy of supporting evidence, and the handling of issues requiring review. Changes between E and E+V will be examined for each plan, including corrected errors, recovered omissions, new errors, and unresolved issues. Runtime, token use, and failed attempts will describe the computational requirements of each approach.
+Comparisons within each plan will examine how sequential verification and coordinated collaboration affect action accuracy and completeness, supporting evidence, and unresolved concerns. Review notes will describe corrected errors, recovered omissions, introduced errors, and how C's agents investigate disagreements. Runtime, token use, and failures will describe computational requirements.
 
-With five selected comparison plans and one model pair, the findings will be descriptive and specific to this study setting. Document layout and errors when extracting text from PDFs or scans may affect extraction quality. Hosted services may expose limited information about model revisions and serving conditions; unavailable details are recorded as unknown. Expert judgments about action grouping and scoring may vary, and revisions to the reference after viewing model outputs may favor information included in those outputs.
+With five selected comparison plans and one fixed set of models, findings will be descriptive and specific to this setting. Differences involving C will reflect its complete workflow, including the third model and additional computation, rather than isolating coordination alone. Document layout and PDF/OCR errors may affect quality. Hosted services may disclose limited model revision and serving details; unavailable information will remain unknown. Expert judgments about grouping and scoring may vary, and omissions or misinterpretations in the reference form may influence results.
 
 The coarse action scores and combined evidence judgment may hide differences in the nature or severity of errors. Grouping an activity across locations or phases also gives records with different amounts of detail equal weight. Issue counts depend on what the models flag and provide only a partial view of review needs.
 
@@ -268,16 +273,16 @@ Each issue object:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `issue_id` | string | Stable issue ID retained through verification and expert curation. |
+| `issue_id` | string | Stable issue ID retained through revisions and curation within its workflow. C IDs are independent of E/E+V. |
 | `related_action_id` | string or null | Affected action ID. Null for an omission, a problem affecting the plan or its source, or a removed action. |
 | `issue_description` | string | Grouped concerns, including relevant pages and any affected actions not linked directly. |
 | `issue_type` | enum or null; optional | Classification of the concern, using the values in [appendix E](#issue-types). |
-| `issue_origin` | enum | `extractor` or `verifier`, identifying the stage that first raised the issue. Retained through later review and curation. |
+| `issue_origin` | enum | `extractor`, `verifier`, or `coordinator` (C only), identifying the role that first raised the issue. Retained through later review and curation. |
 | `issue_status` | enum | `open` when concerns still require attention, or `resolved` when a resolution has been recorded. Model resolutions remain claims for expert assessment. |
-| `resolved_by` | enum or null | `extractor`, `verifier`, or `expert` when resolved. Null while open. Expert resolutions are recorded in curated copies after assessment. |
+| `resolved_by` | enum or null | `extractor`, `verifier`, `coordinator` (C only), or `expert` when resolved. Null while open. Expert resolutions are recorded in curated copies after assessment. |
 | `resolution` | string or null | Explanation addressing every concern when resolved; null while open. |
 
-An open issue has null `resolved_by` and `resolution`. A resolved issue identifies who resolved it and explains how all grouped concerns were addressed. Reopening an issue retains its `issue_id` and `issue_origin`. Expert assessment of a verifier's claimed resolution is recorded in the assessment file. A subsequent fix by an expert is recorded in a curated copy of the dataset.
+An open issue has null `resolved_by` and `resolution`. A resolved issue identifies who resolved it and explains how all grouped concerns were addressed. Reopening retains its ID and origin. Expert assessment of V's claimed resolutions is recorded in manual review notes. A subsequent expert fix is recorded in a curated copy of the dataset.
 
 ### E. Category definitions
 
@@ -342,31 +347,31 @@ These rules describe how models and experts interpret the source and organize ac
 
 ### G. Evaluation measures and calculations
 
-The selected E and linked E+V outputs form the basis of comparison. Quality is assessed on each saved output before curation. Runtime and token totals for E+V include the shared extractor and the verifier.
+The selected E, linked E+V, and independent C outputs form the basis of comparison. Quality is assessed on saved processed outputs before curation. E+V includes the shared extractor and verifier; C includes its own coordinator and all worker activity.
 
 #### Before expert assessment
 
 | Measure | Calculation | Comparison |
 | --- | --- | --- |
-| Open issues | Number of issues whose `issue_status` is `open` in each output. | E is the initial baseline. E+V includes retained and newly raised open issues. |
-| Successful processing runtime | Sum of measured durations of selected successful stages, in seconds. | E uses extractor duration. E+V adds verifier duration. |
-| Tokens used | Sum of provider-reported input and output tokens across generation calls, with the two components retained. | E uses extractor calls. E+V adds verifier calls. |
-| Failed executions | Number of distinct failed comparison run IDs, including retries. | Counts are reported by stage, with shared extractor failures counted once. |
+| Open issues | Number of issues whose `issue_status` is `open` in each output. | Reported for E, E+V, and C; independently generated C issues are not matched to E IDs. |
+| Successful processing runtime | Measured processing duration, in seconds. | E uses extractor duration; E+V adds verifier duration. C uses its complete elapsed duration, without summing overlapping worker durations. |
+| Tokens used | Sum of provider-reported input and output tokens across generation calls, with the two components retained. | E uses extractor calls; E+V adds verifier calls. C includes every coordinator and worker call once. |
+| Failed executions | Number of distinct failed comparison run IDs, including retries. | Reported for E, V, and C, with shared E failures counted once. Worker errors belong to their C run rather than separate executions. |
 
-Runtime covers stage setup/loading, model and tool requests, saving, validation, permitted repairs, and cleanup. Measurements for failed attempts are reported separately from successful processing. Preparation, human review, and gaps between attempts fall outside stage runtime.
+Runtime covers setup/loading, model and tool requests, saving, validation, permitted repairs, and cleanup. C duration runs from its own start to completion, including coordination and parallel work. Failed-attempt measurements are reported separately. Preparation, human review, and gaps between attempts fall outside processing runtime.
 
 #### After expert assessment
 
-Supported additions and corrections are first reconciled into the shared final reference. Output content is grouped by specific activity, with split or duplicate records combined and their IDs and all substantive claims retained. Bundled activities are assessed separately. Each final reference activity receives one score under section 4.
+Experts manually compare each selected output with the completed reference form. Output content is grouped by specific activity, with split or duplicate records combined and their IDs and all substantive claims retained. Bundled activities are assessed separately. Each reference activity receives one score under section 4.
 
 | Measure | Calculation | Interpretation |
 | --- | --- | --- |
-| Action score percentage | Sum of final reference action scores ÷ number of final reference actions × 100. | Main quality measure, combining correctness and completeness with partial credit. |
+| Action score percentage | Sum of reference action scores ÷ number of reference actions × 100. | Main quality measure, combining correctness and completeness with partial credit. |
 | Unsupported action count | Number of distinct output activities judged unsupported or ineligible under the coding rules, alongside the total number of distinct output activities. | Captures invented or ineligible activities outside the reference denominator. Wrong details within a supported activity affect its action score. |
 | Actions with adequate evidence | Number of output activities with adequate evidence ÷ total distinct output activities × 100. | Evidence is adequate when it collectively supports all recorded substantive details and every supplied quotation faithfully reproduces the PDF and cites its correct physical pages. Missing evidence and unsupported activities fail this judgment. |
-| Expert-confirmed verifier resolutions | Number of initially open E issues with `issue_status` set to `resolved` and `resolved_by` set to `verifier` in E+V that experts judge justifiably resolved, reported as confirmed / claimed resolutions. | Shows whether the verifier's explanations address all grouped concerns. The count of open issues in E supplies the initial issue total. |
+| Expert-confirmed verifier resolutions | Number of initially open E issues with `issue_status` set to `resolved` and `resolved_by` set to `verifier` in E+V that experts judge justifiably resolved, reported as confirmed / claimed resolutions. | Applies only to E+V, which revises E. The count of open issues in E supplies the initial issue total. C's independent issue handling is described in review notes. |
 
-For example, six scores of 1, two of 0.5, and two omissions among ten reference activities yield an action score of 70%. Two additional invented activities would contribute to the unsupported action count. The score distribution is retained in the assessments.
+For example, six scores of 1, two of 0.5, and two omissions among ten reference activities yield an action score of 70%. Two additional invented activities would contribute to the unsupported action count. The score distribution is recorded in the manual review.
 
 An activity can receive full content credit while its supplied evidence is inadequate, for example when its description is correct but its page citation is wrong. Experts check all supplied evidence, recording one adequacy judgment and explanation per output activity. The explanation identifies important quotation, citation, or coverage failures.
 
@@ -374,8 +379,8 @@ For issue assessment, only initially open E issues that V marks resolved require
 
 #### Paired comparisons and reporting conventions
 
-Paired changes are calculated as E+V minus E, with percentage differences expressed in percentage points. Results are reported for each plan with counts and denominators. A descriptive overall summary uses the mean of valid per-plan percentages and identifies contributing plans. Results for individual plans allow variation between documents to be examined.
+Paired changes are calculated within plans as E+V minus E and C minus E+V, with percentage differences expressed in percentage points. Results are reported for each plan with counts and denominators. A descriptive overall summary uses the mean of valid per-plan percentages and identifies contributing plans. Missing configuration outputs and failures are identified; each contrast uses plans with the required outputs and judgments.
 
-The value `null` indicates pending judgments or unavailable measurements. Missing required usage or duration makes the corresponding total unavailable. Zero denominators are not applicable. Supported output activities absent from the initial reference enter the shared final reference before scoring. Any activity whose support is still undetermined keeps the relevant quality measures pending.
+The value `null` indicates pending judgments or unavailable measurements. Missing required usage or duration makes the corresponding total unavailable. Zero denominators are not applicable. An output activity absent from the reference is checked against the PDF for source support; absence alone does not make it unsupported. Reference coverage gaps are recorded in manual review notes. Any activity whose support is still undetermined keeps the relevant quality measures pending.
 
-The study reports three quality measures and two issue measures. Review notes describe detailed quotation, citation, addition, and issue examples. Formal assessment files contain the judgments required above.
+The study reports three quality measures across all configurations, open issue counts across all configurations, and expert-confirmed verifier resolutions for E+V only. Review notes describe quotation, citation, addition, and issue examples, including C's collaboration process. Manually recorded judgments provide the inputs to the agreed measures.

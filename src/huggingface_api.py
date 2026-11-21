@@ -29,10 +29,12 @@ HOSTED_MARGIN_TOKENS = 8192
 
 # Router response names can differ from Hugging Face IDs. Only explicitly
 # verified aliases are accepted; matching just the basename would hide changes
-# of model owner or checkpoint. OpenRouter's weights link confirms this pair:
+# of model owner or checkpoint. OpenRouter's weights links confirm these pairs:
 # https://openrouter.ai/deepseek/deepseek-v4.1-flash-1017
+# https://openrouter.ai/z-ai/glm-5.3-flash
 _RESPONSE_MODEL_ALIASES = {
     "deepseek-ai/deepseek-v4.1-flash-1017": frozenset({"deepseek/deepseek-v4.1-flash-1017"}),
+    "zai-org/glm-5.3-flash": frozenset({"z-ai/glm-5.3-flash"}),
 }
 
 

@@ -34,6 +34,9 @@ _PAGES_SCHEMA_PATH = (
     Path(__file__).resolve().parents[1] / "schemas" / "pages.schema.json"
 )
 _PLAN_DATA_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "plan_data.schema.json"
+_EXPERT_REFERENCE_SCHEMA_PATH = (
+    _PLAN_DATA_SCHEMA_PATH.parent / "expert_reference.schema.json"
+)
 _AGENT_RESPONSE_SCHEMA_PATH = (
     Path(__file__).resolve().parents[1] / "schemas" / "agent_response.schema.json"
 )
@@ -122,6 +125,15 @@ def validate_agent_response_structure(data: object) -> list[ValidationProblem]:
     """Check plan data and issues, including open/resolved issue field rules."""
     return _validate_structure(
         data, _AGENT_RESPONSE_SCHEMA_PATH, "agent response",
+        required_formats=("date",),
+        schema_references=((_PLAN_DATA_SCHEMA_URI, _PLAN_DATA_SCHEMA_PATH),),
+    )
+
+
+def validate_expert_reference_structure(data: object) -> list[ValidationProblem]:
+    """Check reference fields without source context or factual assessment."""
+    return _validate_structure(
+        data, _EXPERT_REFERENCE_SCHEMA_PATH, "expert reference",
         required_formats=("date",),
         schema_references=((_PLAN_DATA_SCHEMA_URI, _PLAN_DATA_SCHEMA_PATH),),
     )
@@ -296,7 +308,7 @@ def validate_plan_data(
     """Check plan data fields, record IDs, and physical PDF page ranges.
 
     Supply the original PDF's known page count, not a number claimed by the model.
-    This shared data check can later be used for expert references too.
+    Expert reference validation reuses the same action-ID and page-range rules.
     """
     problems = (
         validate_plan_data_structure(data)
@@ -309,6 +321,36 @@ def validate_plan_data(
     return _validate_plan_data_references(
         data, page_count=page_count, location="$"
     )
+
+
+def validate_expert_reference(
+    data: object, *, plan_id: str, source_url: str, date_accessed: str, page_count: int
+) -> list[ValidationProblem]:
+    """Check a reference against trusted registration details and the original PDF.
+
+    The caller supplies checked collection data and a counted PDF page total.
+    Empty actions remain valid structure; expert review establishes completeness,
+    claim support, grouping, and quotation fidelity. This function changes nothing.
+    """
+    problems = validate_expert_reference_structure(data) + _validate_page_count(page_count)
+    if problems:
+        return problems
+
+    if data["plan_id"] != plan_id:
+        problems.append(ValidationProblem(
+            "reference", "$.plan_id", "Reference plan ID must match the selected registered plan."
+        ))
+    metadata = data["plan_data"]["metadata"]
+    for field, expected in (("source_url", source_url), ("date_accessed", date_accessed)):
+        if metadata[field] != expected:
+            problems.append(ValidationProblem(
+                "reference", f"$.plan_data.metadata.{field}",
+                f"Reference {field} must match the registered collection metadata."
+            ))
+    problems.extend(_validate_plan_data_references(
+        data["plan_data"], page_count=page_count, location="$.plan_data"
+    ))
+    return problems
 
 
 def validate_agent_response(
@@ -696,6 +738,21 @@ def parse_plan_data_json(
             data, page_count=page_count
         )
     )
+
+
+def parse_expert_reference_json(
+    text: str, *, plan_id: str, source_url: str, date_accessed: str, page_count: int
+) -> tuple[dict | None, list[ValidationProblem]]:
+    """Parse strict reference JSON and check its source links without any repairs."""
+    try:
+        return _parse_and_validate(
+            text, lambda data: validate_expert_reference(
+                data, plan_id=plan_id, source_url=source_url,
+                date_accessed=date_accessed, page_count=page_count,
+            )
+        )
+    except RecursionError:
+        return None, [ValidationProblem("syntax", None, "Reference JSON is nested too deeply.")]
 
 
 def parse_agent_response_json(

@@ -1,4 +1,4 @@
-"""Read and preserve collection metadata, PDFs, preparations, and run records.
+"""Read and preserve collection metadata, PDFs, preparations, and study records.
 
 The registry is editable collection metadata, so saving deliberately replaces its
 previous version. Original PDFs and preparation attempts use new destinations.
@@ -18,12 +18,14 @@ from typing import NoReturn
 
 from validation import (
     ValidationProblem,
+    parse_expert_reference_json,
     parse_pages_json,
     parse_preparation_json,
     parse_registry_json,
     parse_run_record_structure_json,
     parse_tool_log_json,
     parse_validation_report_json,
+    validate_expert_reference_structure,
     validate_preparation_pages,
     validate_registry_structure,
     validate_run_links,
@@ -37,6 +39,7 @@ from validation import (
 # - Run functions create/update/load one attempt and preserve its supporting files.
 # - Registry functions replace editable collection metadata.
 # - PDF/preparation functions preserve inputs at new destinations.
+# - Expert reference creation preserves a new form without replacing expert work.
 # - Helpers at the end publish complete files and check project boundaries.
 # "Atomic" below means one file changes from old to new in a single publication;
 # it does not make a folder of files one transaction or coordinate several writers.
@@ -75,6 +78,15 @@ class RunValidationError(ValueError):
         self.problems = problems
         details = "\n".join(f"{problem.location or '$'}: {problem.message}" for problem in problems)
         super().__init__(f"Run validation failed:\n{details}")
+
+
+class ExpertReferenceValidationError(ValueError):
+    """A reference failed checks; retain field locations for terminal reporting."""
+
+    def __init__(self, problems: list[ValidationProblem]) -> None:
+        self.problems = problems
+        details = "\n".join(f"{problem.location or '$'}: {problem.message}" for problem in problems)
+        super().__init__(f"Expert reference validation failed:\n{details}")
 
 
 def next_run_id(project_root: Path | str, plan_id: str, stage: str) -> str:
@@ -647,6 +659,66 @@ def load_registry(project_root: Path | str) -> dict:
     # This is the parser's internal success contract, not an input-validation rule.
     assert registry is not None
     return registry
+
+
+def save_new_expert_reference(project_root: Path | str, reference: dict) -> str:
+    """Structure-check and publish a new form, refusing every occupied destination.
+
+    The caller checks the registered plan and supplies collection metadata.
+    This writer does not validate completed reference content or read model runs.
+    Experts edit the resulting form directly; rerunning creation never resets it.
+    """
+    problems = validate_expert_reference_structure(reference)
+    if problems:
+        details = "\n".join(
+            f"{problem.location or '$'}: {problem.message}" for problem in problems
+        )
+        raise ValueError(f"Expert reference structure validation failed:\n{details}")
+
+    root = Path(project_root).resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(f"Project root is not an existing directory: {root}")
+    _require_run_identifier(reference["plan_id"])
+    relative_path = f"expert_references/{reference['plan_id']}/expert_reference.json"
+    destination = resolve_project_path(root, relative_path)
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(f"Expert reference already exists; it was not changed: {relative_path}")
+    # A reference belongs at this exact plan path, never through a redirect to
+    # another plan's folder, even when the linked target stays inside the project.
+    if destination.resolve() != destination:
+        raise ValueError(f"Expert reference path must not use symbolic links: {relative_path}")
+
+    text = json.dumps(reference, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+    data = text.encode("utf-8")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Atomic publication also rejects a file created after the check above.
+    _publish_new_bytes(destination, data)
+    return relative_path
+
+
+def load_expert_reference(
+    project_root: Path | str, plan_id: str, *,
+    source_url: str, date_accessed: str, page_count: int,
+) -> dict:
+    """Read the selected form and check it against caller-verified source context.
+
+    Refuse redirected paths, malformed JSON, and invalid reference fields. Loading
+    neither repairs the file nor creates a report, completion state, or model run.
+    """
+    _require_run_identifier(plan_id)
+    relative_path = f"expert_references/{plan_id}/expert_reference.json"
+    path = resolve_project_path(project_root, relative_path)
+    if path.resolve() != path:
+        raise ValueError(f"Expert reference path must not use symbolic links: {relative_path}")
+    text = path.read_text(encoding="utf-8")
+    reference, problems = parse_expert_reference_json(
+        text, plan_id=plan_id, source_url=source_url,
+        date_accessed=date_accessed, page_count=page_count,
+    )
+    if problems:
+        raise ExpertReferenceValidationError(problems)
+    assert reference is not None
+    return reference
 
 
 def save_registry(project_root: Path | str, registry: dict) -> None:

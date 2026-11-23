@@ -72,8 +72,10 @@ def prepare_deepinfra_response_schema(schema: dict) -> dict:
 
     DeepInfra rejected uniqueItems in the live compatibility check. Conditional
     issue rules are also kept out of the generation grammar. The authoritative
-    schema and Python validation retain both requirements. Other keywords stay
-    in place so further incompatibilities fail visibly rather than being hidden.
+    schema and Python validation retain both requirements. Merge the known
+    issue-resolver conjunction without changing its permitted answers, using
+    the same representation for every model on this host. Other constraints
+    stay in place so further incompatibilities fail visibly.
     """
     result = deepcopy(schema)
     for keyword in ("uniqueItems", "if", "then", "else"):
@@ -96,7 +98,43 @@ def prepare_deepinfra_response_schema(schema: dict) -> dict:
                 prepare_deepinfra_response_schema(child) if isinstance(child, dict) else child
                 for child in result[keyword]
             ]
+    _flatten_issue_resolver_constraint(result)
     return result
+
+
+def _flatten_issue_resolver_constraint(schema: dict) -> None:
+    """Merge the known issue conjunction in a detached generation copy.
+
+    Only the exact resolver restriction is supported, and only when its enum
+    is a subset of the issue definition's enum. Other compositions stay intact
+    rather than risking a general allOf merge that changes accepted answers.
+    """
+    try:
+        items = schema["properties"]["plan_issues"]["properties"]["issues"]["items"]
+    except (KeyError, TypeError):
+        return
+    if not isinstance(items, dict) or set(items) != {"allOf"}:
+        return
+    branches = items["allOf"]
+    if not isinstance(branches, list) or len(branches) != 2:
+        return
+    issue, restriction = branches
+    permitted = ["extractor", "verifier", None]
+    if restriction != {"properties": {"resolved_by": {"enum": permitted}}}:
+        return
+    if not isinstance(issue, dict) or issue.get("type") != "object":
+        return
+    properties = issue.get("properties")
+    resolver = properties.get("resolved_by") if isinstance(properties, dict) else None
+    if not isinstance(resolver, dict) or not isinstance(resolver.get("enum"), list):
+        return
+    if not all(value in resolver["enum"] for value in permitted):
+        return
+    # The second enum already excludes expert resolutions from model answers.
+    # Moving that restriction preserves every other rule in the issue object.
+    resolver["enum"] = permitted
+    items.clear()
+    items.update(issue)
 
 
 def _huggingface_profile(settings: dict) -> dict:

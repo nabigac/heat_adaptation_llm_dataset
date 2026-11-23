@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:collaboration-task",
+  "title": "One coordinator assignment to a fixed worker",
+  "type": "object",
+  "required": [
+    "task_id",
+    "draft_version",
+    "worker_id",
+    "objective",
+    "source_pages",
+    "expected_findings",
+    "independent",
+    "context_task_ids"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "draft_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "worker_id": {
+      "type": "string",
+      "enum": [
+        "worker_1",
+        "worker_2"
+      ]
+    },
+    "objective": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "source_pages": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "uniqueItems": true,
+      "description": "Physical PDF page positions to focus on; [] means the whole plan. Full source remains available."
+    },
+    "expected_findings": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "The expected observations, evidence, or checks for this assignment."
+    },
+    "independent": {
+      "type": "boolean",
+      "description": "Use a fresh task conversation without draft answers or prior worker findings."
+    },
+    "context_task_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      },
+      "uniqueItems": true,
+      "description": "Completed tasks whose findings should be provided; must be empty for an independent check."
+    }
+  },
+  "$defs": {
+    "assignment": {
+      "type": "object",
+      "required": [
+        "worker_id",
+        "objective",
+        "source_pages",
+        "expected_findings",
+        "independent",
+        "context_task_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "worker_id": {
+          "type": "string",
+          "enum": [
+            "worker_1",
+            "worker_2"
+          ]
+        },
+        "objective": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "source_pages": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true,
+          "description": "Physical PDF page positions to focus on; [] means the whole plan. Full source remains available."
+        },
+        "expected_findings": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "The expected observations, evidence, or checks for this assignment."
+        },
+        "independent": {
+          "type": "boolean",
+          "description": "Use a fresh task conversation without draft answers or prior worker findings."
+        },
+        "context_task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "uniqueItems": true,
+          "description": "Completed tasks whose findings should be provided; must be empty for an independent check."
+        }
+      }
+    }
+  }
+}

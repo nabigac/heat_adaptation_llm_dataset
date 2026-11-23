@@ -105,12 +105,15 @@ def test_permitted_repairs_preserve_raw_assistant_and_candidate_separately(proje
     assert len(scripted.requests) == 2
 
 
-def test_early_draft_is_preserved_but_only_the_strict_final_answer_is_saved(
-    project, scripted, facts, run_record,
+@pytest.mark.parametrize("prose", [False, True])
+def test_investigation_reply_is_preserved_but_only_the_strict_final_answer_is_saved(
+    project, scripted, facts, run_record, prose,
 ):
     draft = json.loads(loop.answer(run_record))
     draft["plan_data"]["metadata"]["draft_only"] = True
     raw_draft = json.dumps(draft)
+    if prose:
+        raw_draft = "I have enough to report. Compiling findings now."
     scripted.replies = [loop.message(raw_draft), loop.message(loop.answer(run_record))]
     result = execute(project, scripted)
     root = folder(project, result)

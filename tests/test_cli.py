@@ -260,6 +260,7 @@ def test_cli_help_lists_available_commands(capsys: pytest.CaptureFixture) -> Non
     assert "run_extract_mode" in output.out
     assert "run_verify_mode" in output.out
     assert "list_plans" in output.out
+    assert "list_profiles" in output.out
 
 
 @pytest.mark.parametrize("command", ["add", "update", "prepare", "extract", "list"])

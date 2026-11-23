@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:collaboration-run",
+  "title": "Saved development collaboration attempt",
+  "description": "Separate from E/V run records. Python checks bindings, source integrity, evidence paths, and lifecycle transitions.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "plan_id",
+    "run_id",
+    "stage",
+    "purpose",
+    "retry_of_run_id",
+    "source_path",
+    "source_fingerprint",
+    "status",
+    "started_at",
+    "ended_at",
+    "elapsed_seconds",
+    "settings",
+    "model_calls",
+    "tool_log_path",
+    "budget",
+    "stop_reason",
+    "plan_data",
+    "plan_issues",
+    "error"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^run_collaboration_[0-9]+$"
+    },
+    "stage": {
+      "const": "collaboration"
+    },
+    "purpose": {
+      "const": "development"
+    },
+    "retry_of_run_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "\\S"
+    },
+    "source_path": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "source_fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "status": {
+      "enum": [
+        "running",
+        "succeeded",
+        "failed"
+      ]
+    },
+    "started_at": {
+      "$ref": "urn:heat-adaptation:run#/$defs/utc_timestamp"
+    },
+    "ended_at": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "urn:heat-adaptation:run#/$defs/utc_timestamp"
+        }
+      ]
+    },
+    "elapsed_seconds": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration",
+        "profiles",
+        "document_tools",
+        "environment"
+      ],
+      "properties": {
+        "configuration": {
+          "$ref": "urn:heat-adaptation:collaboration-config#/properties/profiles/items"
+        },
+        "profiles": {
+          "type": "object",
+          "required": [
+            "coordinator",
+            "worker_1",
+            "worker_2"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "coordinator": {
+              "type": "object"
+            },
+            "worker_1": {
+              "type": "object"
+            },
+            "worker_2": {
+              "type": "object"
+            }
+          }
+        },
+        "document_tools": {
+          "$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/document_tools"
+        },
+        "environment": {
+          "$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/environment"
+        }
+      }
+    },
+    "model_calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "actor",
+          "task_id",
+          "phase",
+          "request_path",
+          "response_path",
+          "input_tokens",
+          "output_tokens",
+          "finish_reason",
+          "truncated",
+          "http_status_code",
+          "generation_started",
+          "completion_status",
+          "elapsed_seconds",
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "enum": [
+              "coordinator",
+              "worker_1",
+              "worker_2"
+            ]
+          },
+          "task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "phase": {
+            "enum": [
+              "investigation",
+              "worker_result",
+              "final"
+            ]
+          },
+          "request_path": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "response_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "input_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "finish_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "truncated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "http_status_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 100,
+            "maximum": 599
+          },
+          "generation_started": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "completion_status": {
+            "enum": [
+              null,
+              "normal",
+              "truncated",
+              "failed"
+            ]
+          },
+          "elapsed_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "tool_log_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "\\S"
+    },
+    "budget": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "limits",
+            "model_requests",
+            "charged_estimated_tokens",
+            "reserved_model_requests",
+            "reserved_estimated_tokens",
+            "document_tool_calls",
+            "elapsed_seconds",
+            "reported_usage"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "limits": {
+              "$ref": "urn:heat-adaptation:collaboration-config#/properties/profiles/items/properties/limits"
+            },
+            "model_requests": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "charged_estimated_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reserved_model_requests": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reserved_estimated_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "document_tool_calls": {
+              "type": "object",
+              "required": [
+                "coordinator",
+                "worker_1",
+                "worker_2"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "coordinator": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "worker_1": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "worker_2": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "elapsed_seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "reported_usage": {
+              "type": "object",
+              "required": [
+                "input_tokens",
+                "output_tokens"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "input_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "output_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "stop_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "\\S"
+    },
+    "plan_data": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "urn:heat-adaptation:plan-data"
+        }
+      ]
+    },
+    "plan_issues": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "urn:heat-adaptation:collaboration-response#/properties/plan_issues"
+        }
+      ]
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "\\S"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "running"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "ended_at": {
+            "type": "null"
+          },
+          "elapsed_seconds": {
+            "type": "null"
+          },
+          "error": {
+            "type": "null"
+          },
+          "plan_data": {
+            "type": "null"
+          },
+          "plan_issues": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "ended_at": {
+            "type": "string"
+          },
+          "elapsed_seconds": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "succeeded"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "plan_data": {
+            "type": "object"
+          },
+          "plan_issues": {
+            "type": "object"
+          },
+          "error": {
+            "type": "null"
+          },
+          "model_calls": {
+            "minItems": 1
+          },
+          "budget": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "plan_data": {
+            "type": "null"
+          },
+          "plan_issues": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ]
+}

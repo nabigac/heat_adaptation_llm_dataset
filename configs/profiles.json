@@ -30,9 +30,13 @@
         "prompts/field_definitions.md",
         "prompts/extractor.md"
       ],
-      "max_tool_calls": 20,
+      "max_tool_calls": 25,
       "model_timeout_seconds": 1800,
-      "image_input_enabled": false
+      "max_elapsed_seconds": 5400,
+      "image_input_enabled": false,
+      "max_model_requests": 25,
+      "max_estimated_tokens": 31457280,
+      "final_generation_seconds": 1800
     },
     {
       "name": "deepseek_v4_1_flash_1017_hf_verifier",
@@ -56,7 +60,89 @@
         "prompts/field_definitions.md",
         "prompts/verifier.md"
       ],
-      "max_tool_calls": 20,
+      "max_tool_calls": 25,
+      "model_timeout_seconds": 1800,
+      "max_elapsed_seconds": 5400,
+      "image_input_enabled": false,
+      "max_model_requests": 25,
+      "max_estimated_tokens": 31457280,
+      "final_generation_seconds": 1800
+    },
+    {
+      "name": "glm5_3_flash_hf_coordinator",
+      "stage": "coordinator",
+      "model": {
+        "name": "zai-org/GLM-5.3-Flash",
+        "execution_mode": "hosted_api",
+        "endpoint": "https://router.huggingface.co/v1",
+        "api_service": "huggingface",
+        "provider": "deepinfra"
+      },
+      "generation": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "max_output_tokens": 131072
+      },
+      "context_limit": 1048576,
+      "prompt_paths": [
+        "prompts/shared_coding.md",
+        "prompts/field_definitions.md",
+        "prompts/coordinator.md"
+      ],
+      "max_tool_calls": 25,
+      "model_timeout_seconds": 1800,
+      "image_input_enabled": false
+    },
+    {
+      "name": "inkling2_small_hf_worker",
+      "stage": "worker",
+      "model": {
+        "name": "thinkingmachines/Inkling-2-Small",
+        "execution_mode": "hosted_api",
+        "endpoint": "https://router.huggingface.co/v1",
+        "api_service": "huggingface",
+        "provider": "deepinfra"
+      },
+      "generation": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "max_output_tokens": 131072
+      },
+      "context_limit": 1048576,
+      "prompt_paths": [
+        "prompts/shared_coding.md",
+        "prompts/field_definitions.md",
+        "prompts/worker.md"
+      ],
+      "max_tool_calls": 25,
+      "model_timeout_seconds": 1800,
+      "image_input_enabled": false
+    },
+    {
+      "name": "deepseek_v4_1_flash_1017_hf_worker",
+      "stage": "worker",
+      "model": {
+        "name": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        "execution_mode": "hosted_api",
+        "endpoint": "https://router.huggingface.co/v1",
+        "api_service": "huggingface",
+        "provider": "deepinfra"
+      },
+      "generation": {
+        "temperature": null,
+        "top_p": null,
+        "seed": null,
+        "max_output_tokens": 131072
+      },
+      "context_limit": 1048576,
+      "prompt_paths": [
+        "prompts/shared_coding.md",
+        "prompts/field_definitions.md",
+        "prompts/worker.md"
+      ],
+      "max_tool_calls": 25,
       "model_timeout_seconds": 1800,
       "image_input_enabled": false
     }

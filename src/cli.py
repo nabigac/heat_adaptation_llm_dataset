@@ -13,6 +13,10 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 import agents
+import collaboration_runner
+from collaboration_contracts import (
+    DEFAULT_COLLABORATION_PROFILE, load_collaboration_configuration, load_collaboration_profiles,
+)
 import documents
 import expert_files
 import storage
@@ -21,7 +25,7 @@ from quotation_diagnostics import QUOTATION_PAGE_REPORT_PATH
 
 # Start reading at main(): arguments choose an operation, workflow modules perform
 # the work, and the small helpers below print its result. Model commands delegate
-# their lifecycle, validation and saving to the corresponding agents.py runner.
+# lifecycle and saving to agents.py (E/V) or collaboration_runner.py (C).
 def main(argv: list[str] | None = None) -> int:
     """Run a command and return 0 on success or 1 when the requested operation fails.
 
@@ -50,8 +54,12 @@ def main(argv: list[str] | None = None) -> int:
             return _prepare_plan(root, args.plan_id, ocr_enabled=args.ocr_enabled)
         elif args.command in {"run_extract_mode", "run_verify_mode"}:
             return _run_model_mode(root, args)
+        elif args.command == "run_collaboration_mode":
+            return _run_collaboration_mode(root, args)
         elif args.command == "list_plans":
             _list_plans(root)
+        elif args.command == "list_profiles":
+            _list_profiles(root, args)
         elif args.command == "create_expert_reference":
             _create_expert_reference(root, args)
         elif args.command == "validate_expert_reference":
@@ -68,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """Describe commands and arguments; argparse generates their help messages."""
     parser = argparse.ArgumentParser(
         prog="heat-adaptation-llm-dataset",
-        description="Register and prepare PDFs, extract or verify records, create or check expert forms, and list status.",
+        description="Register and prepare PDFs, run extraction, verification or collaboration, and manage expert forms.",
         allow_abbrev=False,
     )
     # Explicit option names prevent a shortened flag from acquiring a different
@@ -135,10 +143,39 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_model_run_arguments(run_verify_mode_parser, stage="verifier")
 
+    collaboration_parser = commands.add_parser(
+        "run_collaboration_mode", help="Coordinate three hosted models from a prepared development plan.",
+        allow_abbrev=False,
+    )
+    collaboration_parser.add_argument("plan_id", help="Registered development plan ID.")
+    collaboration_parser.add_argument("--source-path", required=True, help="Exact project-relative preparation.json.")
+    collaboration_parser.add_argument(
+        "--profile", default=DEFAULT_COLLABORATION_PROFILE,
+        help=f"Named C binding (default: {DEFAULT_COLLABORATION_PROFILE}).",
+    )
+    collaboration_parser.add_argument("--purpose", required=True, choices=["development"])
+    collaboration_parser.add_argument("--retry-of-run-id", help="Failed C attempt for the same preparation; starts a new attempt.")
+    collaboration_parser.add_argument("--config-path", default="configs/collaboration.json", help="Project-relative C bindings.")
+    collaboration_parser.add_argument("--model-config-path", default="configs/profiles.json", help="Project-relative model profiles.")
+    _add_project_argument(collaboration_parser)
+
     list_plans_parser = commands.add_parser(
         "list_plans", help="List registered documents, saved preparation status, and links.", allow_abbrev=False
     )
     _add_project_argument(list_plans_parser)
+
+    list_profiles_parser = commands.add_parser(
+        "list_profiles", help="List selectable E/V/C profiles, models, and configured limits.",
+        allow_abbrev=False,
+    )
+    list_profiles_parser.add_argument(
+        "--config-path", default="configs/profiles.json", help="Project-relative model profiles.",
+    )
+    list_profiles_parser.add_argument(
+        "--collaboration-config-path", default="configs/collaboration.json",
+        help="Project-relative C bindings.",
+    )
+    _add_project_argument(list_profiles_parser)
 
     reference_parser = commands.add_parser(
         "create_expert_reference",
@@ -320,6 +357,46 @@ def _run_model_mode(root: Path, args: argparse.Namespace) -> int:
     return 130 if cancelled else (0 if record["status"] == "succeeded" and not saved.persistence_error else 1)
 
 
+def _run_collaboration_mode(root: Path, args: argparse.Namespace) -> int:
+    """Display published C status, including cancellation and saving failures."""
+    async def execute():
+        try:
+            result = await collaboration_runner.run_collaboration(root, args.plan_id,
+                source_path=args.source_path, profile_name=args.profile, purpose=args.purpose,
+                retry_of_run_id=args.retry_of_run_id, config_path=args.config_path,
+                model_config_path=args.model_config_path)
+            return result, False
+        except collaboration_runner.SavedCollaborationCancelled as cancelled:
+            return cancelled.result, True
+    print(f"Starting collaboration for {_display_text(args.plan_id)}.", flush=True)
+    try:
+        saved, cancelled = asyncio.run(execute())
+    except KeyboardInterrupt:
+        print("Collaboration interrupted; inspect saved records before retrying.", file=sys.stderr)
+        return 130
+    print(f"Status: {saved.record['status']}")
+    print(f"Run record: {saved.record_path}")
+    print(f"Model requests: {len(saved.record['model_calls'])}")
+    if saved.record["tool_log_path"]:
+        print(f"Tool log: {saved.record['tool_log_path']}")
+    folder = PurePosixPath(saved.record_path).parent
+    for name, label in (("validation_report.json", "Validation report"),
+                        (QUOTATION_PAGE_REPORT_PATH, "Quotation/page diagnostic")):
+        if storage.resolve_project_path(root, f"{folder}/{name}").is_file():
+            print(f"{label}: {folder}/{name}")
+    if saved.quotation_diagnostics is not None:
+        summary = saved.quotation_diagnostics["summary"]
+        print(f"Quotation/page corrections: {summary['corrected']}")
+        print(f"Quotation/page flags: {summary['possible_page_mismatch']} possible page mismatches; "
+              f"{summary['unmatched_quote']} unmatched quotations; {summary['unconfirmed_page_span']} unconfirmed spans.")
+    for label, error in (("Error", saved.record["error"]), ("Saving error", saved.persistence_error)):
+        if error:
+            print(f"{label}: {error}", file=sys.stderr)
+    if cancelled:
+        print("Collaboration cancelled; available evidence was retained where saving succeeded.", file=sys.stderr)
+    return 130 if cancelled else (0 if saved.record["status"] == "succeeded" and not saved.persistence_error else 1)
+
+
 def _add_plan(root: Path, args: argparse.Namespace) -> None:
     """Pass collected arguments to registration and show its saved result."""
     # Tuple unpacking gives names to both returned values: the registry entry
@@ -433,6 +510,70 @@ def _list_plans(root: Path) -> None:
         )
         if entry["prepared_source_path"] is not None:
             print(f"  Preparation: {entry['prepared_source_path']}")
+
+
+def _list_profiles(root: Path, args: argparse.Namespace) -> None:
+    """Show command-level choices without credentials, inference, or file writes."""
+    configuration = agents.load_profiles(root, config_path=args.config_path)
+    commands = {"extractor": ("E", "run_extract_mode"), "verifier": ("V", "run_verify_mode")}
+    profiles = [
+        agents.load_profile(root, profile["name"], stage=profile["stage"], config_path=args.config_path)
+        for profile in configuration["profiles"] if profile["stage"] in commands
+    ]
+    bindings = load_collaboration_profiles(root, config_path=args.collaboration_config_path)
+    collaborations = [
+        load_collaboration_configuration(
+            root, binding["name"], config_path=args.collaboration_config_path,
+            model_config_path=args.config_path,
+        )
+        for binding in bindings["profiles"]
+    ]
+    # Validate all choices before printing so a damaged binding cannot produce a
+    # partial listing that looks complete. Internal C roles are nested under C.
+    for profile in profiles:
+        mode, command = commands[profile["stage"]]
+        print(f"{mode}: {_display_text(profile['name'])} ({command})")
+        _print_profile_model("model", profile)
+        # Historical profiles omit the independent cap and keep their tool-derived
+        # bound. All request ceilings include final generation.
+        requests = profile.get("max_model_requests", profile["max_tool_calls"] + 1)
+        print(f"  Model requests: up to {requests}; "
+              f"document-tool calls: {profile['max_tool_calls']}")
+        if "max_estimated_tokens" in profile:
+            print(f"  Configuration estimated-token allowance: {profile['max_estimated_tokens']:,} "
+                  "(E+V shares E and V)")
+        ceiling = profile.get("max_elapsed_seconds")
+        print(f"  Elapsed ceiling: {_elapsed_ceiling(ceiling)}")
+        if "final_generation_seconds" in profile:
+            print(f"  Protected final window: {_elapsed_ceiling(profile['final_generation_seconds'])}; "
+                  "E+V reserves this for the final V answer")
+    for binding, actors in collaborations:
+        print(f"C: {_display_text(binding['name'])} (run_collaboration_mode; development only)")
+        for actor, profile in actors.items():
+            _print_profile_model(actor, profile)
+        limits = binding["limits"]
+        print(f"  Shared ceilings: {limits['max_model_requests']} model requests; "
+              f"{limits['max_document_tool_calls']} document-tool calls; "
+              f"{_elapsed_ceiling(limits['max_elapsed_seconds'])}")
+        print(f"  Aggregate estimated-token allowance: {limits['max_estimated_tokens']:,}")
+        reserve = limits.get("final_generation_seconds", actors["coordinator"]["model_timeout_seconds"])
+        print(f"  Protected final window: {_elapsed_ceiling(reserve)} for the coordinator")
+    print("Model requests include final generation. E+V combines stage request limits and shares elapsed time; "
+          "V subtracts its linked E duration.")
+
+
+def _print_profile_model(label: str, profile: dict) -> None:
+    """Keep per-request limits and each actor's document-tool cap visible."""
+    print(f"  {label}: {_display_text(profile['model']['name'])} "
+          f"(Hugging Face / {_display_text(profile['model']['provider'])})")
+    print(f"    Context/request: {profile['context_limit']:,}; "
+          f"output/request: {profile['generation']['max_output_tokens']:,}; "
+          f"document-tool calls: {profile['max_tool_calls']}")
+
+
+def _elapsed_ceiling(seconds: float | None) -> str:
+    """Display historical profiles with no ceiling without inventing one."""
+    return "not configured" if seconds is None else f"{seconds / 60:g} min"
 
 
 def _display_text(value: str) -> str:

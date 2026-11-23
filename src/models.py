@@ -142,8 +142,26 @@ def prepare_response_schema() -> dict:
     enforces every keyword. Always use the original Python validators afterward.
     The saved runner preserves the exact sent schema with its request.
     """
+    return _prepare_schema_documents(_RESPONSE_SCHEMA_FILES, _RESPONSE_SCHEMA_URI)
+
+
+def prepare_collaboration_schema(filename: str) -> dict:
+    """Expand one explicitly selected C contract without loading it for E/V."""
+    names = {
+        "collaboration_task.schema.json": "urn:heat-adaptation:collaboration-task",
+        "collaboration_result.schema.json": "urn:heat-adaptation:collaboration-result",
+        "collaboration_response.schema.json": "urn:heat-adaptation:collaboration-response",
+    }
+    if filename not in names:
+        raise ResponseSchemaError("Select a known collaboration model contract.")
+    uri = names[filename]
+    return _prepare_schema_documents({"urn:heat-adaptation:plan-data": "plan_data.schema.json", uri: filename}, uri)
+
+
+def _prepare_schema_documents(files: dict, root_uri: str) -> dict:
+    """Share local expansion while preserving each workflow's own contract."""
     documents = {}
-    for uri, filename in _RESPONSE_SCHEMA_FILES.items():
+    for uri, filename in files.items():
         path = _SCHEMA_DIRECTORY / filename
         try:
             document = json.loads(
@@ -159,7 +177,7 @@ def prepare_response_schema() -> dict:
             raise ResponseSchemaError(f"Response schema {path} must use JSON Schema Draft 2020-12.")
         documents[uri] = document
     try:
-        prepared = _ResponseSchemaPreparer(documents).expand(documents[_RESPONSE_SCHEMA_URI], _RESPONSE_SCHEMA_URI)
+        prepared = _ResponseSchemaPreparer(documents).expand(documents[root_uri], root_uri)
         # All resource-local dialects are the same; retain one declaration on the
         # completed root after removing resource identities and local references.
         prepared = {"$schema": _SCHEMA_DIALECT, **prepared}
@@ -421,6 +439,22 @@ def _validate_chat_messages(messages: list[dict], definitions: dict[str, dict]) 
             raise ValueError("Message role must be system, user, assistant or tool.")
     if pending:
         raise ValueError("The conversation ends with tool calls that still need results.")
+
+
+def is_investigation_handoff(result: ModelCallResult) -> bool:
+    """End tool investigation on a normal, nonempty reply without tool calls.
+
+    The reply may be a readiness signal, prose, or an unfinished draft. Its
+    shape does not establish task completion or answer validity. Preserve it
+    unchanged and require one separate schema-constrained final response.
+    """
+    return (
+        result.completion_status == "normal"
+        and result.error is None
+        and not result.tool_calls
+        and isinstance(result.response_text, str)
+        and bool(result.response_text.strip())
+    )
 
 
 def _json_object(raw: bytes) -> dict:

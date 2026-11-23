@@ -3,7 +3,7 @@
   "$id": "urn:heat-adaptation:profiles",
   "title": "Editable model profiles and shared document tools",
   "description": "The configuration format in DESIGN.md Appendix A. Valid fields do not establish model availability, capacity, or tested capability.",
-  "$comment": "Reuse the run schema's setting fields so editable profiles and saved run settings agree. Python checks unique names, finite numbers, and portable prompt paths. Loading reads only the explicitly selected profile's prompts. No runtime environment or credentials belong in this configuration.",
+  "$comment": "Reuse the run schema's setting fields except editable stage, which also permits coordinator and worker profiles for C. Saved E/V run stages remain unchanged. Python checks unique names, finite numbers, and portable prompt paths. Loading reads only the explicitly selected profile's prompts. No runtime environment or credentials belong in this configuration.",
   "type": "object",
   "required": ["schema_version", "document_tools", "profiles"],
   "additionalProperties": false,
@@ -22,7 +22,7 @@
       "additionalProperties": false,
       "properties": {
         "name": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/name"},
-        "stage": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/stage"},
+        "stage": {"type": "string", "enum": ["extractor", "verifier", "coordinator", "worker"]},
         "model": {
           "allOf": [
             {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/model"},
@@ -33,7 +33,11 @@
         "context_limit": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/context_limit"},
         "prompt_paths": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/prompt_paths"},
         "max_tool_calls": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/max_tool_calls"},
+        "max_model_requests": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/max_model_requests"},
+        "max_estimated_tokens": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/max_estimated_tokens"},
         "model_timeout_seconds": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/model_timeout_seconds"},
+        "max_elapsed_seconds": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/max_elapsed_seconds"},
+        "final_generation_seconds": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/final_generation_seconds"},
         "image_input_enabled": {"$ref": "urn:heat-adaptation:run#/$defs/saved_run_settings/properties/image_input_enabled"}
       }
     }

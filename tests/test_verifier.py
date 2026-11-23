@@ -76,13 +76,18 @@ def prepare_replies(scripted, response):
 
 
 @pytest.mark.parametrize("valid_final", [True, False])
+@pytest.mark.parametrize("reply_kind", ["plain", "wrapped", "prose"])
 def test_early_verifier_draft_does_not_bypass_final_schema_or_quotation_checks(
-    project, baseline, scripted, valid_final,
+    project, baseline, scripted, valid_final, reply_kind,
 ):
     original = saved_bytes((project / baseline.record_path).parent)
     draft = answer(baseline.record)
     draft["plan_issues"]["issues"][0]["resolution_pages"] = [1]
     raw_draft = json.dumps(draft)
+    if reply_kind == "wrapped":
+        raw_draft = agents.FINAL_READY_SIGNAL + "\n```json\n" + raw_draft + "\n```"
+    elif reply_kind == "prose":
+        raw_draft = "I have enough to report. Compiling findings now."
     final = answer(baseline.record) if valid_final else copy.deepcopy(draft)
     final["plan_data"]["actions"][0]["evidence"][0]["page_numbers"] = [2]
     scripted.replies = [message(raw_draft), message(json.dumps(final))]

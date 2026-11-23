@@ -10,6 +10,7 @@ silently retries a failed run.
 import asyncio
 import hashlib
 import json
+import math
 import platform
 import re
 import subprocess
@@ -18,19 +19,20 @@ import tempfile
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
 from typing import Callable, Literal
 
+from agent_budget import AgentRequestBudget, InvestigationBudgetExhausted
 from models import (
     ModelCallResult, ModelRequestCancelled,
-    prepare_response_schema, prepare_document_tools,
+    is_investigation_handoff, prepare_response_schema, prepare_document_tools,
 )
 from huggingface_api import (
     PreparedHuggingFaceRequest, build_huggingface_request,
-    request_huggingface_chat, require_huggingface_token,
+    request_huggingface_chat, require_huggingface_token, estimate_huggingface_budget,
 )
 from quotation_diagnostics import QUOTATION_PAGE_REPORT_PATH, correct_quotation_pages
 from storage import (
@@ -40,7 +42,7 @@ from storage import (
     append_run_tool_log, create_run_record, next_run_id, save_run_file, save_run_record,
 )
 from validation import (
-    FinalResponseValidation, ValidationProblem, is_agent_response_draft,
+    FinalResponseValidation, ValidationProblem,
     parse_agent_response_json, parse_profiles_json,
     validate_and_repair_agent_response,
     validate_verifier_issue_continuity,
@@ -143,7 +145,7 @@ def load_profile(
     project_root: Path | str,
     profile_name: str,
     *,
-    stage: Literal["extractor", "verifier"],
+    stage: Literal["extractor", "verifier", "coordinator", "worker"],
     config_path: str = "configs/profiles.json",
 ) -> dict:
     """Return the chosen profile plus shared tools and exact ordered prompt texts.
@@ -152,10 +154,12 @@ def load_profile(
     settings. run_extractor adds observed environment details before
     creating a run record. We do not fabricate versions, hardware, or Git state.
     No profile is selected by position, guessed from a stage, or silently reused.
+    C profile loading prepares coordinator/worker settings; it does not enable
+    a C run command or extend the saved E/V response and run contracts.
     """
-    if stage not in ("extractor", "verifier"):
+    if stage not in ("extractor", "verifier", "coordinator", "worker"):
         raise ProfileValidationError([ValidationProblem(
-            "other", "stage", "Select stage 'extractor' or 'verifier'."
+            "other", "stage", "Select stage 'extractor', 'verifier', 'coordinator', or 'worker'."
         )])
     configuration = load_profiles(project_root, config_path=config_path)
     selected = next(
@@ -478,8 +482,8 @@ def _format_plan_source(preparation: dict, pages: list[dict]) -> str:
 
 # These are controller instructions, separate from the selected coding prompts.
 # Exact sent requests retain them in ModelAttempt.request.body. The readiness
-# signal is preferred; a recognizable early draft can also end investigation.
-# Either route still makes the same single schema-constrained final request.
+# signal is preferred; any normal, nonempty reply without tools can hand off.
+# Its content remains unvalidated until the separate final request completes.
 FINAL_READY_SIGNAL = "READY_FOR_FINAL_RESPONSE"
 _TOOL_PHASE_INSTRUCTIONS = (
     "Python controller: this is the tool-investigation phase. All coding and source-handling rules still apply. "
@@ -499,13 +503,24 @@ _TEXT_TOOL_NAMES = {"get_page_text", "find_quote"}
 _DOCUMENT_TOOL_NAMES = _TEXT_TOOL_NAMES | {"run_ocr"}
 
 
-def _tool_phase_instructions(limit: int, submitted: int) -> str:
+def _tool_phase_instructions(
+    limit: int, submitted: int, request_budget: AgentRequestBudget | None = None,
+) -> str:
     """Expose the same allowance enforced by Python, including failed calls."""
     remaining = limit - submitted
-    return (_TOOL_PHASE_INSTRUCTIONS + " "
+    instructions = (_TOOL_PHASE_INSTRUCTIONS + " "
         f"Document-tool budget for this stage: {limit} total; {submitted} submitted; {remaining} remaining. "
         f"Request at most {remaining} calls in the next batch. Submitted calls count even when they fail. "
         "All prepared pages are already supplied; use tools for targeted checks and finish early when ready.")
+    if request_budget is not None:
+        if request_budget.max_requests is not None:
+            instructions += (f" Model-request ceiling: {request_budget.max_requests} for this stage, "
+                f"including final generation; {request_budget.requests} admitted. One final request is reserved.")
+        if request_budget.max_estimated_tokens is not None:
+            charged = request_budget.extractor_estimated_tokens + request_budget.estimated_tokens
+            instructions += (f" Configuration estimated-token ceiling: {request_budget.max_estimated_tokens}; "
+                f"{charged} charged including any linked E. Final capacity remains reserved.")
+    return instructions
 
 
 def _final_source_page_instructions(stage: str) -> str:
@@ -561,6 +576,10 @@ class AgentLoopResult:
     error: str | None = None
     elapsed_seconds: float = 0.0
     checkpoint_error: str | None = None
+    # Monotonic deadlines are process-local; only the allowance is persisted.
+    deadline_monotonic: float | None = None
+    investigation_deadline_monotonic: float | None = None
+    request_budget: AgentRequestBudget | None = None
 
 
 class ExtractorLoopResult(AgentLoopResult):
@@ -689,6 +708,100 @@ async def _bounded_mcp_request(awaitable, timeout_seconds: float):
     return result
 
 
+def _configuration_time_budget(packet: AgentInput) -> dict | None:
+    """Charge the exact E duration once when budgeting an E+V attempt.
+
+    Historical profiles may omit the ceiling. Each manual retry gets a new
+    attempt allowance; previous failed attempts remain separate evidence.
+    """
+    limit = packet.settings.get("max_elapsed_seconds")
+    if limit is None:
+        return None
+    baseline_seconds = 0.0
+    baseline_run_id = None
+    if isinstance(packet, VerifierInput):
+        baseline_run_id = packet.input_run_id
+        baseline_seconds = packet.input_run["elapsed_seconds"]
+        if (type(baseline_seconds) not in (int, float)
+                or not math.isfinite(baseline_seconds) or baseline_seconds < 0):
+            raise ValueError("A timed E+V attempt requires its extractor's recorded elapsed duration.")
+    allowance = limit - baseline_seconds
+    if allowance <= 0:
+        raise ValueError("The linked extraction has exhausted the configuration time allowance; no verifier request can start.")
+    budget = {"configuration_limit_seconds": limit, "input_run_id": baseline_run_id,
+              "extractor_elapsed_seconds": baseline_seconds, "stage_allowance_seconds": allowance}
+    final_seconds = packet.settings.get("final_generation_seconds")
+    if final_seconds is not None:
+        investigation_seconds = allowance - final_seconds
+        if investigation_seconds < 0:
+            raise ValueError("The linked extraction used the protected final window; it must finish within the configuration's investigation allowance before V can start.")
+        budget.update(final_generation_seconds=final_seconds, investigation_allowance_seconds=investigation_seconds)
+    return budget
+
+
+def _remaining_stage_seconds(state: AgentLoopResult) -> float | None:
+    if state.deadline_monotonic is None:
+        return None
+    remaining = state.deadline_monotonic - time.monotonic()
+    if remaining <= 0:
+        raise ValueError("Configuration time allowance exhausted; no further model or document-tool work is allowed.")
+    return remaining
+
+
+def _configuration_request_budget(root: Path, packet: AgentInput) -> AgentRequestBudget | None:
+    """Debit E's exact saved hosted requests before allocating a budgeted V.
+
+    Re-encoding the saved wire body uses the same serialization as the adapter.
+    Provider-reported tokens and today's prompts never substitute for that input.
+    Historical profiles without these optional controls keep their original loop.
+    """
+    settings = packet.settings
+    if not any(name in settings for name in ("max_model_requests", "max_estimated_tokens")):
+        return None
+    baseline_tokens = 0
+    if isinstance(packet, VerifierInput) and "max_estimated_tokens" in settings:
+        baseline = packet.input_run
+        if baseline["settings"]["model"]["execution_mode"] != "hosted_api":
+            raise ValueError("An estimated-token E+V budget requires a hosted extractor with saved requests.")
+        for call in baseline["model_calls"]:
+            response = call["response_path"]
+            match = re.fullmatch(r"response_(\d+)\.json", PurePosixPath(response).name) if response else None
+            if match is None:
+                raise ValueError("Cannot determine the linked extractor's saved request estimates.")
+            number = int(match.group(1))
+            path = f"runs/{packet.plan_id}/{packet.input_run_id}/responses/attempt_{number:02d}/request.json"
+            saved = json.loads(resolve_project_path(root, path).read_bytes())
+            if (not isinstance(saved, dict) or not {"body", "url", "timeout_seconds"} <= saved.keys()
+                    or not isinstance(saved["body"], dict)):
+                raise ValueError("The linked extractor's saved request is malformed; its token estimate is unavailable.")
+            body = saved["body"]
+            profile = baseline["settings"]
+            if body.get("model") != profile["model"]["name"] + ":" + profile["model"]["provider"]:
+                raise ValueError("The linked extractor's saved request model differs from its settings.")
+            request = PreparedHuggingFaceRequest(
+                saved["url"], json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+                saved["timeout_seconds"], profile["model"]["name"], profile["context_limit"],
+                profile["generation"]["max_output_tokens"],
+            )
+            report = estimate_huggingface_budget(request).report
+            if (not report["fits"] or type(body.get("max_tokens")) is not int
+                    or body["max_tokens"] != request.max_output_tokens):
+                raise ValueError("The linked extractor's saved request has inconsistent capacity settings.")
+            baseline_tokens += report["estimated_input_tokens"] + report["max_output_tokens"]
+    return AgentRequestBudget(settings, extractor_estimated_tokens=baseline_tokens)
+
+
+def _operation_timeout(state: AgentLoopResult, configured_seconds: float, *, final: bool = False) -> float:
+    """Investigation cannot spend the final window; every phase shares one end."""
+    remaining = _remaining_stage_seconds(state)
+    if not final and state.investigation_deadline_monotonic is not None:
+        investigation_remaining = state.investigation_deadline_monotonic - time.monotonic()
+        if investigation_remaining <= 0:
+            raise InvestigationBudgetExhausted("Investigation time is exhausted; the final-generation window is reserved.")
+        remaining = investigation_remaining if remaining is None else min(remaining, investigation_remaining)
+    return configured_seconds if remaining is None else min(configured_seconds, remaining)
+
+
 async def _model_turn(
     state: AgentLoopResult, phase: Literal["tool_use", "final"], tools: list[dict],
     response_directory: str, transport, progress,
@@ -699,6 +812,15 @@ async def _model_turn(
     request = build_huggingface_request(
         packet.settings, state.messages, tools=tools, response_format=response_format,
     )
+    request = replace(request, timeout_seconds=_operation_timeout(state, request.timeout_seconds, final=phase == "final"))
+    if state.request_budget is not None:
+        estimate = estimate_huggingface_budget(request).report
+        # Oversized per-request input follows the existing saved preflight failure
+        # path. A shared-budget stop is a handoff only when the request itself fits.
+        if estimate["fits"]:
+            state.request_budget.admit(
+                estimate["estimated_input_tokens"] + estimate["max_output_tokens"], final=phase == "final",
+            )
     attempt = ModelAttempt(
         phase, request, f"{response_directory}/response_{len(state.model_attempts) + 1:02d}.txt",
     )
@@ -718,6 +840,7 @@ async def _model_turn(
         _loop_checkpoint(progress, "model_result", state, suppress=True)
         raise
     _loop_checkpoint(progress, "model_result", state)
+    _remaining_stage_seconds(state)
     result = attempt.result
     if result.error is not None or result.completion_status in {"failed", "truncated"}:
         raise ValueError(result.error or f"Model request ended as {result.completion_status}.")
@@ -753,21 +876,29 @@ async def _execute_tool_calls(state: AgentLoopResult, client, calls: list[dict],
                 entry["error"] = "Tool-call limit reached; request was not executed."
                 payload = {"is_error": True, "error": entry["error"]}
             else:
-                state.tool_calls_started += 1
-                reply = await _bounded_mcp_request(client.call_tool(name, arguments),
-                                                    settings["document_tools"]["tool_timeout_seconds"])
-                # Preserve the full MCP result in the ordered log. Send one
-                # representation to the model, avoiding duplicated text/JSON.
-                entry["result"] = reply.model_dump(mode="json", by_alias=True)
-                if any(block.type != "text" for block in reply.content):
-                    raise ValueError("This loop supports text MCP results only; OCR returns text, while image/audio delivery is not enabled.")
-                if reply.is_error:
-                    entry["error"] = " ".join(block.text for block in reply.content) or "Document tool returned an error."
-                payload = {"is_error": reply.is_error}
-                if reply.structured_content is not None:
-                    payload["result"] = reply.structured_content
+                try:
+                    tool_timeout = _operation_timeout(state, settings["document_tools"]["tool_timeout_seconds"])
+                except InvestigationBudgetExhausted as error:
+                    # Acknowledge every requested call even when the final window
+                    # has begun, so the final conversation has no pending tools.
+                    entry["error"] = str(error) + " Tool request was not executed."
+                    payload = {"is_error": True, "error": entry["error"]}
                 else:
-                    payload["messages"] = [block.text for block in reply.content]
+                    state.tool_calls_started += 1
+                    reply = await _bounded_mcp_request(client.call_tool(name, arguments), tool_timeout)
+                    # Preserve the full MCP result in the ordered log. Send one
+                    # representation to the model, avoiding duplicated text/JSON.
+                    entry["result"] = reply.model_dump(mode="json", by_alias=True)
+                    _remaining_stage_seconds(state)
+                    if any(block.type != "text" for block in reply.content):
+                        raise ValueError("This loop supports text MCP results only; OCR returns text, while image/audio delivery is not enabled.")
+                    if reply.is_error:
+                        entry["error"] = " ".join(block.text for block in reply.content) or "Document tool returned an error."
+                    payload = {"is_error": reply.is_error}
+                    if reply.structured_content is not None:
+                        payload["result"] = reply.structured_content
+                    else:
+                        payload["messages"] = [block.text for block in reply.content]
             message = {"role": "tool", "tool_name": name,
                        "content": json.dumps(payload, ensure_ascii=False, allow_nan=False)}
             if "id" in call:
@@ -796,6 +927,7 @@ async def run_extractor_loop(
     _transport=None,
     _on_progress: Callable | None = None, _prepared_input: ExtractorInput | None = None,
     _run_record_path: str | None = None,
+    _started_monotonic: float | None = None,
 ) -> ExtractorLoopResult:
     """Coordinate one extractor attempt without writing a research run.
 
@@ -807,7 +939,7 @@ async def run_extractor_loop(
     ending in responses/. Its default is logical only: no files are created here.
     run_extractor supplies its allocated run's actual response directory.
     """
-    started = time.monotonic()
+    started = time.monotonic() if _started_monotonic is None else _started_monotonic
     root = Path(project_root).resolve()
     packet = deepcopy(_prepared_input if _prepared_input is not None else build_extractor_input(
         root, plan_id, source_path=source_path, profile_name=profile_name, config_path=config_path))
@@ -825,9 +957,10 @@ async def run_verifier_loop(
     config_path: str = "configs/profiles.json", response_directory: str = "responses",
     _transport=None, _on_progress: Callable | None = None,
     _prepared_input: VerifierInput | None = None, _run_record_path: str | None = None,
+    _started_monotonic: float | None = None,
 ) -> VerifierLoopResult:
     """Verify one pinned E answer with the shared bounded model/tool lifecycle."""
-    started = time.monotonic()
+    started = time.monotonic() if _started_monotonic is None else _started_monotonic
     root = Path(project_root).resolve()
     if purpose == "comparison":
         raise ValueError("Formal comparison is not yet enabled; validate the verifier and reference workflow and freeze settings first.")
@@ -859,61 +992,79 @@ async def _run_agent_loop(
     response_directory = PurePosixPath(response_directory).as_posix()
     state = result_type(packet, [deepcopy(packet.messages[0]),
         {"role": "system", "content": _TOOL_PHASE_INSTRUCTIONS}, *deepcopy(packet.messages[1:])])
+    budget = _configuration_time_budget(packet)
+    if budget is not None:
+        state.deadline_monotonic = started + budget["stage_allowance_seconds"]
+        if "investigation_allowance_seconds" in budget:
+            state.investigation_deadline_monotonic = started + budget["investigation_allowance_seconds"]
+    state.request_budget = _configuration_request_budget(root, packet)
     timeout = packet.settings["document_tools"]["tool_timeout_seconds"]
     try:
         _loop_checkpoint(_on_progress, "input_ready", state)
         async with AsyncExitStack() as cleanup:
-            # Only the saved wrapper provides an active record. Bare-loop calls
-            # keep their original text-only catalogue and create no OCR files.
-            document_client = (_document_client(root, packet) if _run_record_path is None else
-                               _document_client(root, packet, run_record_path=_run_record_path))
-            client = await _bounded_mcp_request(cleanup.enter_async_context(document_client), timeout)
-            catalogue = await _bounded_mcp_request(client.list_tools(), timeout)
-            if catalogue.next_cursor:
-                raise ValueError("Unexpected paginated catalogue from the local document server.")
-            state.tool_catalogue = [tool.model_dump(mode="json", by_alias=True) for tool in catalogue.tools]
-            _loop_checkpoint(_on_progress, "catalogue", state)
-            expected_tools = _TEXT_TOOL_NAMES | ({"run_ocr"} if _run_record_path is not None
-                                                 and packet.settings["document_tools"]["ocr_enabled"] else set())
-            if {tool["name"] for tool in state.tool_catalogue} != expected_tools or len(state.tool_catalogue) != len(expected_tools):
-                raise ValueError(f"The {stage} requires the two supported saved-text tools and, for an OCR-enabled saved run, run_ocr.")
-            tools = prepare_document_tools(state.tool_catalogue)
-            # Every tool-phase turn must consume budget or finish investigation.
-            # This gives a finite bound without adding a second profile setting.
-            early_draft = False
-            while state.tool_calls_started < packet.settings["max_tool_calls"]:
-                # Refresh the dedicated controller slot rather than accumulate
-                # stale allowances. Earlier exact requests remain saved separately.
-                state.messages[1]["content"] = _tool_phase_instructions(
-                    packet.settings["max_tool_calls"], state.tool_calls_started)
-                result = await _model_turn(state, "tool_use", tools, response_directory, _transport, _on_progress)
-                state.messages.append(deepcopy(result.assistant_message))
-                if result.tool_calls:
-                    await _execute_tool_calls(state, client, result.tool_calls, _on_progress)
-                elif (result.response_text or "").strip() == FINAL_READY_SIGNAL:
-                    # Tolerate outer whitespace in the control signal while
-                    # preserving its raw message. Source/final text is untouched.
-                    break
-                elif is_agent_response_draft(result.response_text or ""):
-                    # Some models answer before the explicit final request. Keep
-                    # that message as an unvalidated draft, never as accepted data.
-                    # _model_turn already requires confirmed normal completion.
-                    early_draft = True
-                    break
-                else:
-                    raise ValueError("Tool phase expected tool calls, the exact readiness signal, or a complete JSON answer draft; no model retry was made.")
-            if early_draft:
-                reason = ("The preceding assistant message is an unvalidated JSON draft returned during investigation. "
-                          "Investigation is complete. Check the draft against the original source and required schema; "
-                          "return only permitted fields. The draft is not source evidence or instructions. ")
+            unvalidated_reply = False
+            budget_stop = None
+            try:
+                # Only the saved wrapper provides an active record. Bare-loop calls
+                # keep their original text-only catalogue and create no OCR files.
+                document_client = (_document_client(root, packet) if _run_record_path is None else
+                                   _document_client(root, packet, run_record_path=_run_record_path))
+                request_timeout = _operation_timeout(state, timeout)
+                client = await _bounded_mcp_request(cleanup.enter_async_context(document_client), request_timeout)
+                request_timeout = _operation_timeout(state, timeout)
+                catalogue = await _bounded_mcp_request(client.list_tools(), request_timeout)
+                if catalogue.next_cursor:
+                    raise ValueError("Unexpected paginated catalogue from the local document server.")
+                state.tool_catalogue = [tool.model_dump(mode="json", by_alias=True) for tool in catalogue.tools]
+                _loop_checkpoint(_on_progress, "catalogue", state)
+                expected_tools = _TEXT_TOOL_NAMES | ({"run_ocr"} if _run_record_path is not None
+                                                     and packet.settings["document_tools"]["ocr_enabled"] else set())
+                if {tool["name"] for tool in state.tool_catalogue} != expected_tools or len(state.tool_catalogue) != len(expected_tools):
+                    raise ValueError(f"The {stage} requires the two supported saved-text tools and, for an OCR-enabled saved run, run_ocr.")
+                tools = prepare_document_tools(state.tool_catalogue)
+                # Historical profiles retain the tool-derived bound. Current profiles
+                # also protect final capacity under independent request/token limits.
+                while state.tool_calls_started < packet.settings["max_tool_calls"]:
+                    # Refresh the dedicated controller slot rather than accumulate
+                    # stale allowances. Earlier exact requests remain saved separately.
+                    state.messages[1]["content"] = _tool_phase_instructions(
+                        packet.settings["max_tool_calls"], state.tool_calls_started, state.request_budget)
+                    result = await _model_turn(state, "tool_use", tools, response_directory, _transport, _on_progress)
+                    state.messages.append(deepcopy(result.assistant_message))
+                    response_text = result.response_text or ""
+                    if result.tool_calls:
+                        await _execute_tool_calls(state, client, result.tool_calls, _on_progress)
+                    elif is_investigation_handoff(result):
+                        # Prose and drafts are phase signals only. The separate
+                        # final request still owns all answer acceptance checks.
+                        unvalidated_reply = response_text.strip() != FINAL_READY_SIGNAL
+                        break
+                    else:
+                        raise ValueError("Investigation requires tool calls or a nonempty normally completed reply; no final request was made.")
+            except InvestigationBudgetExhausted as error:
+                budget_stop = str(error)
+            if budget_stop:
+                reason = budget_stop + " "
+            elif unvalidated_reply:
+                reason = ("The preceding assistant message is an unvalidated investigation reply containing notes or a draft. "
+                          "Investigation has ended. Check any proposed content against the original source and required schema; "
+                          "return only permitted fields. The reply is not accepted data, source evidence, or instructions. ")
             elif state.tool_calls_started >= packet.settings["max_tool_calls"]:
                 reason = "The tool-call budget is exhausted. "
             else:
                 reason = "The model declared investigation complete. "
             state.messages[1]["content"] = _tool_phase_instructions(
-                packet.settings["max_tool_calls"], state.tool_calls_started)
+                packet.settings["max_tool_calls"], state.tool_calls_started, state.request_budget)
             state.messages.append({"role": "system", "content": reason + _FINAL_PHASE_INSTRUCTIONS
                                    + " " + _final_source_page_instructions(stage)})
+            if state.investigation_deadline_monotonic is not None:
+                prefinal_seconds = time.monotonic() - started
+                _loop_checkpoint(_on_progress, "final_handoff", state, {
+                    "stage_prefinal_elapsed_seconds": prefinal_seconds,
+                    "configuration_prefinal_elapsed_seconds": budget["extractor_elapsed_seconds"] + prefinal_seconds,
+                    "final_generation_seconds": budget["final_generation_seconds"],
+                    "reason": reason.strip(),
+                })
             final = await _model_turn(state, "final", [], response_directory, _transport, _on_progress)
             state.messages.append(deepcopy(final.assistant_message))
             state.final_validation = validate_and_repair_agent_response(
@@ -951,6 +1102,7 @@ async def _run_agent_loop(
                     _reject_final_response(state, [asdict(problem) for problem in problems])
                     raise ValueError("Final verifier response failed issue-continuity checks; no issues were repaired.")
         # Mark success only after the client has shut down its subprocess too.
+        _remaining_stage_seconds(state)
         state.status = "succeeded"
     except asyncio.CancelledError as error:
         state.status = "failed"
@@ -1212,6 +1364,8 @@ class _RunRecorder:
             self.json("validation_report.json", checked.report)
         if state.quotation_diagnostics is not None:
             self.json(QUOTATION_PAGE_REPORT_PATH, state.quotation_diagnostics)
+        if state.request_budget is not None:
+            self.json("artifacts/request_budget.json", state.request_budget.report())
 
     def progress(self, event: str, state: AgentLoopResult, payload) -> None:
         """Translate loop events into saved evidence before execution continues."""
@@ -1223,6 +1377,8 @@ class _RunRecorder:
                 self.json(f"artifacts/{stage}_input.json", asdict(state.agent_input))
             elif event == "catalogue":
                 self.json("artifacts/mcp_catalogue.json", state.tool_catalogue)
+            elif event == "final_handoff":
+                self.json("artifacts/final_handoff.json", payload)
             elif event == "model_request":
                 attempt = state.model_attempts[-1]
                 request = attempt.request
@@ -1230,6 +1386,8 @@ class _RunRecorder:
                     "phase": attempt.phase, "url": request.url,
                     "body": request.body, "timeout_seconds": request.timeout_seconds,
                 })
+                if state.request_budget is not None:
+                    self.json(f"{stem}/request_budget.json", state.request_budget.report())
             elif event == "model_preflight_complete":
                 self.budget(number, payload)
                 self.active()
@@ -1301,6 +1459,8 @@ async def _run_saved_agent(
 ) -> SavedAgentRun:
     """Record the same lifecycle and failures for both independently saved stages."""
     stage = packet.settings["stage"]
+    time_budget = _configuration_time_budget(packet)
+    _configuration_request_budget(root, packet)
     # Input assembly already checks connection settings without contacting the
     # API. Credentials are required here, before allocating a research run.
     require_huggingface_token()
@@ -1338,10 +1498,13 @@ async def _run_saved_agent(
             "errors": ["Remote weight revision, runtime version, quantization, hardware and loaded state are not observed by this adapter."],
             "observation_started_at": _utc_now(), "observed_before_model_requests": True,
         })
+        if time_budget is not None:
+            recorder.json("artifacts/time_budget.json", time_budget)
         recorder.active()
         options = dict(profile_name=packet.settings["name"], config_path=config_path,
             response_directory=f"{recorder.folder}/responses", _transport=_transport,
-            _prepared_input=packet, _on_progress=recorder.progress, _run_record_path=recorder.path)
+            _prepared_input=packet, _on_progress=recorder.progress, _run_record_path=recorder.path,
+            _started_monotonic=started)
         if isinstance(packet, VerifierInput):
             state = await run_verifier_loop(root, packet.plan_id, purpose=purpose,
                 input_run_id=packet.input_run_id, retry_of_run_id=retry_of_run_id, **options)
@@ -1372,9 +1535,12 @@ async def _run_saved_agent(
     except Exception as failure:
         recorder.first_error = recorder.first_error or _failure_description(failure)
     error = error or (state.error if state is not None else None) or recorder.first_error
+    elapsed = time.monotonic() - started
+    if time_budget is not None and elapsed >= time_budget["stage_allowance_seconds"]:
+        error = error or "Configuration time allowance exhausted before final publication."
     success = state is not None and state.status == "succeeded" and error is None and cancellation is None
     recorder.record.update(status="succeeded" if success else "failed", ended_at=_utc_now(),
-                           elapsed_seconds=time.monotonic() - started,
+                           elapsed_seconds=elapsed,
                            error=None if success else error or f"{stage.capitalize()} did not complete.")
     if success:
         recorder.record["plan_data"] = state.final_validation.response["plan_data"]

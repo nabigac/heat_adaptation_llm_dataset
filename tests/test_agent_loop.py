@@ -206,10 +206,17 @@ def test_automatic_tool_result_returns_in_history_before_readiness_and_final(pro
 
 
 @pytest.mark.parametrize("use_tool_first", [False, True])
-def test_early_json_draft_transitions_to_one_strict_final_request(project, scripted, run_record, use_tool_first):
+@pytest.mark.parametrize("wrap", [
+    lambda body: body,
+    lambda body: agents.FINAL_READY_SIGNAL + "\n\n" + body,
+    lambda body: agents.FINAL_READY_SIGNAL + "\n\n```json\n" + body + "\n```",
+    lambda body: agents.FINAL_READY_SIGNAL + "\r\n```\r\n" + body + "\r\n```",
+    lambda body: "I have enough to report. Compiling findings now.",
+])
+def test_investigation_reply_transitions_to_one_strict_final_request(project, scripted, run_record, use_tool_first, wrap):
     draft = json.loads(answer(run_record))
     draft["plan_data"]["metadata"]["draft_only"] = True
-    raw_draft = json.dumps(draft)
+    raw_draft = wrap(json.dumps(draft))
     scripted.replies = ([message(calls=[call()])] if use_tool_first else []) + [
         message(raw_draft), message(answer(run_record))]
     result = run(project, scripted)
@@ -220,13 +227,19 @@ def test_early_json_draft_transitions_to_one_strict_final_request(project, scrip
     assert result.tool_calls_started == use_tool_first
     assert "tools" not in scripted.requests[-1] and scripted.requests[-1]["response_format"]["type"] == "json_schema"
     assert any(m["role"] == "assistant" and m["content"] == raw_draft for m in scripted.requests[-1]["messages"])
-    assert any("unvalidated JSON draft" in m["content"] for m in scripted.requests[-1]["messages"] if m["role"] == "system")
+    assert any("unvalidated investigation reply" in m["content"] for m in scripted.requests[-1]["messages"] if m["role"] == "system")
     assert result.final_validation.report["raw_response_path"].endswith(f"response_{2 + use_tool_first:02d}.txt")
     assert scripted.client.closed
 
 
-def test_tool_calls_still_run_when_the_same_message_contains_a_draft(project, scripted, run_record):
-    scripted.replies = [message(answer(run_record), calls=[call()]),
+@pytest.mark.parametrize("reply_kind", ["json", "wrapped", "prose"])
+def test_tool_calls_take_priority_over_handoff_text(project, scripted, run_record, reply_kind):
+    draft = answer(run_record)
+    if reply_kind == "wrapped":
+        draft = agents.FINAL_READY_SIGNAL + "\n```json\n" + draft + "\n```"
+    elif reply_kind == "prose":
+        draft = "I have enough to report. Compiling findings now."
+    scripted.replies = [message(draft, calls=[call()]),
                         message(agents.FINAL_READY_SIGNAL), message(answer(run_record))]
     result = run(project, scripted)
     assert result.status == "succeeded" and result.tool_calls_started == 1
@@ -235,12 +248,47 @@ def test_tool_calls_still_run_when_the_same_message_contains_a_draft(project, sc
 
 
 @pytest.mark.parametrize("bad_final", ["not JSON", '{"plan_data":{},"plan_issues":{"issues":[]}}'])
-def test_early_draft_cannot_replace_a_failed_final_answer(project, scripted, run_record, bad_final):
-    scripted.replies = [message(answer(run_record)), message(bad_final)]
+@pytest.mark.parametrize("reply_kind", ["json", "wrapped", "prose"])
+def test_investigation_reply_cannot_replace_a_failed_final_answer(project, scripted, run_record, bad_final, reply_kind):
+    draft = answer(run_record)
+    if reply_kind == "wrapped":
+        draft = agents.FINAL_READY_SIGNAL + "\n```json\n" + draft + "\n```"
+    elif reply_kind == "prose":
+        draft = "I have enough to report. Compiling findings now."
+    scripted.replies = [message(draft), message(bad_final)]
     result = run(project, scripted)
     assert result.status == "failed" and result.final_validation.report["valid"] is False
     assert result.final_validation.response is None and len(scripted.requests) == 2
     assert result.final_validation.raw_text == bad_final
+
+
+@pytest.mark.parametrize("wrap", [
+    lambda body: agents.FINAL_READY_SIGNAL + "\n```json\n" + body + "\n```\nextra prose",
+    lambda body: agents.FINAL_READY_SIGNAL + "\n" + body + "\n{}",
+    lambda body: agents.FINAL_READY_SIGNAL + "\n```json\n" + body[:-1] + "\n```",
+    lambda body: agents.FINAL_READY_SIGNAL + "\n```json\n[]\n```",
+    lambda body: agents.FINAL_READY_SIGNAL + "\n" + body.replace('"plan_data":', '"plan_data":{},"plan_data":', 1),
+    lambda body: agents.FINAL_READY_SIGNAL + "\n" + body.replace('"plan_data":', '"nonfinite":NaN,"plan_data":', 1),
+    lambda body: "Here is my answer:\n" + agents.FINAL_READY_SIGNAL + "\n" + body,
+    lambda body: agents.FINAL_READY_SIGNAL + "\n```python\n" + body + "\n```",
+    lambda body: "```json\n" + body + "\n```",
+])
+def test_investigation_text_needs_no_json_parsing_but_requires_final_generation(project, scripted, run_record, wrap):
+    raw = wrap(answer(run_record))
+    scripted.replies = [message(raw), message(answer(run_record))]
+    result = run(project, scripted)
+    assert result.status == "succeeded" and result.final_validation.response["plan_data"] == run_record["plan_data"]
+    assert len(scripted.requests) == 2 and result.model_attempts[0].result.response_text == raw
+    assert any(m["role"] == "assistant" and m["content"] == raw for m in scripted.requests[-1]["messages"])
+    assert scripted.requests[-1]["response_format"]["json_schema"]["strict"] is True
+
+
+def test_investigation_wrapper_never_unwraps_a_final_answer(project, scripted, run_record):
+    raw = agents.FINAL_READY_SIGNAL + "\n```json\n" + answer(run_record) + "\n```"
+    scripted.replies = [message(agents.FINAL_READY_SIGNAL), message(raw)]
+    result = run(project, scripted)
+    assert result.status == "failed" and result.final_validation.response is None
+    assert result.final_validation.raw_text == raw and len(scripted.requests) == 2
 
 
 @pytest.mark.parametrize("limit", [1, 20])
@@ -308,11 +356,11 @@ def test_mcp_protocol_failure_stops_attempt_and_retains_tool_log(project, script
     assert result.tool_calls_started == 1 and len(scripted.requests) == 1
 
 
-@pytest.mark.parametrize("content", ["unexpected prose", "", "```READY_FOR_FINAL_RESPONSE```", '{"plan_data":{}}'])
-def test_unexpected_tool_phase_text_fails_without_a_final_or_retry_call(project, scripted, content):
+@pytest.mark.parametrize("content", ["", " \n\t "])
+def test_empty_investigation_reply_fails_without_a_final_or_retry_call(project, scripted, content):
     scripted.replies = [message(content)]
     result = run(project, scripted)
-    assert result.status == "failed" and "readiness" in result.error
+    assert result.status == "failed" and "nonempty" in result.error
     assert len(scripted.requests) == 1 and scripted.client.closed
     assert result.model_attempts[0].result.response_text == content
 
@@ -356,7 +404,8 @@ def test_model_output_truncation_stops_immediately_and_retains_available_bytes(p
 
 
 @pytest.mark.parametrize("content", [agents.FINAL_READY_SIGNAL,
-    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[]}}'])
+    '{"plan_data":{"metadata":{},"actions":[]},"plan_issues":{"issues":[]}}',
+    "I have enough to report. Compiling findings now."])
 def test_unconfirmed_tool_phase_completion_cannot_trigger_execution(project, scripted, content):
     scripted.replies = [message(content, finish="unknown")]
     result = run(project, scripted)

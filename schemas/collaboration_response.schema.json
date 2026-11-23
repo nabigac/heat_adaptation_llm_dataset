@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:collaboration-response",
+  "title": "Collaboration final answer",
+  "description": "Same plan-data fields as E/V, with fixed C agent identities for issue attribution.",
+  "$comment": "Separate C contract; E/V contracts remain unchanged. Model resolutions are claims for expert assessment.",
+  "type": "object",
+  "required": [
+    "plan_data",
+    "plan_issues"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "plan_data": {
+      "$ref": "urn:heat-adaptation:plan-data"
+    },
+    "plan_issues": {
+      "type": "object",
+      "required": [
+        "issues"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "text": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "issue": {
+      "type": "object",
+      "required": [
+        "issue_id",
+        "related_action_id",
+        "issue_description",
+        "issue_origin",
+        "issue_status",
+        "resolved_by",
+        "resolution"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "$ref": "#/$defs/text"
+        },
+        "related_action_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "\\S"
+        },
+        "issue_description": {
+          "$ref": "#/$defs/text"
+        },
+        "issue_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "unclear_meaning",
+            "conflicting_evidence",
+            "source_issue",
+            "extraction_process_issue",
+            "no_records_found",
+            null
+          ]
+        },
+        "issue_origin": {
+          "type": "string",
+          "enum": [
+            "worker_1",
+            "worker_2",
+            "coordinator"
+          ]
+        },
+        "issue_status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "resolved"
+          ]
+        },
+        "resolved_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "worker_1",
+            "worker_2",
+            "coordinator",
+            null
+          ]
+        },
+        "resolution": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "\\S"
+        }
+      },
+      "if": {
+        "properties": {
+          "issue_status": {
+            "const": "open"
+          }
+        },
+        "required": [
+          "issue_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "resolved_by": {
+            "type": "null"
+          },
+          "resolution": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "resolved_by": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

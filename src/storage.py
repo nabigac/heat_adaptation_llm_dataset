@@ -93,12 +93,13 @@ def next_run_id(project_root: Path | str, plan_id: str, stage: str) -> str:
     """Suggest an unused numbered ID, including occupied/incomplete run folders.
 
     This does not reserve the ID. create_run_record claims its directory and
-    refuses collisions. Extraction and verification have separate sequences.
+    refuses collisions. E, V, and C have separate sequences.
     """
     _require_run_identifier(plan_id)
-    if stage not in ("extractor", "verifier"):
-        raise ValueError("Run stage must be 'extractor' or 'verifier'.")
-    prefix = "run_extract" if stage == "extractor" else "run_verify"
+    prefixes = {"extractor": "run_extract", "verifier": "run_verify", "collaboration": "run_collaboration"}
+    if stage not in prefixes:
+        raise ValueError("Run stage must be 'extractor', 'verifier', or 'collaboration'.")
+    prefix = prefixes[stage]
     parent = resolve_project_path(project_root, f"runs/{plan_id}")
     largest = 0
     # Count names rather than successful outputs. An empty folder or a file with
@@ -191,7 +192,17 @@ def load_run_record(project_root: Path | str, record_path: str) -> dict:
     repairs JSON, or reloads current prompt text over the saved run settings.
     Missing/damaged inputs must be restored explicitly before this strict load.
     """
+    if _is_collaboration_record(record_path):
+        from collaboration_storage import load_collaboration_record
+        return load_collaboration_record(project_root, record_path)
     return _load_run_record(project_root, record_path, set(), {})
+
+
+def _is_collaboration_record(record_path: str) -> bool:
+    """Dispatch only the separate C namespace; E/V contracts stay unchanged."""
+    return isinstance(record_path, str) and re.fullmatch(
+        r"runs/[^/]+/run_collaboration_[0-9]+/output\.json", record_path,
+    ) is not None
 
 
 def save_run_file(
@@ -203,6 +214,9 @@ def save_run_file(
     JSON or empty; preserve them verbatim. Validation reports have their own
     format checks. Use append_run_tool_log for the active ordered tool log.
     """
+    if _is_collaboration_record(record_path):
+        from collaboration_storage import save_collaboration_file
+        return save_collaboration_file(project_root, record_path, relative_path, data)
     record = _read_run_record_fields(project_root, record_path)
     _require_active_run(record)
     # Read identity and lifecycle fields before accepting any bytes. This permits

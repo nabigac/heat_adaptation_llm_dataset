@@ -2,7 +2,9 @@
 
 this research project examines how heat adaptation experts and open-weight large language models (LLMs) can be paired to build an extraction workflow. it will share practical lessons from the expert judgments, model outputs, and revisions involved in developing that workflow. the project uses open-weight models through hugging face.
 
-the workflow extracts heat adaptation actions from government and public agency plans into structured records with supporting quotations. the study explores two configurations: **E** (extraction) and **E+V** (extraction + verification). **inkling 2 small** is the extractor in both configurations. **deepseek v4.1 flash 1017** checks and revises that exact saved extraction. both models use hugging face with deepinfra as the fixed host; formal assessment of verification quality remains pending. expert-curated answers will also support a pilot instruction dataset for possible future fine-tuning.
+the workflow extracts heat adaptation actions from government and public agency plans into structured records with supporting quotations. it supports **E** (extraction) and **E+V** (extraction + verification): **inkling 2 small** extracts, and **deepseek v4.1 flash 1017** checks and revises that exact saved extraction.
+
+development **C** (collaboration) uses **glm-5.3-flash** to coordinate inkling and deepseek as two flexible workers. it assigns extraction or checking tasks, runs independent assignments in parallel, and assembles one complete JSON answer from the prepared plan. see the [coordinator](prompts/coordinator.md) and [worker](prompts/worker.md) prompts. all three configurations have completed development runs on freetown and paris under earlier settings. the latest C prompts and budgets still need live checks and expert assessment. all three models use hugging face with deepinfra as the fixed host. expert-curated answers will also support a pilot instruction dataset for possible future fine-tuning.
 
 for setup and commands, see [getting started](#getting-started) and the [command line interface](#command-line-interface).
 
@@ -24,7 +26,7 @@ each model answer contains three components:
 
 every action has nine fields: `action_id`, `action`, `action_type`, `action_status`, `action_location`, `action_recipient`, `action_cost`, `action_benefit`, and `evidence`. costs and benefits are recorded within their associated action. evidence uses exact continuous quotations and physical PDF page positions counted from 1. the [field definitions and coding rules](DESIGN.md#appendix-dataset-coding-rules-and-evaluation) specify permitted values and missing information.
 
-issues retain stable IDs and origins through verification and curation. expert fixes are recorded in separate curated copies after assessment; model answers cannot claim an expert resolution. the saved model outputs remain the evidence for comparison.
+issues retain stable IDs and origins through verification and curation. after assessment, experts will prepare separate curated answers; saved model outputs remain the evidence for comparison. instruction export and C curation validation remain to be built. see the [remaining work](IMPLEMENTATION.MD#next-implementation-steps).
 
 ## getting started
 
@@ -52,7 +54,7 @@ models are cached in `.cache/easyocr/`. PDF preparation and OCR run locally; LLM
 
 ### API access
 
-create a hugging face access token with inference providers permission and add account credits or billing. both model stages use this token.
+create a hugging face access token with inference providers permission and add account credits or billing. all hosted models use this token.
 
 in bash or zsh, run the following command, paste the token when the terminal waits, and press enter. token input is hidden:
 
@@ -70,15 +72,17 @@ run model commands in that same terminal session. the program reads `HF_TOKEN` f
 
 ### compatibility check
 
-use these checks when changing models or hosting. the configured extractor and verifier have passed; checks are not needed for each plan.
+use these checks when changing models, hosting, or the generation schema. earlier passes apply to the tested settings; checks are not needed for each plan.
 
-check inkling with up to three **paid requests** using fictional inputs:
+each command makes up to five **paid requests** using fictional inputs to check JSON schemas, output limits, and a tool round trip. it stops at the first failure.
+
+inkling:
 
 ```bash
-uv run --locked python -m huggingface_check
+uv run --locked python -m huggingface_check --check-tools
 ```
 
-check deepseek, including a tool round trip, with up to five paid requests:
+deepseek:
 
 ```bash
 uv run --locked python -m huggingface_check \
@@ -86,13 +90,33 @@ uv run --locked python -m huggingface_check \
   --check-tools
 ```
 
-`--model` changes only the diagnostic, not the extraction profile. reports go to `artifacts/huggingface_checks/`. see the [diagnostic details](IMPLEMENTATION.MD#compatibility-diagnostics); compatibility does not establish full-plan quality.
+glm coordinator model:
+
+```bash
+uv run --locked python -m huggingface_check \
+  --model zai-org/GLM-5.3-Flash \
+  --check-tools
+```
+
+all three models have passed these five checks with the shared project schema. `--model` changes only the diagnostic model, retaining the base extractor profile's settings and task. it does not run the verifier or collaboration workflow, or test the coordinator prompt. reports go to `artifacts/huggingface_checks/`. see the [diagnostic details](IMPLEMENTATION.MD#compatibility-diagnostics); compatibility does not establish full-plan or coordination quality.
 
 for project-schema failures, `--isolate-project-schema` instead runs up to two paid request variants. use it without `--check-tools`; both results are saved even if one fails.
 
+### coordination check
+
+test glm's coordinator interfaces with a fictional plan and controlled worker replies:
+
+```bash
+uv run --locked python -m collaboration_check
+```
+
+makes up to eight **paid coordinator request attempts**, capped at 16,384 output tokens each and 15 minutes overall. inkling and deepseek are not called. the check covers delegation, a corrected worker error, an unresolved source conflict, and the final JSON. records go to `artifacts/collaboration_checks/`. this is a small interface diagnostic; expert assessment is needed to establish full-plan quality. see the [diagnostic details](IMPLEMENTATION.MD#coordination-diagnostic).
+
 ## command line interface
 
-the usual workflow is `add_plan` → `prepare_plan` → `run_extract_mode` → `run_verify_mode`. use `list_plans` for IDs and preparation paths, and `update_plan_data` for metadata corrections. run commands from the project directory.
+the usual workflow is `add_plan` → `prepare_plan` → `run_extract_mode` → `run_verify_mode`. use `list_profiles` for model choices and limits, `list_plans` for IDs and preparation paths, and `update_plan_data` for metadata corrections. run commands from the project directory.
+
+`run_collaboration_mode` starts independently from a prepared development plan. see the [collaboration protocol](IMPLEMENTATION.MD#collaboration-c) for the coordinator and worker design.
 
 ### add_plan: register a PDF
 
@@ -138,6 +162,19 @@ uv run --locked heat-adaptation-llm-dataset run_verify_mode plan_0001 \
 
 uses the latest validated, successful eligible E run and its exact preparation. add `--input-run-id run_extract_0008` to select a particular E run, including for consistent prompt comparisons.
 
+each configuration has 90 minutes overall, with the final 30 minutes protected for its final answer. for E+V, the complete E run and V investigation share the first 60 minutes; an E run exceeding 60 minutes cannot enter this timed workflow. human waiting between commands is excluded, and final generation can begin earlier when investigation finishes. see [time allowances](IMPLEMENTATION.MD#configuration-time-allowance).
+
+### run_collaboration_mode: coordinate three models
+
+```bash
+uv run --locked heat-adaptation-llm-dataset run_collaboration_mode plan_0001 \
+  --source-path data/processed/plan_0001/preparation_01/preparation.json \
+  --profile glm5_3_flash_hf_collaboration \
+  --purpose development
+```
+
+calls all three models without importing E/V or expert answers and saves a new `run_collaboration_NNNN/` folder. only development plans are enabled. `--config-path` selects C bindings (default `configs/collaboration.json`); `--model-config-path` selects model profiles (default `configs/profiles.json`).
+
 ### create_expert_reference: start an expert form
 
 ```bash
@@ -154,6 +191,14 @@ uv run --locked heat-adaptation-llm-dataset validate_expert_reference plan_0001
 ```
 
 checks the saved form's JSON, fields, registered plan ID, source URL/access date, unique action IDs, and physical page bounds against the original PDF. reports problems without changing files or calling the API. an empty action list is flagged but can pass structural checks; experts establish accuracy and completeness.
+
+### list_profiles: find model choices and limits
+
+```bash
+uv run --locked heat-adaptation-llm-dataset list_profiles
+```
+
+shows selectable E, V, and C profiles, their run commands, models, and limits. C's coordinator and workers appear under its shared profile. makes no API calls and needs no token. use `--config-path` for another model profile file and `--collaboration-config-path` for another C binding file.
 
 ### list_plans: find IDs and preparation paths
 
@@ -173,15 +218,24 @@ editable fields are `--title`, `--source-url`, `--date-accessed`, and `--study-s
 
 ### run options and results
 
-use `--purpose development` for development plans or `exploratory` for investigations outside the formal comparison. formal comparison execution remains disabled; comparison-plan content is restricted pending the independent-reference workflow.
+use `--purpose development` for development plans. E/V also allow `exploratory` for investigations outside the formal comparison. formal comparison execution remains disabled; reference-completion and fixed-settings controls are still pending. comparison-plan content remains restricted.
 
 | optional flag | use |
 | --- | --- |
-| `--retry-of-run-id <failed_run_id>` | E/V: link a new attempt to a failed run. verifier retries retain their original E input. omit for a new development repeat. |
+| `--retry-of-run-id <failed_run_id>` | link a new attempt to a failed run. verifier retries retain their original E input; C retries use the same preparation. omit for a new development repeat. |
 | `--config-path <path>` | E/V: select another project-relative profile file; default `configs/profiles.json`. |
 | `--project-root "/path/to/project"` | any command: select another project directory; place after the command name. |
 
-E and V print their saved status, selected inputs, and available report paths. each invocation preserves a new folder under `runs/<plan_id>/run_extract_NNNN/` or `run_verify_NNNN/`. both apply final JSON validation and quotation checks; source accuracy requires expert review. see [execution details](IMPLEMENTATION.MD#saved-execution) for files, limits, and failure handling.
+current ceilings include final generation:
+
+| allowance | E | E+V | C |
+| --- | --- | --- | --- |
+| model/API requests | 25 | 50: 25 per stage | 25 shared |
+| document-tool calls | 25 | 50: 25 per stage | 75: 25 per agent |
+
+each configuration has a 31,457,280 estimated-token ceiling; within E+V, V deducts its linked E estimates. request and tool counts are separate: one API reply can request several tools. see the [complete settings table](IMPLEMENTATION.MD#current-configuration-settings) and [request budgeting](IMPLEMENTATION.MD#configuration-request-and-token-allowances) for details.
+
+model commands print their saved status and available report paths. each invocation preserves a new folder under `runs/<plan_id>/`: `run_extract_NNNN/`, `run_verify_NNNN/`, or `run_collaboration_NNNN/`. all apply final JSON validation and quotation checks; source accuracy requires expert review. see [E/V execution](IMPLEMENTATION.MD#saved-execution) and [C execution](IMPLEMENTATION.MD#saved-c-execution) for files and failure handling.
 
 press ctrl+c to request cancellation. a record left `running` needs inspection after confirming the process has stopped; recovery and retries are manual.
 

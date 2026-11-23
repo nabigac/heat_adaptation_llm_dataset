@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:collaboration-result",
+  "title": "Worker findings for one preserved task",
+  "type": "object",
+  "required": [
+    "task_id",
+    "worker_id",
+    "draft_version",
+    "checked_pages",
+    "findings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "worker_id": {
+      "type": "string",
+      "enum": [
+        "worker_1",
+        "worker_2"
+      ]
+    },
+    "draft_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "checked_pages": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "findings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "description",
+          "related_action_id",
+          "proposed_change",
+          "evidence",
+          "unresolved"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "related_action_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "proposed_change": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S"
+          },
+          "evidence": {
+            "$ref": "urn:heat-adaptation:plan-data#/$defs/evidence"
+          },
+          "unresolved": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

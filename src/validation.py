@@ -158,11 +158,14 @@ def validate_run_record_structure(data: object) -> list[ValidationProblem]:
     # JSON numeric exponents can overflow Python floats (for example 1e400).
     # Reject nonfinite values before they can become unsavable measurements.
     settings = data["settings"]
+    problems.extend(_validate_execution_allowances(settings, "$.settings"))
     for location, value in (
         ("$.elapsed_seconds", data["elapsed_seconds"]),
         ("$.settings.generation.temperature", settings["generation"]["temperature"]),
         ("$.settings.generation.top_p", settings["generation"]["top_p"]),
         ("$.settings.model_timeout_seconds", settings["model_timeout_seconds"]),
+        ("$.settings.max_elapsed_seconds", settings.get("max_elapsed_seconds")),
+        ("$.settings.final_generation_seconds", settings.get("final_generation_seconds")),
         ("$.settings.document_tools.tool_timeout_seconds", settings["document_tools"]["tool_timeout_seconds"]),
     ):
         if isinstance(value, float) and not math.isfinite(value):
@@ -181,10 +184,30 @@ def validate_validation_report(data: object) -> list[ValidationProblem]:
     return _validate_structure(data, _VALIDATION_REPORT_SCHEMA_PATH, "validation report")
 
 
+def _validate_execution_allowances(settings: dict, location: str) -> list[ValidationProblem]:
+    """Reject controls that cannot reserve the requested final capacity."""
+    problems = []
+    if (settings.get("max_estimated_tokens") is not None
+            and settings["max_estimated_tokens"] < settings["context_limit"]):
+        problems.append(ValidationProblem(
+            "reference", location + ".max_estimated_tokens", "Reserve at least one full context for final generation."
+        ))
+    final_seconds = settings.get("final_generation_seconds")
+    if final_seconds is not None:
+        total_seconds = settings.get("max_elapsed_seconds")
+        if total_seconds is None or final_seconds > total_seconds:
+            problems.append(ValidationProblem(
+                "reference", location + ".final_generation_seconds",
+                "A protected final window requires an overall deadline at least as long as that window.",
+            ))
+    return problems
+
+
 def validate_profiles(data: object) -> list[ValidationProblem]:
     """Check editable settings, unique names, and portable prompt paths.
 
-    Profile fields reuse the saved-run rules. This check does not read prompts,
+    Profile fields reuse the saved-run rules except editable stage, which also
+    permits C coordinator/worker roles. This check does not read prompts,
     contact an endpoint, detect model capabilities, or measure usable context.
     An empty profiles list is allowed, but cannot supply a selected profile.
     """
@@ -203,6 +226,7 @@ def validate_profiles(data: object) -> list[ValidationProblem]:
                 "reference", location + ".name", f"Duplicate profile name {profile['name']!r}."
             ))
         names.add(profile["name"])
+        problems.extend(_validate_execution_allowances(profile, location))
         for prompt_index, path in enumerate(profile["prompt_paths"]):
             problems.extend(_validate_project_relative_path(
                 path, f"{location}.prompt_paths[{prompt_index}]"
@@ -236,6 +260,15 @@ def validate_run_links(
                 problems.append(ValidationProblem("reference", "$.source_path", "Verification must use its extractor's exact saved preparation."))
             if input_run["settings"]["document_tools"] != record["settings"]["document_tools"]:
                 problems.append(ValidationProblem("reference", "$.settings.document_tools", "Verification and extraction must use the same shared document-tool settings."))
+            ceiling = record["settings"].get("max_elapsed_seconds")
+            if ceiling is not None and record["status"] == "succeeded":
+                durations = (input_run["elapsed_seconds"], record["elapsed_seconds"])
+                if any(value is None for value in durations) or sum(durations) > ceiling:
+                    problems.append(ValidationProblem("reference", "$.elapsed_seconds", "Successful E+V execution must fit its shared time allowance, including the linked extraction."))
+                reserve = record["settings"].get("final_generation_seconds")
+                if (reserve is not None and input_run["elapsed_seconds"] is not None
+                        and input_run["elapsed_seconds"] > ceiling - reserve):
+                    problems.append(ValidationProblem("reference", "$.input_run_id", "The selected E must leave the protected final window for V."))
             if record["purpose"] == "comparison" and input_run["purpose"] != "comparison":
                 # Preserve deliberate exploratory repeats without allowing one
                 # to replace the main comparison extraction through this link.
@@ -493,6 +526,13 @@ def validate_run_record(
 
     settings = data["settings"]
     # "Saved run settings" is our explanatory name for this settings object.
+    if (settings.get("max_model_requests") is not None
+            and len(data["model_calls"]) > settings["max_model_requests"]):
+        problems.append(ValidationProblem("reference", "$.model_calls", "Recorded model requests exceed the stage allowance."))
+    ceiling = settings.get("max_elapsed_seconds")
+    if (ceiling is not None and data["status"] == "succeeded"
+            and data["elapsed_seconds"] is not None and data["elapsed_seconds"] > ceiling):
+        problems.append(ValidationProblem("reference", "$.elapsed_seconds", "Successful execution exceeds its configuration time allowance."))
     # It preserves the chosen profile, shared tools, prompt texts, and environment.
     if settings["stage"] != data["stage"]:
         problems.append(ValidationProblem(
@@ -771,11 +811,12 @@ def parse_agent_response_json(
 
 
 def is_agent_response_draft(text: str) -> bool:
-    """Recognize a complete JSON draft for the investigation-to-final transition.
+    """Inspect a complete JSON draft's containers without accepting its content.
 
     Require strict, finite JSON with the expected answer containers and object
-    records. This is NOT acceptance validation: metadata/action/issue fields may
-    still be missing or invalid. The runner must request a separate final answer
+    records. This inspection does not control the investigation handoff and is
+    NOT acceptance validation: metadata/action/issue fields may still be missing
+    or invalid. The runner must request a separate final answer
     under the full schema and validate it. No repairs or file operations occur.
     """
     try:

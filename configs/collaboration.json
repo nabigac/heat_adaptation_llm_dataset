@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "name": "glm5_3_flash_hf_collaboration",
+      "agents": {
+        "coordinator": "glm5_3_flash_hf_coordinator",
+        "worker_1": "inkling2_small_hf_worker",
+        "worker_2": "deepseek_v4_1_flash_1017_hf_worker"
+      },
+      "limits": {
+        "max_model_requests": 25,
+        "max_document_tool_calls": 75,
+        "max_elapsed_seconds": 5400,
+        "max_estimated_tokens": 31457280,
+        "final_generation_seconds": 1800
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Design Doc: Heat Adaptation LLM Dataset
 
-**Research design · updated 2026-11-21**
+**Research design · updated 2026-11-23**
 
 ## 1. Context and problem
 
@@ -45,7 +45,7 @@ Each configuration will produce one JSON dataset for a plan, containing plan inf
 
 Within a plan, actions are grouped by the specific activity undertaken. For example, all tree planting belongs in one action object, including planting in different neighborhoods or phases. Details associated with each location or phase are preserved. Tree planting and drinking fountain installation form separate actions. The broad `action_type` categories classify each activity and may overlap.
 
-One source heading, pathway, or programme may contain several distinct activities. Activities with different primary tasks or outputs receive separate records, even when they share a goal, recipient group, or implementer. Routine implementation steps remain part of the activity they support.
+One source heading, pathway, or programme may contain several distinct activities. Activities with different primary tasks or outputs receive separate records, even when they share a goal, recipient group, or implementer. Routine implementation choices remain part of their activity: heat-resistant species specified for tree planting belong in that planting record, while a separately commissioned species experiment has a different primary task.
 
 #### Plan dataset components
 
@@ -74,7 +74,7 @@ Costs, benefits, and evidence are attached to the activity they describe. The [a
 
 ### Evidence and issues
 
-Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Quotations preserve the source wording and punctuation without rewriting or silent omissions. Every page containing quoted words is cited. Separate passages are represented by separate evidence entries, including relevant headings or footnotes. Adequate evidence collectively supports the activity and its stated details.
+Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Quotations preserve wording, punctuation, and line breaks without rewriting or silent omissions; hyphens at line breaks are retained. Unreliable OCR passages are represented by locatable continuous excerpts and unresolved evidence gaps. Every page containing quoted words is cited. Separate passages are represented by separate evidence entries, including relevant headings or footnotes. Adequate evidence collectively supports the activity and its stated details.
 
 Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains E issue IDs, may add issues, and explains claimed resolutions. C maintains its own action and issue IDs, with the role that raised or resolved each issue recorded. Experts may subsequently resolve issues in curated copies. Expert curation corrects or excludes unsupported material.
 
@@ -131,13 +131,15 @@ This fictional example groups tree planting across two wards. A linked issue rec
 
 During development, models will draft action records and flag uncertainties. Experts will examine the outputs against the plans and identify changes needed in coding rules, prompts, tools, and review procedures. Examples showing what prompted a revision, how it was addressed, and what was observed afterwards will be preserved. These examples will support the study's account of building the workflow and the lessons drawn from that process.
 
-Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) is the extractor, DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) is the verifier, and GLM-5.3-Flash (`zai-org/GLM-5.3-Flash`) is the selected coordinator for C. All three models will be accessed through Hugging Face Inference Providers with DeepInfra as the fixed host. E consists of the Inkling extraction with shared Python processing. E+V begins with that exact saved extraction, which DeepSeek checks and revises.
+For E and E+V, Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) is the extractor and DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) is the verifier. GLM-5.3-Flash (`zai-org/GLM-5.3-Flash`) is the coordinator for C. All three models will be accessed through Hugging Face Inference Providers with DeepInfra as the fixed host. E consists of the Inkling extraction with shared Python processing. E+V begins with that exact saved extraction, which DeepSeek checks and revises.
 
-C will start independently from the same prepared plan, without access to the selected E/E+V outputs or expert reference. The coordinator will assign tasks to the extractor and verifier, arrange parallel work where tasks are independent, request follow-up checks, and maintain a working answer. Both workers will contribute findings and source evidence. The coordinator will assemble one complete JSON answer, retaining unresolved concerns as issues. Task order and the number of exchanges may vary within fixed execution budgets.
+C will start independently from the same prepared plan, without access to the selected E/E+V outputs or expert reference. Inkling and DeepSeek will serve as two flexible workers with the same task instructions and document tools; either can extract or check information. The coordinator will give each task a clear objective, source scope, and expected findings, arrange parallel work where tasks are independent, and request follow-up or cross-checks. Both workers will contribute source-supported findings. Worker identities will remain fixed as assignments change. The coordinator will maintain a provisional draft while capacity remains and direct checks of grouping, heat eligibility, coverage beyond the main heat sections, associated details, and quotation fidelity. It will assemble one complete JSON answer, retaining unresolved concerns as issues. Task order and the number of exchanges may vary within fixed execution budgets.
 
-DeepSeek was selected for its low listed cost and strong author-reported reasoning and agent benchmark results. GLM was selected for its low listed cost, long context, and listed tool and structured-output support. E and V have passed compatibility checks and completed development runs; formal quality assessment remains pending. C is planned; GLM compatibility and coordination quality are **Not yet tested**. PDF preparation, optical character recognition (OCR) with EasyOCR, and document tools run locally; LLM inference is hosted.
+DeepSeek was selected for its low listed cost and strong author-reported reasoning and agent benchmark results. GLM was selected for its low listed cost, long context, and listed tool and structured-output support. All three models have passed basic compatibility checks. E, E+V, and C have completed development runs on both plans. Live checks under the latest budgets and C prompts, and formal expert quality assessment, remain pending. PDF preparation, optical character recognition (OCR) with EasyOCR, and document tools run locally; LLM inference is hosted.
 
 Model and hosting details, prompts, response controls, execution budgets, tool use, runtime, and provider-reported tokens will be recorded. Generation will use a provider-compatible schema, with compatibility checked separately using fictional inputs. Python will enforce the complete field and relationship rules for every final output. Structural compliance does not establish substantive accuracy. Earlier trials remain development evidence and are outside the formal comparison.
+
+Each complete configuration will have a 90-minute execution ceiling, with 30 minutes protected for its final answer. For E+V, the complete extraction and verifier investigation will share the preceding 60 minutes; an extraction exceeding that allowance cannot enter the timed E+V workflow. Human waiting between commands will be excluded. C will share its time across all agents. Request, tool, and estimated-token ceilings will be fixed before comparison; actual resource use and failed attempts will be reported separately. Final generation may begin earlier when investigation finishes. Common ceilings do not establish equal computational effort; the current settings are specified in the implementation document's [configuration table](IMPLEMENTATION.MD#current-configuration-settings).
 
 All agents will use the same preparation and document tool capabilities through Model Context Protocol (MCP), the interface connecting agents to tools. C agents will receive the shared coding rules and field definitions; assignments and relevant findings will be exchanged through the coordinator.
 
@@ -148,7 +150,7 @@ The final E, E+V, and C answers will receive the same automatic quotation-locati
 | 1. Registration and preparation | The original PDF, collection metadata, page text, and preparation problems will be preserved. |
 | 2. Extraction (E) | Inkling 2 Small will receive the whole prepared plan through the Hugging Face API. Its answer, issues, settings, tool activity, and execution records will be saved. |
 | 3. Verification (E+V) | DeepSeek V4.1 Flash 1017 will check a copy of that exact Inkling extraction, including unflagged content and possible omissions. Its full revised answer will be saved. |
-| 4. Collaboration (C) | GLM-5.3-Flash will dynamically coordinate Inkling and DeepSeek from the prepared plan to explore multi-agent extraction. C will run independently of E/E+V, preserving task exchanges, execution evidence, and one complete JSON answer. |
+| 4. Collaboration (C) | GLM-5.3-Flash will coordinate Inkling and DeepSeek as flexible workers with clear assignments for extraction and checking. C will start independently from the prepared plan, preserving task exchanges, execution evidence, and one complete JSON answer. |
 | 5. Expert reference preparation | Experts will complete one reference form per plan from the original PDF before viewing any comparison output. The completed form will be preserved. |
 | 6. Manual expert assessment | Experts will match activities by meaning and assess E, E+V, and C against the same completed reference form, using the agreed rubric, evidence judgments, and issue checks. |
 | 7. Analysis and dataset assembly | Lessons about pairing experts and LLMs will be synthesized, the three configurations compared, and instruction examples assembled from expert-curated answers and supporting inputs. |
@@ -197,7 +199,7 @@ The analysis will examine how heat adaptation experts and LLMs work together to 
 
 Comparisons within each plan will examine how sequential verification and coordinated collaboration affect action accuracy and completeness, supporting evidence, and unresolved concerns. Review notes will describe corrected errors, recovered omissions, introduced errors, and how C's agents investigate disagreements. Runtime, token use, and failures will describe computational requirements.
 
-With five selected comparison plans and one fixed set of models, findings will be descriptive and specific to this setting. Differences involving C will reflect its complete workflow, including the third model and additional computation, rather than isolating coordination alone. Document layout and PDF/OCR errors may affect quality. Hosted services may disclose limited model revision and serving details; unavailable information will remain unknown. Expert judgments about grouping and scoring may vary, and omissions or misinterpretations in the reference form may influence results.
+With five selected comparison plans and one fixed set of models, findings will be descriptive and specific to this setting. Differences involving C will reflect its complete workflow, including its third model, resource allowances, and coordination, rather than isolating coordination alone. Document layout and PDF/OCR errors may affect quality. Hosted services may disclose limited model revision and serving details; unavailable information will remain unknown. Expert judgments about grouping and scoring may vary, and omissions or misinterpretations in the reference form may influence results.
 
 The coarse action scores and combined evidence judgment may hide differences in the nature or severity of errors. Grouping an activity across locations or phases also gives records with different amounts of detail equal weight. Issue counts depend on what the models flag and provide only a partial view of review needs.
 
@@ -277,9 +279,9 @@ Each issue object:
 | `related_action_id` | string or null | Affected action ID. Null for an omission, a problem affecting the plan or its source, or a removed action. |
 | `issue_description` | string | Grouped concerns, including relevant pages and any affected actions not linked directly. |
 | `issue_type` | enum or null; optional | Classification of the concern, using the values in [appendix E](#issue-types). |
-| `issue_origin` | enum | `extractor`, `verifier`, or `coordinator` (C only), identifying the role that first raised the issue. Retained through later review and curation. |
+| `issue_origin` | enum | Agent that first raised the issue: `extractor` or `verifier` in E/E+V; `worker_1` (Inkling), `worker_2` (DeepSeek), or `coordinator` (GLM) in C. Retained through later review and curation. |
 | `issue_status` | enum | `open` when concerns still require attention, or `resolved` when a resolution has been recorded. Model resolutions remain claims for expert assessment. |
-| `resolved_by` | enum or null | `extractor`, `verifier`, `coordinator` (C only), or `expert` when resolved. Null while open. Expert resolutions are recorded in curated copies after assessment. |
+| `resolved_by` | enum or null | Agent that resolved the issue, using the same workflow-specific identities as `issue_origin`, or `expert` in a curated copy after assessment. Null while open. |
 | `resolution` | string or null | Explanation addressing every concern when resolved; null while open. |
 
 An open issue has null `resolved_by` and `resolution`. A resolved issue identifies who resolved it and explains how all grouped concerns were addressed. Reopening retains its ID and origin. Expert assessment of V's claimed resolutions is recorded in manual review notes. A subsequent expert fix is recorded in a curated copy of the dataset.

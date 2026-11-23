@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:collaboration-config",
+  "title": "Collaboration profiles and shared pilot limits",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "profiles"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "agents",
+          "limits"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "agents": {
+            "type": "object",
+            "required": [
+              "coordinator",
+              "worker_1",
+              "worker_2"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "coordinator": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "worker_1": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "worker_2": {
+                "type": "string",
+                "pattern": "\\S"
+              }
+            }
+          },
+          "limits": {
+            "type": "object",
+            "required": [
+              "max_model_requests",
+              "max_document_tool_calls",
+              "max_elapsed_seconds",
+              "max_estimated_tokens"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "final_generation_seconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "max_model_requests": {
+                "type": "integer",
+                "minimum": 4
+              },
+              "max_document_tool_calls": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_elapsed_seconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "max_estimated_tokens": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -27,7 +27,7 @@ def test_diagnostic_default_remains_hosted_inkling_with_a_verifier_profile_avail
     root = Path(__file__).resolve().parents[1]
     selected = load_profile(root, check.DEFAULT_PROFILE, stage="extractor")
     config = json.loads((root / "configs/profiles.json").read_text())
-    assert {profile["stage"] for profile in config["profiles"]} == {"extractor", "verifier"}
+    assert {profile["stage"] for profile in config["profiles"]} == {"extractor", "verifier", "coordinator", "worker"}
     assert selected["model"]["name"] == MODEL and selected["model"]["provider"] == "deepinfra"
     assert selected["model"]["execution_mode"] == "hosted_api"
     assert selected["generation"]["max_output_tokens"] == 131072

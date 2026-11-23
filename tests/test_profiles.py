@@ -383,6 +383,7 @@ def test_missing_shared_schema_is_a_visible_setup_failure(configuration: dict, t
 @pytest.mark.parametrize("profile_name,stage", [
     ("inkling2_small_hf_extractor", "extractor"),
     ("deepseek_v4_1_flash_1017_hf_verifier", "verifier"),
+    ("glm5_3_flash_hf_coordinator", "coordinator"),
 ])
 def test_repository_profiles_load_but_do_not_claim_environment_observations(profile_name, stage) -> None:
     root = Path(__file__).resolve().parents[1]

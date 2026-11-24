@@ -43,7 +43,7 @@ def test_freeze_preserves_exact_reference_and_source_without_reading_model_outpu
     after = _snapshot(project)
     metadata = json.loads(after.pop(path))
     assert after == before
-    assert metadata["reference_path"] == f"expert_references/{PLAN_ID}/expert_reference.json"
+    assert metadata["reference_path"] == f"data/expert_references/{PLAN_ID}/expert_reference.json"
     assert metadata["reference_sha256"] == hashlib.sha256(reference).hexdigest()
     assert metadata["document_sha256"] == hashlib.sha256((project / "data/raw/plan_0001.pdf").read_bytes()).hexdigest()
     assert metadata["page_count"] == 3

@@ -7,12 +7,17 @@ Document identity, validation, and file-preservation rules stay in those modules
 import argparse
 import asyncio
 import logging
+import json
 import shlex
 import sys
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 import agents
+import assessments
+import assessment_validation
+import metrics
+import metric_summaries
 import collaboration_runner
 from collaboration_contracts import (
     DEFAULT_COLLABORATION_PROFILE, load_collaboration_configuration, load_collaboration_profiles,
@@ -68,6 +73,14 @@ def main(argv: list[str] | None = None) -> int:
             _edit_expert_reference(root, args)
         elif args.command == "freeze_expert_reference":
             _freeze_expert_reference(root, args)
+        elif args.command == "create_assessment":
+            _create_assessment(root, args)
+        elif args.command == "validate_assessment":
+            return _validate_assessment(root, args)
+        elif args.command == "calculate_metrics":
+            _calculate_metrics(root, args)
+        elif args.command == "summarize_metrics":
+            _summarize_metrics(root, args)
     except (OSError, ValueError) as error:
         # Expected file and data failures become readable terminal messages.
         # Unexpected programming errors still raise, making them visible in development.
@@ -229,6 +242,43 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Reviewer confirming readiness for assessment; repeat for multiple reviewers.",
     )
     _add_project_argument(freeze_reference_parser)
+    assessment_parser = commands.add_parser(
+        "create_assessment", help="Create development review CSVs from selected saved runs and a frozen reference.",
+        allow_abbrev=False,
+    )
+    assessment_parser.add_argument("plan_id", help="Registered development plan ID.")
+    assessment_parser.add_argument("--reviewer", action="append", required=True,
+                                   help="Reviewer name or study ID; repeat for multiple reviewers.")
+    assessment_parser.add_argument("--extractor-run-id", help="Exact E run; default latest validated successful E.")
+    assessment_parser.add_argument("--verifier-run-id", help="Exact V run; default latest successful V linked to E. Alone, selects V's E.")
+    assessment_parser.add_argument("--collaboration-run-id", help="Exact C run; default latest successful C using the selected preparation.")
+    assessment_parser.add_argument("--notes", help="Optional nonblank assessment context.")
+    _add_project_argument(assessment_parser)
+    assessment_validation_parser = commands.add_parser(
+        "validate_assessment", help="Check assessment provenance, CSVs, and pending judgments without writing files.",
+        allow_abbrev=False,
+    )
+    assessment_validation_parser.add_argument("plan_id", help="Registered development plan ID.")
+    assessment_validation_parser.add_argument("--assessment-id", required=True, help="Exact assessment_NNNN folder to check.")
+    assessment_validation_parser.add_argument("--require-complete", action="store_true",
+        help="Return failure when valid manual judgments are still pending or undetermined.")
+    _add_project_argument(assessment_validation_parser)
+    metrics_parser = commands.add_parser(
+        "calculate_metrics", help="Validate an assessment and save per-plan measures plus paired changes.",
+        allow_abbrev=False,
+    )
+    metrics_parser.add_argument("plan_id", help="Registered development plan ID.")
+    metrics_parser.add_argument("--assessment-id", required=True, help="Exact assessment_NNNN folder to calculate.")
+    metrics_parser.add_argument("--require-complete", action="store_true",
+        help="Require finished manual review before writing results.")
+    _add_project_argument(metrics_parser)
+    summary_parser = commands.add_parser(
+        "summarize_metrics", help="Combine exact saved per-plan metric results into a new JSON/CSV report.",
+        allow_abbrev=False,
+    )
+    summary_parser.add_argument("--result", action="append", required=True,
+        help="Project-relative metrics_NNNN folder or results.json; repeat once per selected plan.")
+    _add_project_argument(summary_parser)
     return parser
 
 
@@ -556,6 +606,84 @@ def _freeze_expert_reference(root: Path, args: argparse.Namespace) -> None:
     print(f"Reference SHA-256: {freeze['reference_sha256']}")
     print("Reference frozen for assessment; editor changes are blocked.")
     print("Use this reference fingerprint when recording judgments. Freezing does not enable comparison runs.")
+
+
+def _create_assessment(root: Path, args: argparse.Namespace) -> None:
+    """Publish copied context and blank judgments without starting model work."""
+    path = assessments.create_assessment(
+        root, args.plan_id, reviewers=args.reviewer, extractor_run_id=args.extractor_run_id,
+        verifier_run_id=args.verifier_run_id, collaboration_run_id=args.collaboration_run_id, notes=args.notes,
+    )
+    print(f"Assessment: {path}")
+    metadata = json.loads(storage.resolve_project_path(root, f"{path}/metadata.json").read_text(encoding="utf-8"))
+    for configuration, run in metadata["runs"].items():
+        print(f"{configuration}: {run['run_id']}")
+    print("Created metadata.json, action_scores.csv, output_review.csv, and verifier_resolutions.csv.")
+    print("Judgment fields are pending. Read metadata instructions and confirm activity grouping before assessment.")
+    print("Development assessment creation makes no model calls and calculates no metrics.")
+
+
+def _validate_assessment(root: Path, args: argparse.Namespace) -> int:
+    """Keep structural validity separate from readiness for completed review."""
+    report = assessment_validation.validate_assessment(root, args.plan_id, args.assessment_id)
+    if not report.valid:
+        print("Assessment validation failed.", file=sys.stderr)
+        for problem in report.problems:
+            print(f"[{problem.category}] {problem.location or '$'}: {problem.message}", file=sys.stderr)
+        return 1
+    print(f"Assessment validation passed for {_display_text(args.plan_id)} / {_display_text(args.assessment_id)}.")
+    print("Manual review: " + ("complete" if report.complete else "pending"))
+    for configuration in assessment_validation.CONFIGURATIONS:
+        states = [f"{label}: {'complete' if report.readiness[key][configuration] else 'pending'}"
+                  for key, label in (("reference_actions", "reference scores"), ("output_support", "output support"),
+                                     ("output_evidence", "output evidence"))]
+        print(configuration + " — " + "; ".join(states))
+    print("V resolution review: " + ("complete" if report.readiness["verifier_resolutions"] else "pending"))
+    print(f"Pending fields/coverage gaps: {len(report.pending)}")
+    for item in report.pending[:20]:
+        context = f" ({item.configuration})" if item.configuration else ""
+        print(f"[pending{context}] {item.location}: {item.message}")
+    if len(report.pending) > 20:
+        print(f"{len(report.pending) - 20} further pending fields/coverage gaps.")
+    print("Failure-reporting scope remains unselected. Validation does not establish scientific correctness.")
+    if args.require_complete and not report.complete:
+        print("--require-complete requires all manual judgments to be settled.", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _calculate_metrics(root: Path, args: argparse.Namespace) -> None:
+    """Write a new calculation without altering assessment or model evidence."""
+    path = metrics.calculate_metrics(root, args.plan_id, args.assessment_id, require_complete=args.require_complete)
+    print(f"Metrics: {path}")
+    result = json.loads(storage.resolve_project_path(root, f"{path}/results.json").read_text(encoding="utf-8"))
+    print("Manual review: " + ("complete" if result["review"]["complete"] else "pending"))
+    for configuration, data in result["configurations"].items():
+        values = []
+        for name in ("action_score_percentage", "unsupported_action_count", "adequate_evidence_percentage"):
+            measure = data["metrics"][name]
+            value = f"{measure['value']:.6g}" if measure["status"] == "available" else measure["status"]
+            values.append(f"{name}: {value}")
+        print(configuration + " — " + "; ".join(values))
+    print("Saved results.json, summary.csv, exact assessment inputs, and calculation code.")
+    print("Failure counts remain unavailable until their reporting scope is selected.")
+    print("Per-plan development results; expert judgments establish source correctness.")
+
+
+def _summarize_metrics(root: Path, args: argparse.Namespace) -> None:
+    """Describe contributors instead of presenting missing plans as zeros."""
+    path = metric_summaries.summarize_metrics(root, args.result)
+    print(f"Summary: {path}")
+    report = json.loads(storage.resolve_project_path(root, f"{path}/summary.json").read_text(encoding="utf-8"))
+    print("Selected plans: " + ", ".join(selection["plan_id"] for selection in report["selections"]))
+    for measure in report["aggregates"]:
+        if measure["metric"] == "action_score_percentage":
+            value = f"{measure['value']:.6g}" if measure["status"] == "available" else measure["status"]
+            print(f"{measure['scope']} / {measure['configuration']}: {value} {measure['unit']}; "
+                  f"{measure['contributing_plan_count']} contributing plans; {len(measure['excluded_plans'])} excluded.")
+    print("Saved summary.json, summary.csv, selected result copies, and calculation code.")
+    print("Each measure records its contributing/excluded plans. Failure counts remain unavailable.")
+    print("Development summaries depend on expert judgments; formal comparison remains disabled.")
 
 
 def _list_plans(root: Path) -> None:

@@ -261,3 +261,39 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Reason:** Preserve execution stopping rules and stable reference identities before assessment.
 - **Observed result:** Full regression passed 2,485 tests with 11 existing OCR/PyTorch warnings; 97 reference checks passed after the final counter refinement. All 25 historical runs loaded, and read-only checks preserved 9,422 research files. Both development C inputs included the updated guidance for all three roles. Documentation checks passed for 91 local links/anchors, 12 CLI examples, and the reference/freeze format tables against their schemas. Freetown remains an unfrozen guided draft. No paid requests were made.
 - **Remaining questions:** The shared guidance's effect on model quality and live execution under the latest settings are **Not yet tested**. Reference completion, assessment, metrics, formal comparison controls, and instruction export remain pending.
+
+### 2026-11-24 — Create assessment review files and move references under data
+
+- **Category:** Code / Data / Research
+- **Problem:** Manual assessment lacked generated review inputs, and expert references lived outside the data directory.
+- **Decision/change:** Agreed CSV judgments with generated JSON metadata and future JSON results/CSV summaries. Added `create_assessment` with latest validated successful E, linked V, and same-preparation C defaults, explicit run overrides, reviewer identities, input fingerprints, and three prefilled CSVs with blank judgments. Moved reference commands and existing files to `data/expert_references/`; assessments use `data/assessments/`. Preserved historical freeze bytes/path provenance and excluded both directories from Git. Updated README, IMPLEMENTATION, and DESIGN.
+- **Reason:** Prepare reproducible manual review inputs while keeping research files together and preserving independent references and assessed outputs.
+- **Observed result:** Full regression passed 2,529 tests with 11 existing OCR/PyTorch warnings, including 36 assessment-creation and 7 migration tests. Freetown's guided reference moved byte-for-byte and remains unfrozen. All 25 historical records loaded, and read-only defaults resolved compatible runs for both development plans. Documentation checks passed for 94 local links/anchors, 13 CLI examples, and format tables against their schemas. No paid requests were made.
+- **Remaining questions:** CSV validation, metric calculation, failure-reporting scope, manual review, formal comparison controls, and instruction export remain pending. Assessment with a completed real expert reference is **Not yet tested**.
+
+### 2026-11-24 — Validate assessment records and review completion
+
+- **Category:** Code / Data / Research
+- **Problem:** Saved manual review CSVs lacked checks before metric calculation.
+- **Decision/change:** Added read-only `validate_assessment` with exact input/source checks, strict CSV/JSON parsing, configuration-specific links, reference-row and output-group coverage, eligible V-resolution checks, and consistent judgments. Blank or undetermined judgments remain pending; `--require-complete` requires settled review. Parsed judgments and assessment-file fingerprints are available in memory for later calculations. Updated README, IMPLEMENTATION, DESIGN, and the workflow diagram.
+- **Reason:** Preserve selected evidence and scoring denominators while distinguishing unfinished review from invalid records.
+- **Observed result:** Full regression passed 2,639 tests with 11 existing OCR/PyTorch warnings, including 110 new assessment-validation tests covering pending/completed reviews, regrouping, empty outputs, damaged files, changed inputs, and CLI exit codes. Checks passed for 95 local links/anchors and 16 README CLI examples; all 25 historical run records loaded. Freetown's reference remains unchanged and unfrozen, and no real assessments or paid requests were created.
+- **Remaining questions:** Metric calculation, failure-reporting scope, real-plan manual review, formal comparison controls, and instruction export remain pending. Scientific assessment with completed real references is **Not yet tested**.
+
+### 2026-11-24 — Calculate and preserve per-plan assessment metrics
+
+- **Category:** Code / Data / Research
+- **Problem:** Validated judgments had no calculation or export workflow.
+- **Decision/change:** Added development `calculate_metrics` with reference scores, reviewed activity counts/evidence percentages, open issues, confirmed/claimed V resolutions, runtime/tokens, and E+V minus E / C minus E+V changes. Results preserve pending, unavailable, and not-applicable states with counts, denominators, units, and reasons. Each numbered export retains JSON results, a CSV summary, exact review-file copies, and calculation code/schema/dependency snapshots. Added optional strict manual-completion checks, result-schema validation, and input/code rechecks before publication. Updated README, IMPLEMENTATION, DESIGN, and the workflow diagram.
+- **Reason:** Make agreed per-plan calculations reproducible without replacing expert judgments or overwriting earlier results.
+- **Observed result:** All 323 related assessment, CLI, reference-freeze, and migration regression tests passed, including 40 new metric tests. Checks covered the design's 70% example, grouping denominators, paired directions/units, shared E+V costs, C parallel timing and token totals, missing observations, pending judgments, zero denominators, preserved recalculations, and interrupted publication. Documentation checks passed for 97 local links/anchors and 17 CLI examples. Freetown's reference remains unchanged and unfrozen; no real assessments or paid model requests were created.
+- **Remaining questions:** Failure-reporting scope/counts, cross-plan aggregation, the real-plan manual assessment pilot, formal comparison controls, and instruction export remain pending. Scientific results from completed real references are **Not yet tested**.
+
+### 2026-11-24 — Summarize selected plan metrics
+
+- **Category:** Code / Data / Research
+- **Problem:** Saved per-plan results lacked a combined study report.
+- **Decision/change:** Added `summarize_metrics` with explicit saved-result selections, one calculation per plan, compatible-method checks, package fingerprints, and recalculation from archived judgments. Percentages and paired changes use equal-plan means; counts/resources use labelled totals. Each measure records contributing/excluded plans and preserves pending/unavailable values. Reports retain JSON/CSV, selected result copies, and calculation code under numbered `data/reports/` folders, excluded from Git. Shared assessment validation now supports archived inputs, and metric rows are reused across exports. Updated README, IMPLEMENTATION, DESIGN, and the workflow diagram.
+- **Reason:** Make study summaries reproducible while keeping plan weighting, paired eligibility, and missing observations explicit.
+- **Observed result:** All 369 related summary, metric, assessment, CLI, reference-freeze, and migration regression tests passed, including 46 summary tests. Checks covered unequal plan sizes, different contributing sets, paired changes, zero/missing values, archived recalculation, changed files, duplicate selections, two distinct fictional source packages, and preserved/interrupted reports. Documentation checks passed for 99 local links/anchors and 18 CLI examples. Freetown's reference remains unchanged and unfrozen; no real assessments/reports or paid model requests were created.
+- **Remaining questions:** Failure-reporting scope/counts, the real-plan assessment pilot, formal comparison controls, and instruction export remain pending. Scientific cross-plan results from completed real assessments are **Not yet tested**.

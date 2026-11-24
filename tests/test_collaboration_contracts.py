@@ -40,7 +40,7 @@ def configured(project):
 
 def test_source_builder_ignores_baseline_and_expert_files_and_writes_nothing(configured):
     for name in (f"runs/{PLAN_ID}/run_extract_0001/output.json",
-                 f"expert_references/{PLAN_ID}/expert_reference.json"):
+                 f"data/expert_references/{PLAN_ID}/expert_reference.json"):
         path = configured / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('not valid JSON; must never be read')

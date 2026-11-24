@@ -1,6 +1,6 @@
 # Design Doc: Heat Adaptation LLM Dataset
 
-**Research design · updated 2026-11-23**
+**Research design · updated 2026-11-24**
 
 ## 1. Context and problem
 
@@ -31,13 +31,14 @@ Experts will screen eligibility, with preference for recent versions. City, coun
 
 ### Study sample
 
-| Study set | Planned size | Purpose |
+| Stage | Planned size | Purpose |
 | --- | --- | --- |
-| Development | 2 plans | Refinement of how experts and LLMs work together, with observed problems and revisions informing practical lessons. |
-| Comparison | 5 separate plans | Comparison of E, E+V, and C against independent expert work under fixed settings. |
+| Initial development | 2 plans | Build the workflow, refine prompts and tools, and check execution. Observed problems and revisions inform practical lessons. |
+| Additional plans | 8 plans | Extend the sample after initial development, with any further refinements documented. |
+| Final comparison | All 10 plans | Run E, E+V, and C successfully on the two initial and eight additional plans under one frozen study round. |
 | Expansion | Deferred | Possible dataset expansion after evaluation of the workflow. |
 
-Plans will be selected to provide variation in length, layout, and type, with near-duplicates excluded. The comparison set will be selected before comparison runs and will be separate from the development documents. The selection rationale and document characteristics will be recorded.
+Plans will be selected to provide variation in length, layout, and type, with near-duplicates excluded. The ten-plan sample will be fixed before the final study round. Initial development plans remain in the final comparison and are rerun with the other eight. The selection rationale, document characteristics, and each plan's role in refinement will be recorded.
 
 ### Extracted dataset and action records
 
@@ -137,9 +138,9 @@ C will start independently from the same prepared plan, without access to the se
 
 DeepSeek was selected for its low listed cost and strong author-reported reasoning and agent benchmark results. GLM was selected for its low listed cost, long context, and listed tool and structured-output support. All three models have passed basic compatibility checks. E, E+V, and C have completed development runs on both plans. Live checks under the latest shared guidance, C prompts, and budgets, and formal expert quality assessment, remain pending. The shared guidance's effect on model quality is **Not yet tested**. PDF preparation, optical character recognition (OCR) with EasyOCR, and document tools run locally; LLM inference is hosted.
 
-Model and hosting details, prompts, response controls, execution budgets, tool use, runtime, and provider-reported tokens will be recorded. Generation will use a provider-compatible schema, with compatibility checked separately using fictional inputs. Python will enforce the complete field and relationship rules for every final output. Structural compliance does not establish substantive accuracy. Earlier trials remain development evidence and are outside the formal comparison.
+Model and hosting details, prompts, response controls, execution budgets, tool use, runtime, and provider-reported tokens will be recorded. Generation will use a provider-compatible schema, with compatibility checked separately using fictional inputs. Python will enforce the complete field and relationship rules for every final output. Structural compliance does not establish substantive accuracy. Earlier trial outputs remain development evidence; final comparison outputs for all ten plans will come from the same complete study round.
 
-Each complete configuration will have a 90-minute execution ceiling, with 30 minutes protected for its final answer. For E+V, the complete extraction and verifier investigation will share the preceding 60 minutes; an extraction exceeding that allowance cannot enter the timed E+V workflow. Human waiting between commands will be excluded. C will share its time across all agents. Request, tool, and estimated-token ceilings will be fixed before comparison; actual resource use and failed attempts will be reported separately. Final generation may begin earlier when investigation finishes. Common ceilings do not establish equal computational effort; the current settings are specified in the implementation document's [configuration table](IMPLEMENTATION.MD#current-configuration-settings).
+Each complete configuration will have a 90-minute execution ceiling, with 30 minutes protected for its final answer. For E+V, the complete extraction and verifier investigation will share the preceding 60 minutes; an extraction exceeding that allowance cannot enter the timed E+V workflow. Human waiting between commands will be excluded. C will share its time across all agents. Request, tool, and estimated-token ceilings will be fixed within a study round. Reported resource use will cover the selected successful runs; failures and retries will remain in execution records and development notes. Final generation may begin earlier when investigation finishes. Common ceilings do not establish equal computational effort; the current settings are specified in the implementation document's [configuration table](IMPLEMENTATION.MD#current-configuration-settings).
 
 A submitted document-tool request exceeding its deadline will fail the configuration, including when a reply arrives late. Failure evidence and available late replies will be preserved, and no further model requests will start. Ordinary source problems, such as unreadable OCR, may remain recoverable and be retained as unresolved issues.
 
@@ -149,31 +150,37 @@ The final E, E+V, and C answers will receive the same automatic quotation-locati
 
 | Stage | Procedure and saved result |
 | --- | --- |
-| 1. Registration and preparation | The original PDF, collection metadata, page text, and preparation problems will be preserved. |
+| 1. Registration and preparation | The original PDFs, collection metadata, page text, and preparation problems will be preserved for all ten plans. |
 | 2. Extraction (E) | Inkling 2 Small will receive the whole prepared plan through the Hugging Face API. Its answer, issues, settings, tool activity, and execution records will be saved. |
 | 3. Verification (E+V) | DeepSeek V4.1 Flash 1017 will check a copy of that exact Inkling extraction, including unflagged content and possible omissions. Its full revised answer will be saved. |
 | 4. Collaboration (C) | GLM-5.3-Flash will coordinate Inkling and DeepSeek as flexible workers with clear assignments for extraction and checking. C will start independently from the prepared plan, preserving task exchanges, execution evidence, and one complete JSON answer. |
-| 5. Expert reference preparation | Experts will complete one reference form per plan from the original PDF before viewing any comparison output. The completed form will be validated and frozen before assessment. |
-| 6. Manual expert assessment | Experts will match activities by meaning and assess E, E+V, and C against the same frozen reference form, using the agreed rubric, evidence judgments, and issue checks. |
+| 5. Expert reference preparation | Experts will complete one form per plan from the original PDF, recording prior output exposure. Forms will be completed before viewing model outputs where no exposure has occurred, then validated and frozen before assessment. |
+| 6. Manual expert assessment | After all 30 configuration outputs are complete in one study round, experts will assess each plan's E, E+V, and C against its shared frozen reference, using the agreed rubric, evidence judgments, and issue checks. |
 | 7. Analysis and dataset assembly | Lessons about pairing experts and LLMs will be synthesized, the three configurations compared, and instruction examples assembled from expert-curated answers and supporting inputs. |
 
-Verification will default to the most recent validated, successful E run for the plan unless a specific E run is selected. The same selection rule applies to development, comparison, and later expansion. The selected E run ID will be saved with V, and verifier retries will retain that input.
+During development, verification can default to the most recent validated, successful E run or use an explicit run ID. For final comparison, V will use the selected E from that study round. The E run ID will be saved with V, and verifier retries will retain that input.
 
-Each comparison will use the selected E output, the first successful V run linked to it, and the first successful independent C run under fixed settings and the same preparation. The selected run IDs will be recorded before assessment and retained when newer runs appear. Manual judgments will also identify the frozen reference fingerprint and reviewers. Successful execution means that format and execution checks have passed. Failures and repeated runs will be preserved, with manual retries linked to earlier attempts.
+The final study round will fix the workflow code, models and hosts, prompts, response controls, source versions and preparations, tools, coding rules, budgets, timeouts, validation, and processing/repair policies. Each configuration will use its own fixed definition across all ten plans. C's task sequence may adapt within that protocol. Scoring rules will be fixed before assessment.
 
-Models, prompts, preparation, tools, coding rules, budgets, stopping rules, and scoring will be fixed before comparison. C's task sequence may adapt within that fixed protocol. Subsequent changes and affected runs will be documented. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) describes current software and planned work, and [README.md](README.md) provides available commands.
+For each plan, select the first validated, successful E, the first successful V linked to that E, and the first successful independent C within the round. Execution failures can be retried under unchanged settings. Successful execution means that format and execution checks pass; expert scoring may still identify substantive errors. The complete final round will contain 10 E, 10 E+V, and 10 C outputs. Selected run IDs, round identity, frozen reference fingerprints, and reviewers will accompany assessment and reporting.
+
+Any change to the frozen workflow will supersede the entire round. The revised workflow will start a new round and rerun all three configurations across all ten plans, including previously successful runs. A change required during C on the eighth plan therefore requires a full restart. Earlier attempts and superseded outputs will remain development history. Only one complete round will supply the final comparison. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) describes current software and planned controls, and [README.md](README.md) provides available commands.
 
 ## 4. Evaluation
 
 ### Expert reference and scoring
 
-Experts will complete one reference form per plan using the same grouping and coding rules as the models. The form will contain expert-coded activities, details, and source evidence from the original PDF. For comparison plans, the expert will complete it before viewing any E, E+V, or C output. All three saved outputs will be assessed manually against that same frozen form.
+Experts will complete one reference form per plan using the same grouping and coding rules as the models. The form will contain expert-coded activities, details, and source evidence from the original PDF. Where experts have not viewed model outputs, they will complete the form before doing so. Prior exposure on the initial development plans or during later refinement will be recorded. All three final-round outputs for a plan will be assessed against the same frozen form.
 
 Reference forms begin with guided action and issue placeholders. Experts will replace the guidance or remove unused records while coding the PDF. Reference issues use `expert` origin and, when resolved, `expert` resolver. These concerns remain separate from model-output issues used in evaluation. Structural validation does not establish reference completeness or factual accuracy.
 
 Reference action and issue IDs will remain stable, with deleted IDs unavailable for reuse. The same evidence/type-to-issue rules apply to reference actions; an omitted optional issues container means no issues. Before assessment, a named reviewer will confirm readiness and freeze the completed form. The freeze will identify the exact reference and original PDF by SHA-256 fingerprints, with reviewer and time recorded. Subsequent file changes will fail validation. This records the reviewer's decision; it does not establish scientific completeness or enable formal comparison.
 
-Development forms will pilot coding and assessment procedures. Prior exposure to development outputs will be recorded, and those forms will not provide independent comparison evidence.
+Development forms will pilot coding and assessment procedures and can supply the shared references for the initial two plans in the final comparison after completion, review, and freezing. Prior exposure will remain documented when interpreting the results.
+
+Assessments will use prefilled CSV tables for reference-activity scores, output-activity support/evidence judgments, and confirmation of V's claimed resolutions. Generated metadata will identify selected runs, the frozen reference, reviewers, and source fingerprints. Judgment fields will begin blank; experts will confirm activity grouping and matches before scoring. Development validation checks these records and their saved inputs, separating invalid data from blank or undetermined judgments. Every reference activity requires one scoring row per configuration, and output groups must cover every output record before review is complete. Validation checks consistency; experts establish source meaning. Development calculation exports per-plan results and selected cross-plan summaries as JSON/CSV, retaining pending measures as unavailable and preserving reviewed inputs and calculation code. Final-round membership and completeness controls remain to be implemented. References, assessments, and reports will be preserved under `data/expert_references/`, `data/assessments/`, and `data/reports/`.
+
+Development assessment creation can select the latest validated, successful E, its latest eligible V, and the latest eligible C from the same preparation, or use explicit run IDs. Final assessment will use the selected outputs from the complete ten-plan round above. Creation of review files does not establish scientific judgments or enable final-round execution.
 
 Actions will be matched by activity and meaning. Split or duplicate records will be assessed together, with each reference activity counted once. All substantive claims in matched records, including conflicting or unsupported details, will be considered in scoring. If a record bundles different activities, its relevant content will be assessed against each matching reference activity.
 
@@ -195,7 +202,7 @@ This study-specific rubric will be piloted on development plans. A worked scorin
 | Unsupported activities | **Unsupported action count**, reported alongside the total distinct output activities. This captures invented or ineligible activities outside the reference-based score. |
 | Evidence quality | **Actions with adequate evidence**, the percentage of output activities whose supplied evidence supports all recorded substantive details and uses faithful quotations with correct pages. |
 | Issues requiring review | **Open issues** in all three outputs, and **expert-confirmed verifier resolutions** reported against resolutions claimed for initially open E issues in E+V. C's issue handling will be described in review notes. |
-| Computational requirements | Successful processing runtime, provider-reported tokens, and failed executions as supporting information. |
+| Computational requirements | Processing runtime and provider-reported tokens for the selected successful runs. |
 
 The [evaluation appendix](#g-evaluation-measures-and-calculations) defines calculations and denominators. Assessment notes explain errors and corrections without requiring separate scores for every quotation or page.
 
@@ -203,9 +210,9 @@ The [evaluation appendix](#g-evaluation-measures-and-calculations) defines calcu
 
 The analysis will examine how heat adaptation experts and LLMs work together to develop the extraction workflow. Examples of decisions, revisions, and failures will help identify practical lessons about combining expert knowledge with model outputs to build and refine the workflow.
 
-Comparisons within each plan will examine how sequential verification and coordinated collaboration affect action accuracy and completeness, supporting evidence, and unresolved concerns. Review notes will describe corrected errors, recovered omissions, introduced errors, and how C's agents investigate disagreements. Runtime, token use, and failures will describe computational requirements.
+Comparisons within each plan will examine how sequential verification and coordinated collaboration affect action accuracy and completeness, supporting evidence, and unresolved concerns. Review notes will describe corrected errors, recovered omissions, introduced errors, and how C's agents investigate disagreements. Runtime and token use will describe the selected successful workflows. Execution failures remain part of the development account rather than a quantitative study outcome.
 
-With five selected comparison plans and one fixed set of models, findings will be descriptive and specific to this setting. Differences involving C will reflect its complete workflow, including its third model, resource allowances, and coordination, rather than isolating coordination alone. Document layout and PDF/OCR errors may affect quality. Hosted services may disclose limited model revision and serving details; unavailable information will remain unknown. Expert judgments about grouping and scoring may vary, and omissions or misinterpretations in the reference form may influence results.
+With ten selected plans and one final workflow version, findings will be descriptive and specific to this setting. The analysis will identify the initial development plans and any additional plans used for refinement, interpreting results with that history. Differences involving C will reflect its complete workflow, including its third model, resource allowances, and coordination, rather than isolating coordination alone. Document layout and PDF/OCR errors may affect quality. Hosted services may disclose limited model revision and serving details; unavailable information will remain unknown. Expert judgments about grouping and scoring may vary, and omissions or misinterpretations in the reference form may influence results.
 
 The coarse action scores and combined evidence judgment may hide differences in the nature or severity of errors. Grouping an activity across locations or phases also gives records with different amounts of detail equal weight. Issue counts depend on what the models flag and provide only a partial view of review needs.
 
@@ -355,7 +362,7 @@ These rules describe how models and experts interpret the source and organize ac
 
 ### G. Evaluation measures and calculations
 
-The selected E, linked E+V, and independent C outputs form the basis of comparison. Quality is assessed on saved processed outputs before curation. E+V includes the shared extractor and verifier; C includes its own coordinator and all worker activity.
+The complete final study round supplies E, linked E+V, and independent C outputs for all ten plans. Quality is assessed on saved processed outputs before curation. E+V includes the shared extractor and verifier; C includes its own coordinator and all worker activity.
 
 #### Before expert assessment
 
@@ -364,9 +371,8 @@ The selected E, linked E+V, and independent C outputs form the basis of comparis
 | Open issues | Number of issues whose `issue_status` is `open` in each output. | Reported for E, E+V, and C; independently generated C issues are not matched to E IDs. |
 | Successful processing runtime | Measured processing duration, in seconds. | E uses extractor duration; E+V adds verifier duration. C uses its complete elapsed duration, without summing overlapping worker durations. |
 | Tokens used | Sum of provider-reported input and output tokens across generation calls, with the two components retained. | E uses extractor calls; E+V adds verifier calls. C includes every coordinator and worker call once. |
-| Failed executions | Number of distinct failed comparison run IDs, including retries. | Reported for E, V, and C, with shared E failures counted once. Worker errors belong to their C run rather than separate executions. |
 
-Runtime covers setup/loading, model and tool requests, saving, validation, permitted repairs, and cleanup. C duration runs from its own start to completion, including coordination and parallel work. Failed-attempt measurements are reported separately. Preparation, human review, and gaps between attempts fall outside processing runtime.
+Runtime covers setup/loading, model and tool requests, saving, validation, permitted repairs, and cleanup. C duration runs from its own start to completion, including coordination and parallel work. These measures cover the selected successful runs in the final round. Failed attempts, retries, and superseded rounds remain in execution records and development notes and are outside the reported runtime/token totals. Preparation, human review, and gaps between attempts also fall outside processing runtime.
 
 #### After expert assessment
 
@@ -387,7 +393,7 @@ For issue assessment, only initially open E issues that V marks resolved require
 
 #### Paired comparisons and reporting conventions
 
-Paired changes are calculated within plans as E+V minus E and C minus E+V, with percentage differences expressed in percentage points. Results are reported for each plan with counts and denominators. A descriptive overall summary uses the mean of valid per-plan percentages and identifies contributing plans. Missing configuration outputs and failures are identified; each contrast uses plans with the required outputs and judgments.
+Paired changes are calculated within plans as E+V minus E and C minus E+V, with percentage differences expressed in percentage points. Results are reported for each plan with counts and denominators. The final summary will include all ten plans from one complete study round. A descriptive overall summary uses the mean of valid per-plan percentages, giving each plan equal weight. Paired summaries average within-plan changes over plans with both required measures. Counts and successful-run resource use are reported as totals by configuration; confirmed/claimed V resolutions use the same contributing plans for both counts. Each summary selects one exact saved calculation per plan and identifies contributing and excluded plans for every measure. An incomplete execution round is not the final comparison; unavailable judgments and zero denominators remain explicit.
 
 The value `null` indicates pending judgments or unavailable measurements. Missing required usage or duration makes the corresponding total unavailable. Zero denominators are not applicable. An output activity absent from the reference is checked against the PDF for source support; absence alone does not make it unsupported. Reference coverage gaps are recorded in manual review notes. Any activity whose support is still undetermined keeps the relevant quality measures pending.
 

@@ -98,7 +98,7 @@ def freeze_expert_reference(
         raise storage.ExpertReferenceValidationError(problems)
     freeze = {
         "schema_version": 1, "plan_id": plan_id,
-        "reference_path": f"expert_references/{plan_id}/expert_reference.json",
+        "reference_path": f"data/expert_references/{plan_id}/expert_reference.json",
         "reference_sha256": hashlib.sha256(original_bytes).hexdigest(),
         "document_sha256": entry["document_sha256"].lower(),
         "source_url": entry["source_url"], "date_accessed": entry["date_accessed"],

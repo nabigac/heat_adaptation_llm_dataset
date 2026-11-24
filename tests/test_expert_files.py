@@ -28,7 +28,7 @@ def project(tmp_path: Path) -> Path:
 
 
 def _reference_path(root: Path) -> Path:
-    return root / "expert_references/plan_0001/expert_reference.json"
+    return root / "data/expert_references/plan_0001/expert_reference.json"
 
 
 def _file_contents(root: Path) -> dict[str, bytes]:
@@ -50,7 +50,7 @@ def test_creates_guided_form_from_collection_without_model_outputs(
 
     path = expert_files.create_expert_reference(project, "plan_0001", prepared_by=reviewers)
 
-    assert path == "expert_references/plan_0001/expert_reference.json"
+    assert path == "data/expert_references/plan_0001/expert_reference.json"
     reference = json.loads((project / path).read_text(encoding="utf-8"))
     assert reference["schema_version"] == 1
     assert reference["plan_id"] == "plan_0001"
@@ -120,7 +120,7 @@ def test_invalid_expert_identity_writes_nothing(project: Path, reviewers: object
         expert_files.create_expert_reference(project, "plan_0001", prepared_by=reviewers)
 
     assert _file_contents(project) == before
-    assert not (project / "expert_references").exists()
+    assert not (project / "data/expert_references").exists()
 
 
 def test_unknown_plan_writes_nothing(project: Path) -> None:
@@ -146,7 +146,7 @@ def test_damaged_collection_is_rejected_without_writes(project: Path, damage: st
         expert_files.create_expert_reference(project, "plan_0001", prepared_by=["reviewer"])
 
     assert _file_contents(project) == before
-    assert not (project / "expert_references").exists()
+    assert not (project / "data/expert_references").exists()
 
 
 @pytest.mark.parametrize("occupied", ["expert_edits", "invalid_json", "directory", "dangling_link"])
@@ -179,7 +179,7 @@ def test_reference_folder_cannot_redirect_to_another_location(
 ) -> None:
     target = tmp_path / "outside references" if outside else project / "other references"
     target.mkdir()
-    (project / "expert_references").symlink_to(target, target_is_directory=True)
+    (project / "data/expert_references").symlink_to(target, target_is_directory=True)
 
     with pytest.raises(ValueError):
         expert_files.create_expert_reference(project, "plan_0001", prepared_by=["reviewer"])
@@ -227,7 +227,7 @@ def test_cli_creates_form_with_repeated_expert_flag(
     ]) == 0
 
     output = capsys.readouterr()
-    assert "expert_references/plan_0001/expert_reference.json" in output.out
+    assert "data/expert_references/plan_0001/expert_reference.json" in output.out
     assert "guided blank action action_0001 and expert issue issue_0001" in output.out
     assert "TODO:" in output.out
     assert "before viewing model outputs" in output.out

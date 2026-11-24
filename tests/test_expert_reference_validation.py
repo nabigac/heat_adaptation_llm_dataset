@@ -17,7 +17,7 @@ from validation import parse_expert_reference_json, validate_expert_reference
 
 
 def _reference_path(root: Path) -> Path:
-    return root / "expert_references/plan_0001/expert_reference.json"
+    return root / "data/expert_references/plan_0001/expert_reference.json"
 
 
 def _read_reference(root: Path) -> dict:

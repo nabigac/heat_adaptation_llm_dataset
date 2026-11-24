@@ -695,10 +695,13 @@ def save_new_expert_reference(project_root: Path | str, reference: dict) -> str:
     if not root.is_dir():
         raise NotADirectoryError(f"Project root is not an existing directory: {root}")
     _require_run_identifier(reference["plan_id"])
-    relative_path = f"expert_references/{reference['plan_id']}/expert_reference.json"
+    relative_path = f"data/expert_references/{reference['plan_id']}/expert_reference.json"
     destination = resolve_project_path(root, relative_path)
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(f"Expert reference already exists; it was not changed: {relative_path}")
+    legacy = resolve_project_path(root, f"expert_references/{reference['plan_id']}")
+    if legacy.exists() or legacy.is_symlink():
+        raise ValueError("An expert reference folder exists at the old location; migrate it before creating a form.")
     require_unfrozen_expert_reference(root, reference["plan_id"])
     # A reference belongs at this exact plan path, never through a redirect to
     # another plan's folder, even when the linked target stays inside the project.
@@ -736,7 +739,7 @@ def load_expert_reference(
 def _expert_reference_file(project_root: Path | str, plan_id: str) -> Path:
     """Keep both reads and edits bound to the selected plan's canonical form."""
     _require_run_identifier(plan_id)
-    relative_path = f"expert_references/{plan_id}/expert_reference.json"
+    relative_path = f"data/expert_references/{plan_id}/expert_reference.json"
     path = resolve_project_path(project_root, relative_path)
     if path.resolve() != path:
         raise ValueError(f"Expert reference path must not use symbolic links: {relative_path}")
@@ -781,8 +784,11 @@ def load_expert_reference_freeze(project_root: Path | str, plan_id: str) -> dict
     if problems:
         raise ExpertReferenceValidationError(problems)
     assert freeze is not None
-    if (freeze["plan_id"] != plan_id
-            or freeze["reference_path"] != f"expert_references/{plan_id}/expert_reference.json"):
+    # Preserve historical freeze bytes when the reference folder is moved. The
+    # old recorded path remains provenance; file/hash checks use today's path.
+    permitted_paths = {f"data/expert_references/{plan_id}/expert_reference.json",
+                       f"expert_references/{plan_id}/expert_reference.json"}
+    if freeze["plan_id"] != plan_id or freeze["reference_path"] not in permitted_paths:
         raise ValueError("Expert reference freeze must identify this plan's canonical reference.")
     return freeze
 
@@ -799,7 +805,7 @@ def save_new_expert_reference_freeze(
     if problems:
         raise ExpertReferenceValidationError(problems)
     if (freeze["plan_id"] != plan_id
-            or freeze["reference_path"] != f"expert_references/{plan_id}/expert_reference.json"):
+            or freeze["reference_path"] != f"data/expert_references/{plan_id}/expert_reference.json"):
         raise ValueError("Expert reference freeze must identify this plan's canonical reference.")
     require_unfrozen_expert_reference(project_root, plan_id)
     current = read_expert_reference_bytes(project_root, plan_id)
@@ -807,7 +813,7 @@ def save_new_expert_reference_freeze(
         raise ValueError("The expert reference changed while freezing; review it again before freezing.")
     destination = _expert_reference_freeze_file(project_root, plan_id)
     _publish_new_bytes(destination, _serialize_run_json(freeze).encode("utf-8"))
-    return f"expert_references/{plan_id}/reference_freeze.json"
+    return f"data/expert_references/{plan_id}/reference_freeze.json"
 
 
 def save_expert_reference_edit(
@@ -830,7 +836,32 @@ def save_expert_reference_edit(
     if destination.read_bytes() != expected_bytes:
         raise ValueError("The expert reference changed while editing; reload it and repeat the edit.")
     _replace_run_json(destination, text)
-    return f"expert_references/{plan_id}/expert_reference.json"
+    return f"data/expert_references/{plan_id}/expert_reference.json"
+
+
+def migrate_expert_references(project_root: Path | str) -> list[str]:
+    """Move the old reference folder without rewriting reference or freeze bytes.
+
+    Refuse occupied destinations and symbolic links instead of merging folders
+    or losing expert work. As elsewhere, migration requires one writer at a time.
+    Historical freeze paths stay readable through load_expert_reference_freeze.
+    """
+    source = resolve_project_path(project_root, "expert_references")
+    destination = resolve_project_path(project_root, "data/expert_references")
+    if source.is_symlink() or source.resolve() != source:
+        raise ValueError("The old expert reference folder must not use symbolic links.")
+    if not source.exists():
+        return []
+    if not source.is_dir():
+        raise ValueError("The old expert reference location is not a directory.")
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError("The new expert reference location is occupied; neither folder was changed.")
+    if destination.resolve() != destination or any(path.is_symlink() for path in source.rglob("*")):
+        raise ValueError("Expert reference migration must not follow symbolic links.")
+    files = sorted(path.relative_to(source).as_posix() for path in source.rglob("*") if path.is_file())
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(destination)
+    return [f"data/expert_references/{name}" for name in files]
 
 
 def save_registry(project_root: Path | str, registry: dict) -> None:

@@ -220,6 +220,7 @@ def test_live_clients_parallel_workers_and_preserved_saved_output(ready):
     assert len(controller["tasks"]) == len(controller["drafts"]) == 2
     assert len(list((folder / "artifacts/events").glob('*.json'))) == len(controller["events"])
     assert not list((ready.root / "expert_references").glob('**/*'))
+    assert not list((ready.root / "data/expert_references").glob('**/*'))
     for path in folder.rglob('*'):
         if path.is_file():
             assert b"hf-fictional-c-run-token" not in path.read_bytes()

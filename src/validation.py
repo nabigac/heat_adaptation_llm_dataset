@@ -151,6 +151,31 @@ def validate_expert_reference_freeze(data: object) -> list[ValidationProblem]:
     )
 
 
+def validate_assessment_metadata(data: object) -> list[ValidationProblem]:
+    """Check generated assessment metadata; creation verifies its exact inputs."""
+    return _validate_structure(
+        data, _PLAN_DATA_SCHEMA_PATH.parent / "assessment_metadata.schema.json",
+        "assessment metadata", required_formats=("date-time",),
+    )
+
+
+def validate_metrics_results(data: object) -> list[ValidationProblem]:
+    """Check generated calculation output; the calculator validates its inputs."""
+    return _validate_structure(
+        data, _PLAN_DATA_SCHEMA_PATH.parent / "metrics_results.schema.json", "metrics results",
+        required_formats=("date-time",),
+        schema_references=(("urn:heat-adaptation:assessment-metadata", _PLAN_DATA_SCHEMA_PATH.parent / "assessment_metadata.schema.json"),),
+    )
+
+
+def validate_metrics_summary(data: object) -> list[ValidationProblem]:
+    """Check report structure; summary generation validates selected packages."""
+    return _validate_structure(
+        data, _PLAN_DATA_SCHEMA_PATH.parent / "metrics_summary.schema.json", "metrics summary",
+        required_formats=("date-time",),
+    )
+
+
 def validate_run_record_structure(data: object) -> list[ValidationProblem]:
     """Check run fields, saved run settings, state requirements, and finite numbers.
 
@@ -812,6 +837,14 @@ def parse_plan_data_json(
             data, page_count=page_count
         )
     )
+
+
+def parse_assessment_metadata_json(text: str) -> tuple[dict | None, list[ValidationProblem]]:
+    """Read strict assessment metadata JSON without repairs or rewritten fields."""
+    try:
+        return _parse_and_validate(text, validate_assessment_metadata)
+    except RecursionError:
+        return None, [ValidationProblem("syntax", None, "Assessment metadata JSON is nested too deeply.")]
 
 
 def parse_expert_reference_json(

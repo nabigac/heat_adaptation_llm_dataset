@@ -32,7 +32,7 @@ def project(tmp_path):
 
 
 def reference_path(root):
-    return root / "expert_references/plan_0001/expert_reference.json"
+    return root / "data/expert_references/plan_0001/expert_reference.json"
 
 
 def read(root):
@@ -68,7 +68,7 @@ def test_add_appends_next_id_preserving_existing_reference_and_other_files(proje
 
     path, record_id = edit(project, f"add_{kind}")
 
-    assert path == "expert_references/plan_0001/expert_reference.json"
+    assert path == "data/expert_references/plan_0001/expert_reference.json"
     assert record_id == f"{kind}_0002"
     after = read(project)
     added = records(after, kind).pop()
@@ -325,7 +325,7 @@ def test_edit_cli_selects_reference_and_operation(project, capsys, flag, record_
     args.extend(["--project-root", str(project)])
     assert cli.main(args) == 0
     output = capsys.readouterr()
-    assert "Expert reference: expert_references/plan_0001/expert_reference.json" in output.out
+    assert "Expert reference: data/expert_references/plan_0001/expert_reference.json" in output.out
     expected_verb = "Added blank" if flag.startswith("--add") else "Removed"
     assert expected_verb in output.out
     assert output.err == ""

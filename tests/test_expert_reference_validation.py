@@ -65,6 +65,7 @@ def project(tmp_path: Path) -> Path:
         "action_benefit": None,
         "evidence": [{"quote": "Fictional quotation for structural checks.", "page_numbers": [3]}],
     }]
+    reference["plan_issues"]["issues"] = []
     # The PDF is deliberately blank: passing these tests establishes file/link
     # consistency, never quotation fidelity or source support.
     _write_reference(root, reference)
@@ -76,6 +77,31 @@ def _context() -> dict:
         "plan_id": "plan_0001", "source_url": "https://example.org/plan.pdf",
         "date_accessed": "2026-11-21", "page_count": 3,
     }
+
+
+@pytest.mark.parametrize("missing_field", [None, "evidence", "action_type"])
+def test_absent_and_empty_issue_containers_apply_identical_checks(project, missing_field):
+    reference = _read_reference(project)
+    if missing_field:
+        reference["plan_data"]["actions"][0][missing_field] = []
+    before = copy.deepcopy(reference)
+    with_container = validate_expert_reference(reference, **_context())
+    reference.pop("plan_issues")
+    without_container = validate_expert_reference(reference, **_context())
+    assert without_container == with_container
+    assert bool(without_container) == bool(missing_field)
+    assert reference == {key: value for key, value in before.items() if key != "plan_issues"}
+
+
+@pytest.mark.parametrize("missing_field", ["evidence", "action_type"])
+def test_linked_expert_issue_explains_missing_type_or_evidence(project, missing_field):
+    from expert_templates import blank_issue
+    reference = _read_reference(project)
+    reference["plan_data"]["actions"][0][missing_field] = []
+    issue = blank_issue("issue_0001")
+    issue.update(related_action_id="action_0001", issue_description="Source details remain unclear.")
+    reference["plan_issues"]["issues"] = [issue]
+    assert validate_expert_reference(reference, **_context()) == []
 
 
 def test_valid_reference_uses_original_pdf_without_preparation_or_model_access(

@@ -243,3 +243,21 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Reason:** Respond to observed errors and make limits reproducible while comparing complete workflows with different resource allowances.
 - **Observed result:** Paris C `0002` succeeded under the earlier 21-request ceiling in 38m36s. Review of its 77 records and 85 unmatched quotation flags identified grouping and omission concerns. The budget update passed 2,283 tests with 11 existing OCR warnings; both plans passed offline budget checks, historical records remained readable, and research files were preserved. No paid requests were launched for these updates.
 - **Remaining questions:** The latest C prompts and current budgets are **Not yet tested** in live runs. Expert assessment, metrics, formal comparison controls, C curation validation, and instruction export remain pending.
+
+### 2026-11-23 — Support C curation and guided expert references
+
+- **Category:** Code / Data
+- **Problem:** Curated-answer validation rejected C identities, and empty reference forms offered little guidance for manual coding.
+- **Decision/change:** Extended curation validation to C worker/coordinator identities and expert resolutions while retaining workflow-specific rules. Added guided action/issue starters, unfinished-guidance checks, and `edit_expert_reference` with default removal of untouched blanks or removal by ID. Reference issues use expert identities. Updated README, IMPLEMENTATION, and DESIGN.
+- **Reason:** Support expert coding and curation before instruction export while preserving assessed model outputs.
+- **Observed result:** The C curation update passed 2,378 tests with 11 existing OCR/PyTorch warnings; all 25 saved records loaded. The reference update then passed 770 focused tests. Freetown's empty form was recreated with one guided action and issue; an installed-CLI add/remove round trip preserved that starter and 32 registry, source, preparation, and output files. No paid requests were made.
+- **Remaining questions:** The latest C prompts and budgets are **Not yet tested** in live study runs. Reference completion, manual assessment, metrics, formal comparison controls, and instruction export remain pending.
+
+### 2026-11-23 — Enforce C deadlines and stabilize expert references
+
+- **Category:** Code / Model / Data / Research
+- **Problem:** C could recover from submitted tool timeouts, omitted reference issues bypassed checks, shared role guidance was ambiguous, and deleted reference IDs could be reused.
+- **Decision/change:** Reused E/V's complete-request timeout handling in C, preserving failure and late-reply evidence and stopping further model requests. Ordinary source/OCR errors remain recoverable. Unified reference evidence/type-to-issue checks for omitted and empty issue containers, clarified shared answer/worker formats and issue roles, and added persistent ID counters plus `freeze_expert_reference` with named reviewer confirmation and reference/PDF fingerprints. Updated README, IMPLEMENTATION, and DESIGN.
+- **Reason:** Preserve execution stopping rules and stable reference identities before assessment.
+- **Observed result:** Full regression passed 2,485 tests with 11 existing OCR/PyTorch warnings; 97 reference checks passed after the final counter refinement. All 25 historical runs loaded, and read-only checks preserved 9,422 research files. Both development C inputs included the updated guidance for all three roles. Documentation checks passed for 91 local links/anchors, 12 CLI examples, and the reference/freeze format tables against their schemas. Freetown remains an unfrozen guided draft. No paid requests were made.
+- **Remaining questions:** The shared guidance's effect on model quality and live execution under the latest settings are **Not yet tested**. Reference completion, assessment, metrics, formal comparison controls, and instruction export remain pending.

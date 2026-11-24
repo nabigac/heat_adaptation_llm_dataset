@@ -38,7 +38,7 @@ def _file_contents(root: Path) -> dict[str, bytes]:
     }
 
 
-def test_creates_empty_form_from_collection_without_model_outputs(
+def test_creates_guided_form_from_collection_without_model_outputs(
     project: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("HF_TOKEN", raising=False)
@@ -52,26 +52,33 @@ def test_creates_empty_form_from_collection_without_model_outputs(
 
     assert path == "expert_references/plan_0001/expert_reference.json"
     reference = json.loads((project / path).read_text(encoding="utf-8"))
-    assert reference == {
-        "schema_version": 1,
-        "plan_id": "plan_0001",
-        "prepared_by": reviewers,
-        "plan_data": {
-            "metadata": {
-                "plan_title": "Fictional heat plan — 2026",
-                "jurisdiction_name": None,
-                "country": None,
-                "plan_scale": None,
-                "plan_type": None,
-                "publication_year": None,
-                "lead_agencies": [],
-                "source_url": "https://example.org/heat-plan.pdf",
-                "date_accessed": "2026-11-21",
-                "language": "English",
-            },
-            "actions": [],
-        },
+    assert reference["schema_version"] == 1
+    assert reference["plan_id"] == "plan_0001"
+    assert reference["prepared_by"] == reviewers
+    assert reference["plan_data"]["metadata"] == {
+        "plan_title": "Fictional heat plan — 2026",
+        "jurisdiction_name": None,
+        "country": None,
+        "plan_scale": None,
+        "plan_type": None,
+        "publication_year": None,
+        "lead_agencies": [],
+        "source_url": "https://example.org/heat-plan.pdf",
+        "date_accessed": "2026-11-21",
+        "language": "English",
     }
+    assert reference["instructions"] and all(isinstance(line, str) for line in reference["instructions"])
+    assert len(reference["plan_data"]["actions"]) == len(reference["plan_issues"]["issues"]) == 1
+    action = reference["plan_data"]["actions"][0]
+    assert action["action_id"] == "action_0001"
+    assert action["action_status"] == "unspecified"
+    assert action["action_type"] == action["evidence"] == []
+    for field in ("action", "action_location", "action_recipient", "action_cost", "action_benefit"):
+        assert action[field].startswith("TODO:")
+    issue = reference["plan_issues"]["issues"][0]
+    assert issue["issue_id"] == "issue_0001" and issue["issue_origin"] == "expert"
+    assert issue["issue_status"] == "open" and issue["issue_description"].startswith("TODO:")
+    assert all(issue[field] is None for field in ("related_action_id", "issue_type", "resolved_by", "resolution"))
     assert validate_expert_reference_structure(reference) == []
     after = _file_contents(project)
     assert after.pop(path).decode("utf-8").endswith("\n")
@@ -221,7 +228,8 @@ def test_cli_creates_form_with_repeated_expert_flag(
 
     output = capsys.readouterr()
     assert "expert_references/plan_0001/expert_reference.json" in output.out
-    assert "Actions are empty" in output.out
+    assert "guided blank action action_0001 and expert issue issue_0001" in output.out
+    assert "TODO:" in output.out
     assert "before viewing model outputs" in output.out
     assert output.err == ""
     reference = json.loads(_reference_path(project).read_text())

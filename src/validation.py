@@ -21,6 +21,7 @@ from referencing.exceptions import Unresolvable
 from referencing.jsonschema import DRAFT202012
 
 from repair import COMPLETION_STATUSES, CompletionStatus, repair_agent_response
+from expert_templates import placeholder_locations
 
 
 # Resolve the schema relative to this module, independently of the terminal's path.
@@ -135,7 +136,18 @@ def validate_expert_reference_structure(data: object) -> list[ValidationProblem]
     return _validate_structure(
         data, _EXPERT_REFERENCE_SCHEMA_PATH, "expert reference",
         required_formats=("date",),
-        schema_references=((_PLAN_DATA_SCHEMA_URI, _PLAN_DATA_SCHEMA_PATH),),
+        schema_references=(
+            (_PLAN_DATA_SCHEMA_URI, _PLAN_DATA_SCHEMA_PATH),
+            (_AGENT_RESPONSE_SCHEMA_URI, _AGENT_RESPONSE_SCHEMA_PATH),
+        ),
+    )
+
+
+def validate_expert_reference_freeze(data: object) -> list[ValidationProblem]:
+    """Check freeze metadata; storage checks its paths and exact reference bytes."""
+    return _validate_structure(
+        data, _PLAN_DATA_SCHEMA_PATH.parent / "expert_reference_freeze.schema.json",
+        "expert reference freeze", required_formats=("date", "date-time"),
     )
 
 
@@ -357,13 +369,15 @@ def validate_plan_data(
 
 
 def validate_expert_reference(
-    data: object, *, plan_id: str, source_url: str, date_accessed: str, page_count: int
+    data: object, *, plan_id: str, source_url: str, date_accessed: str, page_count: int,
+    allow_templates: bool = False,
 ) -> list[ValidationProblem]:
     """Check a reference against trusted registration details and the original PDF.
 
     The caller supplies checked collection data and a counted PDF page total.
-    Empty actions remain valid structure; expert review establishes completeness,
-    claim support, grouping, and quotation fidelity. This function changes nothing.
+    The editor permits TODO guidance while retaining field/link checks. Normal
+    validation rejects it. Older references without issues remain readable.
+    Expert review establishes completeness and claim support; no fields change.
     """
     problems = validate_expert_reference_structure(data) + _validate_page_count(page_count)
     if problems:
@@ -380,9 +394,27 @@ def validate_expert_reference(
                 "reference", f"$.plan_data.metadata.{field}",
                 f"Reference {field} must match the registered collection metadata."
             ))
-    problems.extend(_validate_plan_data_references(
-        data["plan_data"], page_count=page_count, location="$.plan_data"
-    ))
+    if not allow_templates:
+        # An omitted optional container means no issues, just like an empty list.
+        # Normalize only this check; reading never rewrites the expert's form.
+        checked = {**data, "plan_issues": data.get("plan_issues", {"issues": []})}
+        problems.extend(_validate_response_references(checked, page_count=page_count, stage="expert"))
+    else:
+        problems.extend(_validate_plan_data_references(
+            data["plan_data"], page_count=page_count, location="$.plan_data"
+        ))
+        if "plan_issues" in data:
+            problems.extend(_validate_plan_issues_references(
+                data["plan_issues"],
+                record_ids={action["action_id"] for action in data["plan_data"]["actions"]},
+                stage="expert",
+            ))
+    if not allow_templates:
+        for location in placeholder_locations(data):
+            problems.append(ValidationProblem(
+                "reference", location,
+                "Unfinished TODO guidance: fill this field or remove the unused blank record.",
+            ))
     return problems
 
 
@@ -411,8 +443,10 @@ def validate_agent_response(
 
 
 def validate_curated_dataset(data: object, *, page_count: int) -> list[ValidationProblem]:
-    """Check curated answers, allowing expert-authored issue resolutions.
+    """Check curated E/V or C answers, allowing expert-authored resolutions.
 
+    Each answer uses one workflow's issue identities. Shared field and reference
+    checks still apply, and validation never changes the supplied answer.
     Format and references are checked here. Source meaning and expert approval
     remain research judgments recorded separately from validation success.
     """
@@ -781,7 +815,8 @@ def parse_plan_data_json(
 
 
 def parse_expert_reference_json(
-    text: str, *, plan_id: str, source_url: str, date_accessed: str, page_count: int
+    text: str, *, plan_id: str, source_url: str, date_accessed: str, page_count: int,
+    allow_templates: bool = False,
 ) -> tuple[dict | None, list[ValidationProblem]]:
     """Parse strict reference JSON and check its source links without any repairs."""
     try:
@@ -789,10 +824,19 @@ def parse_expert_reference_json(
             text, lambda data: validate_expert_reference(
                 data, plan_id=plan_id, source_url=source_url,
                 date_accessed=date_accessed, page_count=page_count,
+                allow_templates=allow_templates,
             )
         )
     except RecursionError:
         return None, [ValidationProblem("syntax", None, "Reference JSON is nested too deeply.")]
+
+
+def parse_expert_reference_freeze_json(text: str) -> tuple[dict | None, list[ValidationProblem]]:
+    """Read an existing freeze without accepting duplicate keys or invalid fields."""
+    try:
+        return _parse_and_validate(text, validate_expert_reference_freeze)
+    except RecursionError:
+        return None, [ValidationProblem("syntax", None, "Reference freeze JSON is nested too deeply.")]
 
 
 def parse_agent_response_json(

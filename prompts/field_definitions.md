@@ -1,8 +1,10 @@
 # Plan dataset fields
 
-Return one JSON object containing exactly plan_data and plan_issues. Every field below
-is required except issue_type. Unknown fields are not allowed. Python records
-run IDs, settings, measurements, and validation reports separately.
+Complete answers from E, V, and C contain exactly plan_data and plan_issues. C workers
+return their assigned task-result structure instead; these definitions govern any
+plan content they propose. Every field below is required except issue_type. Unknown
+fields are not allowed. Python records run IDs, settings, measurements, and
+validation reports separately.
 
 ## Plan data
 
@@ -67,9 +69,11 @@ fields, with concerns about the same action grouped into one issue.
 - issue_description: nonblank explanation of all grouped concerns and relevant pages.
 - issue_type: optional. unclear_meaning, conflicting_evidence, source_issue,
   extraction_process_issue, no_records_found, or null.
-- issue_origin: extractor or verifier, identifying who first raised the issue.
+- issue_origin: who first raised the issue. E uses extractor; V retains existing
+  origins and uses verifier for new issues. C uses worker_1, worker_2, or coordinator.
 - issue_status: open or resolved.
-- resolved_by: extractor or verifier when resolved, null while open.
+- resolved_by: the resolving role from the same workflow: extractor or verifier for
+  E/V; worker_1, worker_2, or coordinator for C. Null while open.
 - resolution: nonblank explanation addressing every concern when resolved,
   null while open.
 

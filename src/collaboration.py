@@ -13,7 +13,7 @@ import json
 import time
 from typing import Awaitable, Callable
 
-from agents import FINAL_READY_SIGNAL
+from agents import FINAL_READY_SIGNAL, MCPRequestTimeout, _bounded_mcp_request
 from collaboration_budget import CollaborationBudget, CollaborationBudgetExceeded
 from collaboration_contracts import (
     WORKERS, CollaborationInput, CollaborationContractError,
@@ -223,9 +223,21 @@ class _Controller:
                 self._record("document_tool_submitted", actor=actor, task_id=task_id,
                              name=name, arguments=arguments)
                 try:
-                    value = await asyncio.wait_for(self.document_client(actor, name, deepcopy(arguments)),
-                                                   timeout=seconds)
+                    value = await _bounded_mcp_request(
+                        self.document_client(actor, name, deepcopy(arguments)), seconds)
                     value = _json_object(_json(value).encode("utf-8"))
+                except MCPRequestTimeout as error:
+                    # A submitted request crossing its deadline fails the attempt,
+                    # including synchronous decoding that finishes after the timer.
+                    # Stop sibling tasks from starting any further model requests.
+                    self.worker_failed = True
+                    late_reply = error.result
+                    if hasattr(late_reply, "model_dump"):
+                        late_reply = late_reply.model_dump(mode="json", by_alias=True)
+                    self._record("document_tool_result", actor=actor, task_id=task_id,
+                                 name=name, result=late_reply,
+                                 error=f"{type(error).__name__}: {error}")
+                    raise
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
@@ -332,11 +344,15 @@ class _Controller:
             self.tasks.append(deepcopy(task))
             self._record("task_assigned", task=task)
         results = await asyncio.gather(*(self._worker(*item) for item in prepared), return_exceptions=True)
+        # Results follow assignment order, not failure order. A sibling stopped
+        # by the failure guard must not hide the request timeout that stopped it.
+        timeout_failure = next((result for result in results if isinstance(result, MCPRequestTimeout)), None)
         for result in results:
             if isinstance(result, asyncio.CancelledError):
                 raise result
             if isinstance(result, BaseException):
-                raise CollaborationContractError(f"Required worker failed: {type(result).__name__}: {result}")
+                cause = timeout_failure if timeout_failure is not None else result
+                raise CollaborationContractError(f"Required worker failed: {type(cause).__name__}: {cause}")
         return {"results": results}
 
     def _save_draft(self, answer, based_on_version):

@@ -7,6 +7,7 @@ Fictional PDFs and replies establish lifecycle behavior, not extraction quality.
 import asyncio
 from copy import deepcopy
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -101,6 +102,94 @@ def ready(configured, facts, run_record, monkeypatch):
 def run(ready, **options):
     return asyncio.run(runner.run_collaboration(ready.root, PLAN_ID, source_path=SOURCE,
         _transport=httpx.MockTransport(ready.http), **options))
+
+
+@pytest.mark.parametrize("late_reply", [False, True])
+@pytest.mark.parametrize("actor", ["worker", "coordinator"])
+def test_submitted_tool_timeout_fails_and_preserves_evidence_without_new_requests(ready, late_reply, actor):
+    config_path = ready.root / "configs/profiles.json"
+    config = json.loads(config_path.read_text())
+    config["document_tools"]["tool_timeout_seconds"] = 0.05
+    config_path.write_text(json.dumps(config))
+
+    async def delayed(*args):
+        if late_reply:
+            time.sleep(0.10)  # Model synchronous SDK decoding that misses its deadline.
+            return ready.client.result
+        await asyncio.sleep(1)
+    ready.client.call_tool = delayed
+    if actor == "coordinator":
+        original = ready.http
+        async def coordinator_tool(request):
+            body = json.loads(request.content)
+            return httpx.Response(200, json={"model": MODELS["coordinator"],
+                "choices": [{"index": 0, "message": original.tool(
+                    "get_page_text", {"page_number": 1}, "coordinator", 1), "finish_reason": "tool_calls"}],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 20}})
+        ready.http = coordinator_tool
+
+    saved = run(ready)
+
+    assert saved.record["status"] == "failed"
+    assert "MCPRequestTimeout" in saved.record["error"]
+    assert saved.persistence_error is None and ready.client.closed
+    assert storage.load_run_record(ready.root, saved.record_path) == saved.record
+    # Initial parallel requests may already be in flight; no follow-up or final
+    # request may start after the missed tool deadline is observed.
+    calls = saved.record["model_calls"]
+    assert len(calls) <= (3 if actor == "worker" else 1)
+    assert all(call["phase"] == "investigation" for call in calls)
+    folder = ready.root / Path(saved.record_path).parent
+    controller = json.loads((folder / "artifacts/controller_result.json").read_text())
+    timeouts = [event for event in controller["events"]
+                if event["event"] == "document_tool_result" and "MCPRequestTimeout" in event.get("error", "")]
+    assert timeouts
+    first_timeout = controller["events"].index(timeouts[0])
+    assert all(event["event"] != "model_request" for event in controller["events"][first_timeout + 1:])
+    log = json.loads((ready.root / saved.record["tool_log_path"]).read_text())
+    assert log and all(row["error"] for row in log)
+    assert len(list((folder / "artifacts/tool_results").glob("*.json"))) == len(log)
+    if late_reply:
+        assert log[0]["result"]["structuredContent"]["page_number"] == 1
+        assert timeouts[0]["result"]["structuredContent"]["page_number"] == 1
+    else:
+        assert all(row["result"] is None for row in log)
+
+
+@pytest.mark.parametrize("tool_name", ["get_page_text", "run_ocr"])
+def test_ordinary_unreadable_source_reply_remains_recoverable_in_saved_c(ready, tool_name):
+    from mcp.types import CallToolResult, TextContent
+    if tool_name == "run_ocr":
+        config_path = ready.root / "configs/profiles.json"
+        config = json.loads(config_path.read_text())
+        config["document_tools"].update(ocr_enabled=True, ocr_engine="easyocr", ocr_language="en")
+        config_path.write_text(json.dumps(config))
+        original_catalogue = ready.client.list_tools
+        async def catalogue():
+            from mcp.types import Tool
+            result = await original_catalogue()
+            result.tools.append(Tool(name="run_ocr", description="Read source with OCR.", input_schema={
+                "type": "object", "properties": {"page_number": {"type": "integer", "minimum": 1}},
+                "required": ["page_number"]}))
+            return result
+        ready.client.list_tools = catalogue
+        original_tool = ready.http.tool
+        def ocr_tool(name, arguments, actor, number):
+            return original_tool(tool_name if name == "get_page_text" else name, arguments, actor, number)
+        ready.http.tool = ocr_tool
+    async def unreadable(*args):
+        return CallToolResult(is_error=True, content=[TextContent(
+            type="text", text="OCR could not read this page; source text is unavailable.")])
+    ready.client.call_tool = unreadable
+
+    saved = run(ready)
+
+    assert saved.record["status"] == "succeeded", saved.record["error"]
+    assert saved.persistence_error is None and len(ready.http.calls) == 10
+    log = json.loads((ready.root / saved.record["tool_log_path"]).read_text())
+    assert len(log) == 2 and all("OCR could not read" in row["error"] for row in log)
+    assert all(row["tool"] == tool_name for row in log)
+    assert all(row["result"]["isError"] for row in log)
 
 
 def test_live_clients_parallel_workers_and_preserved_saved_output(ready):

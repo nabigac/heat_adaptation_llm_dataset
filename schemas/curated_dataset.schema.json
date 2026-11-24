@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:heat-adaptation:curated-dataset",
   "title": "Expert-curated plan dataset",
+  "$comment": "A C origin selects C rules for the entire issue list, preventing mixed workflow identities and retaining field-specific errors. C reuses shared issue fields and status rules, with expert resolutions allowed. Model-answer schemas remain separate.",
   "type": "object",
   "required": [
     "plan_data",
@@ -21,10 +22,93 @@
       "properties": {
         "issues": {
           "type": "array",
-          "items": {
-            "$ref": "urn:heat-adaptation:agent-response#/$defs/issue"
+          "if": {
+            "contains": {
+              "type": "object",
+              "required": ["issue_origin"],
+              "properties": {
+                "issue_origin": {
+                  "$ref": "#/$defs/collaboration_issue/properties/issue_origin"
+                }
+              }
+            }
+          },
+          "then": {
+            "items": {
+              "$ref": "#/$defs/collaboration_issue"
+            }
+          },
+          "else": {
+            "items": {
+              "$ref": "urn:heat-adaptation:agent-response#/$defs/issue"
+            }
           }
         }
+      }
+    }
+  },
+  "$defs": {
+    "collaboration_issue": {
+      "type": "object",
+      "required": [
+        "issue_id",
+        "related_action_id",
+        "issue_description",
+        "issue_origin",
+        "issue_status",
+        "resolved_by",
+        "resolution"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "issue_id": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/issue_id"
+        },
+        "related_action_id": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/related_action_id"
+        },
+        "issue_description": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/issue_description"
+        },
+        "issue_type": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/issue_type"
+        },
+        "issue_origin": {
+          "type": "string",
+          "enum": [
+            "worker_1",
+            "worker_2",
+            "coordinator"
+          ]
+        },
+        "issue_status": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/issue_status"
+        },
+        "resolved_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "worker_1",
+            "worker_2",
+            "coordinator",
+            "expert",
+            null
+          ]
+        },
+        "resolution": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/resolution"
+        }
+      },
+      "if": {
+        "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/if"
+      },
+      "then": {
+        "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/then"
+      },
+      "else": {
+        "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/else"
       }
     }
   }

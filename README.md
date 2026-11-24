@@ -4,7 +4,7 @@ this research project examines how heat adaptation experts and open-weight large
 
 the workflow extracts heat adaptation actions from government and public agency plans into structured records with supporting quotations. it supports **E** (extraction) and **E+V** (extraction + verification): **inkling 2 small** extracts, and **deepseek v4.1 flash 1017** checks and revises that exact saved extraction.
 
-development **C** (collaboration) uses **glm-5.3-flash** to coordinate inkling and deepseek as two flexible workers. it assigns extraction or checking tasks, runs independent assignments in parallel, and assembles one complete JSON answer from the prepared plan. see the [coordinator](prompts/coordinator.md) and [worker](prompts/worker.md) prompts. all three configurations have completed development runs on freetown and paris under earlier settings. the latest C prompts and budgets still need live checks and expert assessment. all three models use hugging face with deepinfra as the fixed host. expert-curated answers will also support a pilot instruction dataset for possible future fine-tuning.
+development **C** (collaboration) uses **glm-5.3-flash** to coordinate inkling and deepseek as two flexible workers. it assigns extraction or checking tasks, runs independent assignments in parallel, and assembles one complete JSON answer from the prepared plan. see the [coordinator](prompts/coordinator.md) and [worker](prompts/worker.md) prompts. all three configurations have completed development runs on freetown and paris under earlier settings. the latest shared guidance, C prompts, and budgets still need live checks and expert assessment. all three models use hugging face with deepinfra as the fixed host. expert-curated answers will also support a pilot instruction dataset for possible future fine-tuning.
 
 for setup and commands, see [getting started](#getting-started) and the [command line interface](#command-line-interface).
 
@@ -26,7 +26,7 @@ each model answer contains three components:
 
 every action has nine fields: `action_id`, `action`, `action_type`, `action_status`, `action_location`, `action_recipient`, `action_cost`, `action_benefit`, and `evidence`. costs and benefits are recorded within their associated action. evidence uses exact continuous quotations and physical PDF page positions counted from 1. the [field definitions and coding rules](DESIGN.md#appendix-dataset-coding-rules-and-evaluation) specify permitted values and missing information.
 
-issues retain stable IDs and origins through verification and curation. after assessment, experts will prepare separate curated answers; saved model outputs remain the evidence for comparison. instruction export and C curation validation remain to be built. see the [remaining work](IMPLEMENTATION.MD#next-implementation-steps).
+issues retain stable IDs and origins through verification and curation. curated-answer validation supports E/V and C identities with expert resolutions. after assessment, experts will prepare separate curated answers; saved model outputs remain the evidence for comparison. instruction export remains to be built. see the [remaining work](IMPLEMENTATION.MD#next-implementation-steps).
 
 ## getting started
 
@@ -182,7 +182,24 @@ uv run --locked heat-adaptation-llm-dataset create_expert_reference plan_0001 \
   --prepared-by "your name or study ID"
 ```
 
-saves `expert_references/plan_0001/expert_reference.json` with registered collection metadata and an empty action list. repeat `--prepared-by` for multiple experts. complete the form from the original PDF; for comparison plans, do so before viewing model outputs. requires registration only, makes no API calls, and refuses to overwrite an existing form.
+saves `expert_references/plan_0001/expert_reference.json` with collection metadata, instructions, one guided action, and one expert issue. repeat `--prepared-by` for multiple experts. replace `TODO:` guidance or remove unused blanks while coding from the original PDF; for comparison plans, complete the form before viewing model outputs. requires registration only, makes no API calls, and refuses to overwrite an existing form.
+
+### edit_expert_reference: add or remove records
+
+```bash
+uv run --locked heat-adaptation-llm-dataset edit_expert_reference \
+  --plan-id plan_0001 --add-action
+```
+
+select the reference with `--plan-id` and choose one operation:
+
+| flag | operation |
+| --- | --- |
+| `--add-action` / `--add-issue` | append a guided blank with the next numbered ID. |
+| `--remove-action` / `--remove-issue` | remove the highest-ID untouched blank of that kind. |
+| `--remove-action action_0002` / `--remove-issue issue_0002` | remove that exact record, including an edited one. |
+
+partially filled records are preserved by default removal. remove or relink associated issues before removing their action. the editor maintains `id_counters` so deleted IDs are not reused; keep these counters when coding the form directly. editing checks the registered original PDF and draft links, permits unfinished guidance, and saves atomically. the editor refuses changes to frozen references. no model or OCR calls are made.
 
 ### validate_expert_reference: check an expert form
 
@@ -190,7 +207,20 @@ saves `expert_references/plan_0001/expert_reference.json` with registered collec
 uv run --locked heat-adaptation-llm-dataset validate_expert_reference plan_0001
 ```
 
-checks the saved form's JSON, fields, registered plan ID, source URL/access date, unique action IDs, and physical page bounds against the original PDF. reports problems without changing files or calling the API. an empty action list is flagged but can pass structural checks; experts establish accuracy and completeness.
+checks JSON, fields, source links, action/issue IDs and links, and physical page bounds against the original PDF. unfinished `TODO:` guidance fails validation. omitted `plan_issues` is checked as an empty issue list; empty action types or evidence require a linked expert issue. reference issues originate with `expert`; resolved ones name `expert` as resolver. these are separate from model-output issues. validation is read-only and makes no API calls. an empty action list can still pass; experts establish accuracy and completeness.
+
+### freeze_expert_reference: preserve the assessment reference
+
+after completing and reviewing the form, freeze it before recording judgments:
+
+```bash
+uv run --locked heat-adaptation-llm-dataset freeze_expert_reference plan_0001 \
+  --frozen-by "your name or study ID"
+```
+
+validates the form, writes `reference_freeze.json` beside it, and prints the reference's SHA-256 fingerprint. the freeze records the exact reference and original PDF fingerprints, source details, reviewer, and UTC time. repeat `--frozen-by` for multiple reviewers. keep the reference fingerprint with manual judgments. editor changes and resets are blocked; `validate_expert_reference` detects later reference or source changes. no model or OCR calls are made.
+
+freezing records the reviewer's confirmation of readiness for assessment. experts establish completeness and accuracy; freezing does not enable formal comparison.
 
 ### list_profiles: find model choices and limits
 
@@ -218,7 +248,7 @@ editable fields are `--title`, `--source-url`, `--date-accessed`, and `--study-s
 
 ### run options and results
 
-use `--purpose development` for development plans. E/V also allow `exploratory` for investigations outside the formal comparison. formal comparison execution remains disabled; reference-completion and fixed-settings controls are still pending. comparison-plan content remains restricted.
+use `--purpose development` for development plans. E/V also allow `exploratory` for investigations outside the formal comparison. formal comparison execution remains disabled; fixed-settings, selected-run, and reference-feedback controls are still pending. comparison-plan content remains restricted.
 
 | optional flag | use |
 | --- | --- |
@@ -234,6 +264,8 @@ current ceilings include final generation:
 | document-tool calls | 25 | 50: 25 per stage | 75: 25 per agent |
 
 each configuration has a 31,457,280 estimated-token ceiling; within E+V, V deducts its linked E estimates. request and tool counts are separate: one API reply can request several tools. see the [complete settings table](IMPLEMENTATION.MD#current-configuration-settings) and [request budgeting](IMPLEMENTATION.MD#configuration-request-and-token-allowances) for details.
+
+a submitted document tool exceeding its complete-request deadline fails E, V, or C and stops further model requests. failure evidence and any late reply are preserved. ordinary source/OCR problems can return error evidence for the model to assess.
 
 model commands print their saved status and available report paths. each invocation preserves a new folder under `runs/<plan_id>/`: `run_extract_NNNN/`, `run_verify_NNNN/`, or `run_collaboration_NNNN/`. all apply final JSON validation and quotation checks; source accuracy requires expert review. see [E/V execution](IMPLEMENTATION.MD#saved-execution) and [C execution](IMPLEMENTATION.MD#saved-c-execution) for files and failure handling.
 

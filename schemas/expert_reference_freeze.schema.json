@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Expert reference freeze",
+  "description": "Identifies the completed reference and original PDF retained for assessment. Freezing records the reviewer's confirmation; software does not establish scientific completeness.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "plan_id", "reference_path", "reference_sha256",
+    "document_sha256", "source_url", "date_accessed", "page_count",
+    "frozen_at", "frozen_by", "confirmed_complete"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "plan_id": {"type": "string", "pattern": "\\S"},
+    "reference_path": {"type": "string", "pattern": "\\S"},
+    "reference_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "document_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_url": {"type": "string", "pattern": "\\S"},
+    "date_accessed": {"type": "string", "format": "date"},
+    "page_count": {"type": "integer", "minimum": 1},
+    "frozen_at": {"type": "string", "format": "date-time"},
+    "frozen_by": {
+      "type": "array", "minItems": 1,
+      "items": {"type": "string", "pattern": "\\S"}
+    },
+    "confirmed_complete": {"type": "boolean", "const": true}
+  }
+}

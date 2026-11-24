@@ -264,7 +264,7 @@ async def run_collaboration(
                 recorder.json(f"artifacts/tool_requests/tool_{index:04d}.json", entry)
                 began = time.monotonic()
                 try:
-                    reply = await client.call_tool(name, arguments)
+                    reply = await agents._bounded_mcp_request(client.call_tool(name, arguments), timeout)
                     entry["result"] = reply.model_dump(mode="json", by_alias=True)
                     if any(block.type != "text" for block in reply.content):
                         raise ValueError("C supports text document results only.")
@@ -276,6 +276,13 @@ async def run_collaboration(
                     else:
                         payload["messages"] = [block.text for block in reply.content]
                     return payload
+                except agents.MCPRequestTimeout as error:
+                    if error.result is not None:
+                        entry["result"] = error.result.model_dump(mode="json", by_alias=True)
+                    entry["error"] = agents._failure_description(error)
+                    # The controller records the fatal timeout and stops new work.
+                    # Keep its progress recorder usable to preserve that evidence.
+                    raise
                 except BaseException as error:
                     entry["error"] = agents._failure_description(error)
                     if not isinstance(error, asyncio.CancelledError):

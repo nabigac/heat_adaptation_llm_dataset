@@ -41,7 +41,7 @@ dev = [
 # Install the design's flat src/ modules explicitly. uv sync uses an editable
 # development install; release packaging of schema resources is a later step.
 package-dir = {"" = "src"}
-py-modules = ["agent_budget", "agents", "cli", "collaboration", "collaboration_budget", "collaboration_check", "collaboration_contracts", "collaboration_runner", "collaboration_storage", "document_tools", "documents", "expert_files", "huggingface_api", "huggingface_check", "models", "quotation_diagnostics", "repair", "storage", "validation"]
+py-modules = ["agent_budget", "agents", "cli", "collaboration", "collaboration_budget", "collaboration_check", "collaboration_contracts", "collaboration_runner", "collaboration_storage", "document_tools", "documents", "expert_files", "expert_templates", "huggingface_api", "huggingface_check", "models", "quotation_diagnostics", "repair", "storage", "validation"]
 packages = []
 
 [tool.pytest.ini_options]

@@ -703,6 +703,9 @@ async def _bounded_mcp_request(awaitable, timeout_seconds: float):
             # A late decoded response is evidence, never a successful request.
             if time.monotonic() - started >= timeout_seconds:
                 raise TimeoutError
+    except MCPRequestTimeout:
+        # Nested complete-request bounds must retain the original late reply.
+        raise
     except TimeoutError as error:
         raise MCPRequestTimeout(result) from error
     return result

@@ -19,6 +19,7 @@ from typing import NoReturn
 from validation import (
     ValidationProblem,
     parse_expert_reference_json,
+    parse_expert_reference_freeze_json,
     parse_pages_json,
     parse_preparation_json,
     parse_registry_json,
@@ -26,6 +27,7 @@ from validation import (
     parse_tool_log_json,
     parse_validation_report_json,
     validate_expert_reference_structure,
+    validate_expert_reference_freeze,
     validate_preparation_pages,
     validate_registry_structure,
     validate_run_links,
@@ -697,6 +699,7 @@ def save_new_expert_reference(project_root: Path | str, reference: dict) -> str:
     destination = resolve_project_path(root, relative_path)
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(f"Expert reference already exists; it was not changed: {relative_path}")
+    require_unfrozen_expert_reference(root, reference["plan_id"])
     # A reference belongs at this exact plan path, never through a redirect to
     # another plan's folder, even when the linked target stays inside the project.
     if destination.resolve() != destination:
@@ -719,12 +722,7 @@ def load_expert_reference(
     Refuse redirected paths, malformed JSON, and invalid reference fields. Loading
     neither repairs the file nor creates a report, completion state, or model run.
     """
-    _require_run_identifier(plan_id)
-    relative_path = f"expert_references/{plan_id}/expert_reference.json"
-    path = resolve_project_path(project_root, relative_path)
-    if path.resolve() != path:
-        raise ValueError(f"Expert reference path must not use symbolic links: {relative_path}")
-    text = path.read_text(encoding="utf-8")
+    text = read_expert_reference_bytes(project_root, plan_id).decode("utf-8")
     reference, problems = parse_expert_reference_json(
         text, plan_id=plan_id, source_url=source_url,
         date_accessed=date_accessed, page_count=page_count,
@@ -733,6 +731,106 @@ def load_expert_reference(
         raise ExpertReferenceValidationError(problems)
     assert reference is not None
     return reference
+
+
+def _expert_reference_file(project_root: Path | str, plan_id: str) -> Path:
+    """Keep both reads and edits bound to the selected plan's canonical form."""
+    _require_run_identifier(plan_id)
+    relative_path = f"expert_references/{plan_id}/expert_reference.json"
+    path = resolve_project_path(project_root, relative_path)
+    if path.resolve() != path:
+        raise ValueError(f"Expert reference path must not use symbolic links: {relative_path}")
+    return path
+
+
+def read_expert_reference_bytes(project_root: Path | str, plan_id: str) -> bytes:
+    """Read exact bytes, rejecting changes to a reference frozen for assessment."""
+    data = _expert_reference_file(project_root, plan_id).read_bytes()
+    freeze = load_expert_reference_freeze(project_root, plan_id)
+    if freeze is not None and hashlib.sha256(data).hexdigest() != freeze["reference_sha256"]:
+        raise ValueError("The frozen expert reference changed; its assessment fingerprint no longer matches.")
+    return data
+
+
+def _expert_reference_freeze_file(project_root: Path | str, plan_id: str) -> Path:
+    """Keep the freeze beside its reference and reject redirected metadata."""
+    reference = _expert_reference_file(project_root, plan_id)
+    path = reference.with_name("reference_freeze.json")
+    if path.is_symlink() or path.resolve() != path:
+        raise ValueError("Expert reference freeze path must not use symbolic links.")
+    return path
+
+
+def require_unfrozen_expert_reference(project_root: Path | str, plan_id: str) -> None:
+    """Refuse edits or resets whenever freeze metadata occupies the destination.
+
+    Even damaged metadata blocks writing: an unreadable freeze cannot silently
+    turn an assessment reference back into an editable draft.
+    """
+    path = _expert_reference_freeze_file(project_root, plan_id)
+    if path.exists():
+        raise ValueError("The expert reference is frozen for assessment; it cannot be edited or reset.")
+
+
+def load_expert_reference_freeze(project_root: Path | str, plan_id: str) -> dict | None:
+    """Read strict freeze metadata, or None for an unfrozen draft."""
+    path = _expert_reference_freeze_file(project_root, plan_id)
+    if not path.exists():
+        return None
+    freeze, problems = parse_expert_reference_freeze_json(path.read_text(encoding="utf-8"))
+    if problems:
+        raise ExpertReferenceValidationError(problems)
+    assert freeze is not None
+    if (freeze["plan_id"] != plan_id
+            or freeze["reference_path"] != f"expert_references/{plan_id}/expert_reference.json"):
+        raise ValueError("Expert reference freeze must identify this plan's canonical reference.")
+    return freeze
+
+
+def save_new_expert_reference_freeze(
+    project_root: Path | str, plan_id: str, freeze: dict, *, expected_bytes: bytes,
+) -> str:
+    """Publish one immutable freeze after checking the exact reviewed bytes.
+
+    Like reference editing, this requires one writer at a time. The source-aware
+    caller validates completion before publication; this function preserves it.
+    """
+    problems = validate_expert_reference_freeze(freeze)
+    if problems:
+        raise ExpertReferenceValidationError(problems)
+    if (freeze["plan_id"] != plan_id
+            or freeze["reference_path"] != f"expert_references/{plan_id}/expert_reference.json"):
+        raise ValueError("Expert reference freeze must identify this plan's canonical reference.")
+    require_unfrozen_expert_reference(project_root, plan_id)
+    current = read_expert_reference_bytes(project_root, plan_id)
+    if current != expected_bytes or hashlib.sha256(current).hexdigest() != freeze["reference_sha256"]:
+        raise ValueError("The expert reference changed while freezing; review it again before freezing.")
+    destination = _expert_reference_freeze_file(project_root, plan_id)
+    _publish_new_bytes(destination, _serialize_run_json(freeze).encode("utf-8"))
+    return f"expert_references/{plan_id}/reference_freeze.json"
+
+
+def save_expert_reference_edit(
+    project_root: Path | str, plan_id: str, reference: dict, *, expected_bytes: bytes,
+) -> str:
+    """Atomically replace a checked draft without resetting or creating a form.
+
+    The caller checks registered source context and draft relationships. The
+    byte comparison catches intervening edits; like registry editing, this still
+    requires one writer at a time rather than providing a multi-writer lock.
+    """
+    problems = validate_expert_reference_structure(reference)
+    if problems:
+        raise ExpertReferenceValidationError(problems)
+    if reference["plan_id"] != plan_id:
+        raise ValueError("The edited reference must retain the selected plan ID.")
+    require_unfrozen_expert_reference(project_root, plan_id)
+    destination = _expert_reference_file(project_root, plan_id)
+    text = _serialize_run_json(reference)
+    if destination.read_bytes() != expected_bytes:
+        raise ValueError("The expert reference changed while editing; reload it and repeat the edit.")
+    _replace_run_json(destination, text)
+    return f"expert_references/{plan_id}/expert_reference.json"
 
 
 def save_registry(project_root: Path | str, registry: dict) -> None:

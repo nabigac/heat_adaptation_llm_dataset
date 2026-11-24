@@ -27,7 +27,9 @@ heat_adaptation_llm_dataset/
 │       ├── preparation.json     # Settings, source identity, status, and page-file link
 │       ├── pages.json           # Ordered physical pages, exact text, and review notes
 │       └── images/              # Preserved page PNGs and candidate-region crops
-├── expert_references/<plan_id>/expert_reference.json # Expert form; excluded from Git
+├── expert_references/<plan_id>/  # Expert coding and assessment identity; excluded from Git
+│   ├── expert_reference.json    # One shared expert form
+│   └── reference_freeze.json    # Fingerprints and reviewer confirmation, after freezing
 ├── runs/<plan_id>/
 │   ├── run_extract_NNNN/         # Extractor attempts; same file layout as below
 │   ├── run_collaboration_NNNN/   # Development C attempts; see saved C execution
@@ -57,7 +59,8 @@ Git tracks code, schemas, prompts, profiles, registry metadata, and project docu
 | --- | --- |
 | [src/cli.py](src/cli.py) | Arguments, command dispatch, terminal feedback, comparison disclosure restrictions, exit codes. |
 | [src/documents.py](src/documents.py) | Registration, collection-metadata updates, native text preparation, and selective OCR coordination. |
-| [src/expert_files.py](src/expert_files.py) | Independent reference creation and validation against checked collection metadata and the original PDF, without model-output access. |
+| [src/expert_files.py](src/expert_files.py) | Independent reference creation, record editing, validation, and freezing against checked collection metadata and the original PDF, without model-output access. |
+| [src/expert_templates.py](src/expert_templates.py) | Guided blank actions/issues, field instructions, and unfinished-guidance detection. |
 | [src/document_tools.py](src/document_tools.py) | PDF rendering/image inspection, EasyOCR, source-bound page/quotation tools, and the local MCP server. |
 | [src/agents.py](src/agents.py) | Profile/prompt loading, E input selection, complete source input, shared extractor/verifier execution, and incremental recording. |
 | [src/agent_budget.py](src/agent_budget.py) | Independent E/V request ceilings, shared E+V estimated-token charges, and protected final-request capacity. |
@@ -93,8 +96,9 @@ Read the relevant schema before changing its producer, validator, or consumer. P
 | [collaboration_run.schema.json](schemas/collaboration_run.schema.json) | Development C record, three profiles, shared settings/environment, per-agent model calls, budget, status, and accepted answer. |
 | [plan_data.schema.json](schemas/plan_data.schema.json) | `plan_data.metadata`, `plan_data.actions`, evidence, categories, and missing values. |
 | [agent_response.schema.json](schemas/agent_response.schema.json) | Complete model answer: `plan_data` and `plan_issues`, including issue-status constraints. |
-| [curated_dataset.schema.json](schemas/curated_dataset.schema.json) | E/V answer format with expert resolutions allowed; C issue identities still need support before C curation/export. |
-| [expert_reference.schema.json](schemas/expert_reference.schema.json) | One expert reference form: version, plan ID, expert identity, and the shared plan-data fields. Python adds registered-source, action-ID, and PDF page-bound checks. |
+| [curated_dataset.schema.json](schemas/curated_dataset.schema.json) | Curated E/V or C answers with workflow-specific issue identities and expert resolutions; mixed workflow identities are rejected. |
+| [expert_reference.schema.json](schemas/expert_reference.schema.json) | One reference with shared plan-data fields and optional instructions, ID counters, and expert-origin issues. Python checks source links, IDs, issue links, page bounds, and unfinished guidance. |
+| [expert_reference_freeze.schema.json](schemas/expert_reference_freeze.schema.json) | Exact reference/PDF fingerprints, source context, reviewer confirmation, and UTC freeze time. |
 | [run.schema.json](schemas/run.schema.json) | Saved wrapper, settings/environment, generation measurements, status, and accepted answer. |
 | [tool_log.schema.json](schemas/tool_log.schema.json), [validation_report.schema.json](schemas/validation_report.schema.json) | Tool activity and final-response errors/repairs. |
 
@@ -112,8 +116,10 @@ The CLI entry point is `cli.main()`:
 | `run_extract_mode` | `agents.run_extractor()` | One new extraction attempt and its evidence. |
 | `run_verify_mode` | `agents.run_verifier()` | One new verification attempt linked to its selected E, with a full revised answer. |
 | `run_collaboration_mode` | `collaboration_runner.run_collaboration()` | One independent development C attempt from the selected preparation. |
-| `create_expert_reference` | `expert_files.create_expert_reference()` | New blank expert form, with no model calls or overwrite. |
+| `create_expert_reference` | `expert_files.create_expert_reference()` | New guided form with one blank action and expert issue; no model calls or overwrite. |
+| `edit_expert_reference` | `expert_files.edit_expert_reference()` | One checked action/issue addition or removal in the selected form. |
 | `validate_expert_reference` | `expert_files.validate_expert_reference()` | Read-only field/source checks against the registered original PDF. |
+| `freeze_expert_reference` | `expert_files.freeze_expert_reference()` | Validate the completed form and preserve its assessment identity with named reviewer confirmation. |
 | `list_plans` | `documents.list_documents()` | Read-only registration/preparation listing. |
 | `list_profiles` | `cli._list_profiles()` | Read-only E/V/C choices, commands, models, and limits; C roles are nested under their binding. |
 
@@ -121,7 +127,7 @@ Model commands follow `CLI → saved runner → controller → Hugging Face API`
 
 Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) produces E; DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) checks that exact saved extraction for E+V. Both use Hugging Face Inference Providers with DeepInfra pinned. Registration, preparation, E/V execution, response validation, quotation diagnostics/corrections, saving/loading, and expert-curated answer validation are implemented. Both development plans have completed E and V; Paris runs exercised live quotation diagnostics. Qualifying citation repairs have been tested offline, but none qualified in the reviewed Paris runs.
 
-The E/V role prompts are being held stable; the C role prompts were refined after development review. Expert reference creation and validation are implemented. Manual reference completion and assessment, metrics, formal comparison controls, C curation support, and instruction export remain pending. Comparison execution is disabled. Structural success and quotation matches do not establish factual quality; the [development checkpoint](#current-development-checkpoint) separates observed results from remaining work.
+The E/V role prompts are being held stable; the C role prompts were refined after development review, and shared field guidance now distinguishes workflow roles and response formats. Guided reference creation, editing, validation, freezing, and E/V/C curated-answer validation are implemented. Manual reference completion and assessment, metrics, formal comparison controls, and instruction export remain pending. Comparison execution is disabled. Structural success and quotation matches do not establish factual quality; the [development checkpoint](#current-development-checkpoint) separates observed results from remaining work.
 
 ## 3. Document collection and preparation
 
@@ -194,7 +200,9 @@ These are configured limits for future runs, not claimed provider maxima. Model 
 
 The endpoint is `https://router.huggingface.co/v1`; routing appends `:deepinfra` to the configured model ID. IDs are `thinkingmachines/Inkling-2-Small`, `deepseek-ai/DeepSeek-V4.1-Flash-1017`, and `zai-org/GLM-5.3-Flash`. Every profile loads `prompts/shared_coding.md` and `prompts/field_definitions.md` before its role prompt. C's component profile names and responsibilities appear in the [collaboration section](#collaboration-c).
 
-Null generation controls leave the selected model/host defaults unspecified; they do not establish identical sampling across models or deterministic output. All three models passed the five basic compatibility checks and completed development runs under earlier settings. The current budgets and latest C prompts are **Not yet tested** in live study runs. Formal comparison remains disabled.
+Shared field guidance distinguishes complete E/V/C answers from C worker task results and specifies each workflow's issue origins/resolvers. Its effect on model quality is **Not yet tested**.
+
+Null generation controls leave the selected model/host defaults unspecified; they do not establish identical sampling across models or deterministic output. All three models passed the five basic compatibility checks and completed development runs under earlier settings. The current budgets, shared guidance, and latest C prompts are **Not yet tested** in live study runs. Formal comparison remains disabled.
 
 ### Configuration time allowance
 
@@ -299,6 +307,8 @@ Limits are capped by the profile, with at most 300 seconds per request. Requeste
 
 The handoff reply counts as a generation. Blocked preflight is retained as an attempt but contributes no generation usage. Whole-stage elapsed time includes setup, tools, validation, saving, and cleanup. Request deadlines cover connection, response reads, and in-request evidence callbacks; tool deadlines also cover SDK waiting/decoding.
 
+E/V and C reuse `agents._bounded_mcp_request()` for complete MCP requests. A submitted tool exceeding its deadline fails the attempt, including synchronous decoding that returns late. Preserve the failure and any decoded late reply, stop further model requests, and retain evidence from already submitted concurrent work. Ordinary source/OCR error replies remain recoverable.
+
 #### Investigation handoff
 
 E/V and C workers use `models.is_investigation_handoff()`: confirmed normal completion, no API error, no tool calls, and nonempty text after whitespace stripping. `READY_FOR_FINAL_RESPONSE` remains the preferred signal, but ordinary prose and drafts also end investigation. JSON shape, Markdown fences, and wording are not parsed at this boundary. Tool-bearing replies execute their calls first. Empty or whitespace-only text, failed/truncated completion, and unknown completion status fail without final generation.
@@ -369,7 +379,7 @@ Comparison-plan feedback remains restricted, including exploratory runs: hide cl
 
 The source-based page-citation repair is coordinated separately by the runner using `quotation_diagnostics.py`, as described above. Preserve the original and candidate separately and repeat acceptance checks on any changed answer. Failed/truncated requests receive no repairs. Missing fields, unsupported details, duplicates, and other substantive violations require a separately initiated attempt.
 
-Issue checks enforce one linked issue per affected action, valid IDs/links, and resolver/status relationships. Open issues require null resolver/resolution; resolved issues require a permitted resolver and nonblank explanation. E uses extractor origin/resolver. V retains original identities/origins, may reopen issues, and uses verifier origin for additions and verifier resolver for its fixes. Expert resolutions belong only in curated copies, validated with `validate_curated_dataset()`. Removed/merged actions require updated links and an explanation of retired targets where a link becomes null.
+Issue checks enforce one linked issue per affected action, valid IDs/links, and resolver/status relationships. Open issues require null resolver/resolution; resolved issues require a permitted resolver and nonblank explanation. E uses extractor origin/resolver. V retains original identities/origins, may reopen issues, and uses verifier origin for additions and verifier resolver for its fixes. Model answers exclude expert resolutions; their curated copies allow them through `validate_curated_dataset()`. Removed/merged actions require updated links and an explanation of retired targets where a link becomes null.
 
 ### Collaboration (C)
 
@@ -405,7 +415,7 @@ C schemas are expanded separately; changing their identities does not widen E/V 
 4. GLM uses `finish_investigation` after both workers contribute and a valid draft exists. At most one coordination tool is allowed per turn; `submit_draft` and `finish_investigation` must each be standalone. Document-only batches remain allowed. An early complete answer still needs both contributions and a subsequent strict final request. If investigation capacity expires after both workers return validated findings, the reserved final request may assemble the first complete answer without an intermediate draft. Missing or failed required workers still block completion. Unexecuted pending calls receive explicit non-submission results, and the handoff records the available draft version and worker tasks.
 5. Python disables tools, makes the reserved final request under the C answer schema, and validates the complete answer. The core returns that raw validated answer; the saved runner applies quotation checks and publishes the accepted result separately.
 
-A required worker/model/API failure, invalid result, or invalid final answer fails C. Source-tool failures count as submitted calls and return error evidence for the model to assess; source uncertainty may remain unresolved. No automatic retries, provider fallback, or model substitution occurs. Cancellation retains available evidence in `CollaborationCancelled.result`.
+A required worker/model/API failure, submitted tool timeout, invalid result, or invalid final answer fails C and stops further model requests. Ordinary source/OCR error replies count as submitted calls and remain recoverable; source uncertainty may remain unresolved. Parallel worker shutdown retains the timeout as the failure cause. No automatic retries, provider fallback, or model substitution occurs. Cancellation retains available evidence in `CollaborationCancelled.result`.
 
 `CollaborationResult` retains status/error, accepted answer, exact prepared model requests, raw response evidence, tasks, draft versions, tool/decision events, budget observations, and stopping reason in memory. Failed attempts have no accepted answer. The saved runner publishes input/profile/code snapshots and this evidence without overwriting earlier attempts under `runs/<plan_id>/run_collaboration_NNNN/`.
 
@@ -413,7 +423,7 @@ A required worker/model/API failure, invalid result, or invalid final answer fai
 
 `run_collaboration()` accepts a prepared development plan and a named C binding. It requires `HF_TOKEN` before allocating `runs/<plan_id>/run_collaboration_NNNN/`. `--config-path` selects C bindings; `--model-config-path` selects agent profiles. A retry links a failed C attempt using the same preparation and purpose but always creates a new folder. Comparison and exploratory C execution remain disabled.
 
-The wrapper snapshots the complete input, preparation/pages, all profiles/prompts, observed environment, and application code/contracts. It starts the shared source-bound MCP server; all three models use the existing HF adapter. Independent worker requests can overlap. Checkpoints save each request before dispatch, raw HTTP chunks as received, response usage/errors, and numbered controller events containing tasks, draft updates, and tool activity. A saving failure stops further work. Ordinary source/OCR problems return error replies; MCP transport/protocol exceptions, including unsaved OCR evidence, fail the run. The MCP subprocess closes before accepted output is published.
+The wrapper snapshots the complete input, preparation/pages, all profiles/prompts, observed environment, and application code/contracts. It starts the shared source-bound MCP server; all three models use the existing HF adapter. Independent worker requests can overlap. Checkpoints save each request before dispatch, raw HTTP chunks as received, response usage/errors, and numbered controller events containing tasks, draft updates, and tool activity. A saving failure stops further work. Ordinary source/OCR problems return error replies; complete-request timeouts and MCP transport/protocol exceptions, including unsaved OCR evidence, fail the run. Controller events and tool records retain timeout evidence and any decoded late reply. The MCP subprocess closes before accepted output is published.
 
 | Saved path within the C folder | Contents |
 | --- | --- |
@@ -453,15 +463,23 @@ The first live check truncated at the former 4,096-token allowance. After increa
 
 ## 6. Expert review and dataset assembly
 
-The [expert reference format](#appendix-supporting-json-files), creation command, and validation command are implemented. Reference completion and manual assessment still need a development pilot. Experts use one form per plan from the original PDF for all three outputs. Reviewer roles, prior exposure, and disagreement procedures belong in study notes. Development outputs have already been viewed, so their assessment pilots the process rather than providing independent comparison evidence.
+The [expert reference format](#appendix-supporting-json-files), guided creation, record editing, validation, and freezing are implemented. Reference completion and manual assessment still need a development pilot. Experts use one form per plan from the original PDF for all three outputs, freezing it before recording judgments. Reviewer roles, prior exposure, and disagreement procedures belong in study notes. Development outputs have already been viewed, so their assessment pilots the process rather than providing independent comparison evidence.
 
 ### Expert reference creation — implemented
 
 `create_expert_reference <plan_id> --prepared-by <name-or-study-ID>` creates `expert_references/<plan_id>/expert_reference.json`. Repeat `--prepared-by` for multiple experts; `--project-root` follows the same convention as other commands. Registration is required, but preparation, model runs, and an API token are not.
 
-`expert_files.py` reuses `documents.list_documents()` to check collection integrity, then copies the selected registered title, source URL, and access date. Unknown metadata remains null or an empty list; language is `English` under the shared contract. Actions start empty. No model outputs are read and no OCR or API calls are made.
+`expert_files.py` checks collection integrity and copies the registered title, source URL, and access date. Other metadata starts null or empty; language is `English`. `expert_templates.py` supplies instructions, `action_0001`, and `issue_0001`, with `TODO:` text guidance, `unspecified` action status, empty type/evidence lists, and an open expert-origin issue. New forms start `id_counters.action` and `id_counters.issue` at 1. No model outputs are read and no OCR or API calls are made.
 
-`storage.save_new_expert_reference()` applies the reference schema through `validation.validate_expert_reference_structure()`, checks the destination, and atomically publishes a new UTF-8 JSON file. It refuses existing files, directories, and symbolic-link destinations; publication also refuses a concurrent collision. The reference folder is outside `runs/`, so creation does not count as saved model work or change study-set permissions. The registry, preparations, and runs remain unchanged. Experts edit the saved form directly; creation cannot reset it. The command does not establish that the form is complete or factually correct.
+`storage.save_new_expert_reference()` checks structure and atomically publishes the UTF-8 form, refusing occupied or redirected destinations and concurrent creation collisions. References live outside `runs/` and do not count as model work. Creation preserves the registry, preparations, and runs; rerunning it cannot reset an existing form. Experts code the fields directly and manage records with the editor.
+
+### Expert reference editing — implemented
+
+`edit_expert_reference --plan-id <plan_id>` requires one of `--add-action`, `--add-issue`, `--remove-action [ACTION_ID]`, or `--remove-issue [ISSUE_ID]`. Additions advance the persistent action or issue counter; removal never lowers it, so deleted IDs are not reused. Default removal selects the highest-ID record exactly matching its blank template; any changed field preserves it. Explicit IDs may select edited records. Action removal is blocked while issues link to it.
+
+Before each edit, counters retain at least the highest currently present numbered IDs. Older forms gain counters from their current records on first edit; previously deleted IDs cannot be reconstructed. Keep these editor-managed counters when coding fields directly. Frozen references reject editor changes.
+
+Editing verifies the original PDF, collection links, draft fields, unique IDs, issue links, and page bounds. Internal `allow_templates=True` permits unfinished guidance and empty type/evidence lists during editing. Normal reference validation rejects unfinished guidance. `storage.save_expert_reference_edit()` compares the original file bytes before atomic replacement and refuses intervening changes. Use one writer at a time; this is not a multi-writer lock. Missing or malformed forms are not recreated or repaired. Editing makes no model or OCR calls.
 
 ### Expert reference validation — implemented
 
@@ -469,19 +487,27 @@ The [expert reference format](#appendix-supporting-json-files), creation command
 
 `expert_files.py` reuses collection integrity checks, reads the registered original into memory, verifies those exact bytes against its SHA-256 checksum, and counts physical PDF pages with the strict pypdf reader. Unreadable, encrypted, empty, missing, or modified originals stop validation. Preparation and model outputs are not required. Each two-page spread counts as one physical PDF page.
 
-`storage.load_expert_reference()` reads only the selected form and rejects symbolic-link redirection. `validation.parse_expert_reference_json()` rejects malformed JSON, duplicate fields, and nonstandard numbers, then checks the shared schema, selected plan ID, exact registered source URL/access date, unique action IDs, and evidence page bounds. Other metadata remains expert-coded. The action-ID and page-range rules are shared with model-answer validation; no reference fields are repaired or rewritten.
+`storage.load_expert_reference()` reads only the selected form and rejects symbolic-link redirection. `validation.parse_expert_reference_json()` checks strict JSON, fields, selected plan/source links, unique action IDs, and evidence page bounds. When present, reference issues require unique IDs, valid action links, at most one issue per action, and `expert` origins/resolvers. All references require linked issues for empty action types or evidence. An omitted `plan_issues` is checked as `{"issues": []}` without changing the file. Normal validation rejects `TODO:` guidance in editable text fields while leaving verbatim quotations untouched. No fields are repaired or rewritten.
 
-Passing establishes file/link consistency. Empty action lists can pass, with an explicit terminal reminder to complete the form. Experts establish completeness, correct grouping, source support, and quotation fidelity. A validation pass does not mark the form complete or enable comparison execution.
+Passing establishes file/link consistency. Empty action lists can pass; unfinished guidance cannot. Experts establish completeness, grouping, source support, and quotation fidelity. A validation pass does not mark the form complete or enable comparison execution.
+
+### Expert reference freezing — implemented
+
+After completing and reviewing the form, use `freeze_expert_reference <plan_id> --frozen-by <name-or-study-ID>`. Repeat `--frozen-by` for multiple reviewers. The named reviewers confirm readiness for assessment; software checks structure and source consistency, not scientific completeness or independence. Registration and the original PDF are required; preparation, model runs, and an API token are not.
+
+The command fully validates the form and publishes `expert_references/<plan_id>/reference_freeze.json` once. It records SHA-256 fingerprints of the exact reference and original PDF bytes, source URL/date, physical page count, reviewer names, UTC time, and readiness confirmation. The reference stays in `expert_reference.json`; no additional reference form is created. Publication checks the reviewed bytes again and refuses intervening changes.
+
+Freeze metadata blocks editor changes and recreation, including when the reference file is missing. `validate_expert_reference` verifies the reference fingerprint and checked source context against the freeze; changed files or damaged metadata fail. The CLI prints the reference fingerprint for manual judgments. Use one writer at a time and back up both files. Freezing does not enable comparison runs or release comparison-plan feedback.
 
 ### Manual expert assessment — planned
 
 1. Complete the generated form from the original PDF. For comparison plans, this happens before viewing any model output.
-2. Run `validate_expert_reference` and address reported problems. Preserve the completed form as `expert_reference.json`; it contains the expert's grouped activities, associated details, and source evidence, and stays the common reference throughout the comparison.
+2. Run `validate_expert_reference`, address reported problems, and confirm scientific readiness. Run `freeze_expert_reference` before recording judgments; retain its emitted reference fingerprint with the selected run IDs and reviewers. The frozen `expert_reference.json` stays the common reference throughout the comparison.
 3. Experts manually assess each selected E, linked E+V, and independent C output against every reference activity with 0/0.5/1 and reasons. Combine split/duplicate output records by activity; assess each activity within a bundled record separately.
 4. Experts judge source support and evidence adequacy for each distinct output activity. An activity absent from the reference is checked against the PDF before being classified as unsupported; any reference coverage gap is noted in the manual review.
 5. Experts check every initially open E issue marked resolved by V before curation. Record whether all grouped concerns were addressed. C's independently generated issue handling and agent disagreements are described in review notes rather than matched to E issue IDs.
 
-Assessment is manual; no separate assessment JSON templates or schemas are planned. Before implementing metrics, agree a minimal way to import the existing manual judgments and selected run IDs; this is an implementation decision, not another reference-preparation step. Pending judgments make the corresponding measures unavailable. The three quality measures and two issue measures remain as defined in DESIGN.md.
+Assessment is manual; no separate assessment JSON templates or schemas are planned. Before implementing metrics, agree a minimal way to import the existing manual judgments, selected run IDs, and reference fingerprint; this is an implementation decision, not another reference-preparation step. Pending judgments make the corresponding measures unavailable. The three quality measures and two issue measures remain as defined in DESIGN.md.
 
 #### Worked scoring example
 
@@ -495,13 +521,13 @@ A fictional plan reports 100 trees planted in North Ward in 2025 and 200 planned
 
 ### Measurement capture and calculation — planned
 
-`metrics.py` will use selected saved runs, the completed expert reference, and manual judgments with [DESIGN.md appendix G](DESIGN.md#g-evaluation-measures-and-calculations). All three configurations use action score percentage, unsupported action count with total distinct activities, adequate-evidence percentage, and open issue counts. Expert-confirmed/claimed verifier resolutions apply only to E+V's initially open E issues. Expert grouping supplies distinct-activity units; later expert fixes remain outside model comparison.
+`metrics.py` will use selected saved runs, the frozen expert reference, and manual judgments tied to its fingerprint with [DESIGN.md appendix G](DESIGN.md#g-evaluation-measures-and-calculations). All three configurations use action score percentage, unsupported action count with total distinct activities, adequate-evidence percentage, and open issue counts. Expert-confirmed/claimed verifier resolutions apply only to E+V's initially open E issues. Expert grouping supplies distinct-activity units; later expert fixes remain outside model comparison.
 
 E+V shares E and adds V duration/tokens. C uses its own complete elapsed duration, including coordination and parallel work; overlapping worker durations are not summed. C token totals include every coordinator/worker call once. Failed attempts are reported separately by top-level run ID, with worker errors retained within C. EasyOCR contributes duration, not LLM tokens. Missing observations or pending judgments make a measure unavailable; zero denominators are not applicable. Export per-plan counts/denominators and changes for E+V minus E and C minus E+V. Optional notebooks use the same calculations.
 
 ### Instruction dataset assembly — planned
 
-The existing curated-answer contract supports E/V issue identities and expert resolutions. C curation still needs schema and validator support for `worker_1`, `worker_2`, and `coordinator` origins/resolvers while retaining expert resolution support.
+`validate_curated_dataset()` supports E/V or C answers. C retains `worker_1`, `worker_2`, and `coordinator` origins and permits these agents or `expert` as resolvers. Each answer uses one workflow's identities; E/V role rules remain enforced. Model-answer schemas continue to exclude expert resolutions. Independent reference issues use `expert` origin in their separate form.
 
 After assessment, experts curate separate supported answers while preserving assessed outputs. Each whole-plan example pairs extraction instructions, sufficient source text/page links and reviewed recovery, and an expert-curated answer. Correct/exclude unsupported content, preserve reasons/source links, and validate targets with the curated-answer contract. Expert fixes retain issue IDs/origins and record expert authorship/resolution; confirmation of a V fix remains in the manual study review records. Pilot the export format and report plans, examples, and grouped actions separately. Fine-tuning remains future work.
 
@@ -518,17 +544,17 @@ All three configurations have completed live development runs on both plans. The
 
 Paris V matched 100 of 130 quotations against available text and flagged 30; C matched 64 of 149 and flagged 85. Neither made a citation correction. Most C flags aligned after relaxing spacing or typographic punctuation in a read-only investigation; the saved matcher and outputs were unchanged. These are location/fidelity diagnostics, not evidence-adequacy scores or proof that one workflow is better.
 
-The C prompts were refined after that review. Current E/V role prompts remain stable, while controller instructions now expose the independent budgets. The budget update passed 2,283 offline tests with 11 existing OCR dependency warnings; both plans passed offline input/budget checks, and all 25 historical records remained readable. Live checks of the current settings, completed expert references, formal quality scores, and confirmation of model-claimed resolutions remain pending. [CHANGELOG.md](CHANGELOG.md) records earlier failures and revisions.
+The latest shared guidance, C prompts, budgets, and timeout handling passed offline checks; E/V role prompts remain stable. C curated-answer validation is implemented, alongside guided reference creation, editing, validation, and freezing. Optional reference issues now receive the same evidence/type checks when omitted or empty. Freetown's reference remains an unfrozen guided starter. Live checks of the current settings, completed expert references, formal quality scores, and confirmation of model-claimed resolutions remain pending. [CHANGELOG.md](CHANGELOG.md) records validation results, failures, and revisions.
 
 ### Next implementation steps
 
 | Step | Current status | Remaining work |
 | --- | --- | --- |
-| 1. Pilot expert review | Form creation/validation implemented; completion and assessment pending | Complete one development reference per plan, record prior exposure, and pilot manual activity matching, scores, evidence judgments, and issue checks. Settle grouping, reviewer roles, and disagreement procedures. |
+| 1. Pilot expert review | Guided creation, editing, validation, and freezing implemented; completion and assessment pending | Complete and freeze one development reference per plan, record prior exposure and the reference fingerprint, and pilot manual activity matching, scores, evidence judgments, and issue checks. Settle grouping, reviewer roles, and disagreement procedures. |
 | 2. Check the current workflow | E/V/C runners implemented; latest settings checked offline | Repeat E, linked V, and independent C on both preparations under the current budgets. Review coverage, grouping, quotation fidelity, resource use, and failure evidence before freezing settings. |
-| 3. Implement measurements | `metrics.py` and exports not built | Agree the minimal input for manual judgments, calculate the existing measures, and export per-plan counts, denominators, paired changes, usage, runtime, and failures. Preserve unavailable judgments as unavailable. |
-| 4. Enable formal comparison | Execution remains disabled | Freeze code, prompts, profiles, sources, processing/repair policies, budgets, stopping and retry rules, and scoring. Replace disabled comparison guards with frozen-settings, selected-run, and reference-feedback controls. Extend C's CLI, input, run-schema, and storage rules to comparison plans. Preserve selected E/V/C IDs before assessment; experts complete one reference before viewing comparison outputs. |
-| 5. Build curation and instruction export | E/V curated-answer validation exists; C issue support and export pending | Extend curation validation to C identities, preserve expert fixes separately, and export validated instruction/source/answer examples without changing assessed outputs. |
+| 3. Implement measurements | `metrics.py` and exports not built | Agree the minimal input for manual judgments linked to run IDs and the reference fingerprint, calculate the existing measures, and export per-plan counts, denominators, paired changes, usage, runtime, and failures. Preserve unavailable judgments as unavailable. |
+| 4. Enable formal comparison | Execution remains disabled | Freeze code, prompts, profiles, sources, processing/repair policies, budgets, stopping and retry rules, and scoring. Replace disabled comparison guards with frozen-settings, selected-run, and reference-feedback controls that verify the frozen form. Extend C's CLI, input, run-schema, and storage rules to comparison plans. Preserve selected E/V/C IDs before assessment; experts complete one reference before viewing comparison outputs and freeze it before judgments. |
+| 5. Curate answers and build instruction export | E/V/C curated-answer validation implemented; curation and export pending | Prepare separate expert-curated answers and export validated instruction/source/answer examples without changing assessed outputs. |
 | Later expansion | Deferred | Dataset expansion and model fine-tuning follow evaluation of the workflow. |
 
 ## Appendix: supporting JSON files
@@ -544,10 +570,31 @@ Use one form per plan, saved at `expert_references/<plan_id>/expert_reference.js
 | `schema_version` | integer, fixed at 1 | Reference form format version. |
 | `plan_id` | string | Registered document. |
 | `prepared_by` | nonempty list of strings | Names or study codes identifying the experts who completed the form. |
+| `id_counters` | object; optional | Nonnegative integer `action` and `issue` counters retaining the highest numbered IDs allocated or observed by the editor. Removal never lowers them. |
 | `plan_data` | object | Plan metadata, grouped actions, and evidence using the existing plan data fields. |
+| `instructions` | list of strings; optional | Editing guidance supplied in new forms, outside coded content. |
+| `plan_issues` | object; optional | Expert concerns in `issues`, using the shared issue fields with `expert` origin and `expert` or null resolver. |
 
-The schema checks required fields and types, nonblank plan/reviewer identifiers, and the shared metadata/action/evidence field rules. The validation command additionally checks registered plan/source links, unique action IDs, and upper page bounds against the actual PDF. Experts establish factual support and completeness; independence is maintained through the review procedure.
+New forms include instructions, issues, and counters; older version 1 forms without them remain readable under the same evidence/type checks. Reference issue IDs are independent of model-output issues. The schema checks fields and values; Python adds source, ID, link, page-bound, and unfinished-guidance checks. Experts establish factual support and completeness; independence is maintained through the review procedure.
+
+### Expert reference freeze
+
+`expert_references/<plan_id>/reference_freeze.json` follows [expert_reference_freeze.schema.json](schemas/expert_reference_freeze.schema.json). All fields are required.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | integer, fixed at 1 | Freeze format version. |
+| `plan_id` | string | Selected registered plan. |
+| `reference_path` | string | Canonical project-relative path to its `expert_reference.json`. |
+| `reference_sha256` | SHA-256 string | Fingerprint of the exact completed reference bytes. |
+| `document_sha256` | SHA-256 string | Fingerprint of the registered original PDF bytes. |
+| `source_url` | string | Registered source URL at freezing. |
+| `date_accessed` | date string | Registered collection date at freezing. |
+| `page_count` | positive integer | Physical pages counted in the original PDF. |
+| `frozen_at` | UTC timestamp string | Time of freezing. |
+| `frozen_by` | nonempty list of strings | Names or study IDs of reviewers confirming readiness for assessment. |
+| `confirmed_complete` | boolean, fixed at true | Recorded reviewer confirmation, not a software finding of completeness. |
 
 ### Manual assessment
 
-Experts compare the saved E, E+V, and C outputs with the same completed reference form. Manual scores, activity-support and evidence judgments, E+V resolution checks, and explanatory notes provide inputs to the agreed measures. C's collaboration and issue handling are described in review notes. Preserve selected run IDs and reviewer identities. No separate assessment JSON format is required.
+Experts compare the saved E, E+V, and C outputs with the same frozen reference form. Manual scores, activity-support and evidence judgments, E+V resolution checks, and explanatory notes provide inputs to the agreed measures. C's collaboration and issue handling are described in review notes. Preserve selected run IDs, the reference fingerprint, and reviewer identities. No separate assessment JSON format is required.

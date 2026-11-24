@@ -64,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
             _create_expert_reference(root, args)
         elif args.command == "validate_expert_reference":
             _validate_expert_reference(root, args.plan_id)
+        elif args.command == "edit_expert_reference":
+            _edit_expert_reference(root, args)
+        elif args.command == "freeze_expert_reference":
+            _freeze_expert_reference(root, args)
     except (OSError, ValueError) as error:
         # Expected file and data failures become readable terminal messages.
         # Unexpected programming errors still raise, making them visible in development.
@@ -179,7 +183,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     reference_parser = commands.add_parser(
         "create_expert_reference",
-        help="Create an empty expert reference form from registered collection metadata.",
+        help="Create a guided expert reference with a blank action and issue.",
         allow_abbrev=False,
     )
     reference_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
@@ -196,6 +200,35 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate_reference_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
     _add_project_argument(validate_reference_parser)
+
+    edit_reference_parser = commands.add_parser(
+        "edit_expert_reference", help="Add or remove records in an expert reference draft.",
+        allow_abbrev=False,
+    )
+    edit_reference_parser.add_argument("--plan-id", required=True, help="Plan ID selecting its expert_reference.json.")
+    operations = edit_reference_parser.add_mutually_exclusive_group(required=True)
+    operations.add_argument("--add-action", action="store_true", help="Append a guided blank action with the next ID.")
+    operations.add_argument("--add-issue", action="store_true", help="Append a guided blank expert issue with the next ID.")
+    operations.add_argument(
+        "--remove-action", nargs="?", const="", metavar="ACTION_ID",
+        help="Remove an exact action ID, or the highest-ID untouched blank when no ID is supplied.",
+    )
+    operations.add_argument(
+        "--remove-issue", nargs="?", const="", metavar="ISSUE_ID",
+        help="Remove an exact issue ID, or the highest-ID untouched blank when no ID is supplied.",
+    )
+    _add_project_argument(edit_reference_parser)
+    freeze_reference_parser = commands.add_parser(
+        "freeze_expert_reference",
+        help="Confirm a completed reference is ready for assessment and freeze its identity.",
+        allow_abbrev=False,
+    )
+    freeze_reference_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
+    freeze_reference_parser.add_argument(
+        "--frozen-by", action="append", required=True,
+        help="Reviewer confirming readiness for assessment; repeat for multiple reviewers.",
+    )
+    _add_project_argument(freeze_reference_parser)
     return parser
 
 
@@ -479,7 +512,8 @@ def _create_expert_reference(root: Path, args: argparse.Namespace) -> None:
         root, args.plan_id, prepared_by=args.prepared_by
     )
     print(f"Expert reference: {path}")
-    print("Actions are empty; complete the form from the original PDF.")
+    print("Added guided blank action action_0001 and expert issue issue_0001.")
+    print("Replace TODO: guidance and remove unused blanks before validation; use the original PDF.")
     print("For comparison plans, complete it before viewing model outputs.")
 
 
@@ -489,9 +523,39 @@ def _validate_expert_reference(root: Path, plan_id: str) -> None:
     actions = reference["plan_data"]["actions"]
     print(f"Expert reference validation passed for {_display_text(plan_id)}.")
     print(f"Actions: {len(actions)}")
-    if not actions:
+    print(f"Issues: {len(reference.get('plan_issues', {}).get('issues', []))}")
+    freeze = storage.load_expert_reference_freeze(root, plan_id)
+    if freeze is not None:
+        print("Frozen reference and source fingerprints verified.")
+    if not actions and freeze is None:
         print("Actions are empty; the form still needs expert completion.")
     print("Checks cover structure, source links, and page bounds. Experts still assess accuracy and completeness.")
+
+
+def _edit_expert_reference(root: Path, args: argparse.Namespace) -> None:
+    """Expose one explicit edit per invocation, leaving human coding in the form."""
+    if args.add_action or args.add_issue:
+        operation = "add_action" if args.add_action else "add_issue"
+        record_id = None
+    else:
+        operation = "remove_action" if args.remove_action is not None else "remove_issue"
+        record_id = getattr(args, operation) or None
+    path, affected_id = expert_files.edit_expert_reference(
+        root, args.plan_id, operation=operation, record_id=record_id,
+    )
+    print(f"Expert reference: {path}")
+    verb = "Added blank" if operation.startswith("add_") else "Removed"
+    print(f"{verb} {affected_id}.")
+
+
+def _freeze_expert_reference(root: Path, args: argparse.Namespace) -> None:
+    """Record the named reviewer's confirmation without starting model work."""
+    path = expert_files.freeze_expert_reference(root, args.plan_id, frozen_by=args.frozen_by)
+    freeze = storage.load_expert_reference_freeze(root, args.plan_id)
+    print(f"Expert reference freeze: {path}")
+    print(f"Reference SHA-256: {freeze['reference_sha256']}")
+    print("Reference frozen for assessment; editor changes are blocked.")
+    print("Use this reference fingerprint when recording judgments. Freezing does not enable comparison runs.")
 
 
 def _list_plans(root: Path) -> None:

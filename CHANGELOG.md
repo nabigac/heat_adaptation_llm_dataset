@@ -1,6 +1,11 @@
 # Structured change log
 
-Decisions, changes, failures, and findings that explain how the workflow developed. Entries describe the setup and evidence at the time; later entries record changed decisions. Current usage is in [README.md](README.md) and [IMPLEMENTATION.MD](IMPLEMENTATION.MD).
+Dated decisions, changes, failures, and findings from development. Entries describe the setup and evidence at the time. Current study methods and commands are in [DESIGN.md](DESIGN.md), [README.md](README.md), and [IMPLEMENTATION.MD](IMPLEMENTATION.MD).
+
+[2026-11-18](#2026-11-18) · [2026-11-19](#2026-11-19) · [2026-11-20](#2026-11-20) · [2026-11-21](#2026-11-21) · [2026-11-22](#2026-11-22) · [2026-11-23](#2026-11-23) · [2026-11-24](#2026-11-24)
+
+<details>
+<summary>Categories and entry template</summary>
 
 ## Categories
 
@@ -15,7 +20,7 @@ Decisions, changes, failures, and findings that explain how the workflow develop
 
 ## Entry template
 
-Add dated entries at the bottom. Record observed results separately from expectations; use "Not yet tested" when evidence is unavailable.
+Add dated entries to the matching date group. Record observed results separately from expectations; use "Not yet tested" when evidence is unavailable.
 
 ### YYYY-MM-DD — Short title
 
@@ -26,7 +31,15 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Observed result:** What was observed or learned?
 - **Remaining questions:** What remains unresolved? Use "None" if complete.
 
+</details>
+
 ## Entries
+
+Open a date group to read its entries. The latest date is expanded.
+
+<a id="2026-11-18"></a>
+<details>
+<summary><strong>2026-11-18</strong> — extraction and hosted-model selection (6 entries)</summary>
 
 ### 2026-11-18 — Build the workflow through the first extraction
 
@@ -82,6 +95,12 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Observed result:** 1,660 tests passed, with 11 OCR dependency warnings. Four offline request comparisons retained identical bytes, routing, timeouts, and estimates. All 734 preservation-baseline files were unchanged; all five historical runs loaded. The implementation guide was roughly halved. No paid calls were made.
 - **Remaining questions:** Formal extraction-quality assessment and the different hosted verifier remain pending.
 
+</details>
+
+<a id="2026-11-19"></a>
+<details>
+<summary><strong>2026-11-19</strong> — Paris, verification, and quotation checks (6 entries)</summary>
+
 ### 2026-11-19 — Add Paris and increase the extraction output allowance
 
 - **Category:** Data / Model
@@ -136,6 +155,12 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Observed result:** The focused regression suite passed 464 tests; 12 follow-up boundary/context checks passed. Read-only replay corrected all three known Freetown V2 page mismatches in memory, leaving two unmatched quotations. Historical artifacts remained unchanged; no paid requests were made for this implementation.
 - **Remaining questions:** New live runs with automatic correction are **Not yet tested**. Unmatched wording, source fidelity, and evidence adequacy still require review.
 
+</details>
+
+<a id="2026-11-20"></a>
+<details>
+<summary><strong>2026-11-20</strong> — handoff, prompts, and repeated verification (4 entries)</summary>
+
 ### 2026-11-20 — Handle early JSON drafts before final generation
 
 - **Category:** Code
@@ -172,6 +197,12 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Observed result:** Paris `0004`–`0006` independently used `run_extract_0002` and unchanged model settings; all succeeded without Python repairs. After the quotation revision, `0005` kept 122 excerpts without tiny fragments. After the coverage/resolution revision, `0006` kept 130, left the courtyard discrepancy open, and added runoff-water cooling. Whitespace-normalized matches rose from 66/122 to 100/130; these are diagnostics, not evidence-adequacy scores. Runtime rose from 8m to 14m 5s and API-reported cost from about $0.066 to $0.129. Offline checks passed 174 then 126 tests, plus both-plan input checks.
 - **Remaining questions:** Omissions, bundling, quotation errors, and unstable statuses persist; `0006` described planned bathing sites as already opened. Individual repeats and differing tool activity do not isolate prompt effects. Expert reference scoring and confirmation of claimed resolutions remain pending.
 
+</details>
+
+<a id="2026-11-21"></a>
+<details>
+<summary><strong>2026-11-21</strong> — expert references and collaboration planning (2 entries)</summary>
+
 ### 2026-11-21 — Add expert reference forms and validation
 
 - **Category:** Code / Research
@@ -189,6 +220,12 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Reason:** Explore whether coordinated collaboration improves extraction and evidence quality, with its computational tradeoffs. GLM's low listed cost, long context, and listed tool/structured-output support motivated selection. Comparisons assess the complete workflow, including model and computation differences.
 - **Observed result:** DESIGN.md and IMPLEMENTATION.MD were updated and 47 local links checked. C's command, profiles, and runtime remain unimplemented; GLM compatibility and coordination quality are **Not yet tested**.
 - **Remaining questions:** Check GLM compatibility, establish numerical budgets, implement/test C, and pilot it on Freetown and Paris before freezing comparison settings.
+
+</details>
+
+<a id="2026-11-22"></a>
+<details>
+<summary><strong>2026-11-22</strong> — collaboration execution and time controls (4 entries)</summary>
 
 ### 2026-11-22 — Unify hosted compatibility and test the collaboration controller
 
@@ -226,6 +263,12 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Observed result:** Freetown C `0005` succeeded with 14 activity groups and two independent follow-up checks, using 21 requests in 28m59s at about $0.196. The deadline update passed 2,217 tests with 11 existing OCR warnings. Both plans passed offline input checks, and historical records remained readable.
 - **Remaining questions:** Live E/V enforcement is **Not yet tested**. Total API/tool allowances remain different, so the common deadline does not establish equal computation. Expert quality assessment remains pending.
 
+</details>
+
+<a id="2026-11-23"></a>
+<details>
+<summary><strong>2026-11-23</strong> — collaboration review and reference identity (4 entries)</summary>
+
 ### 2026-11-23 — Generalize the investigation handoff after the Paris failure
 
 - **Category:** Code / Model
@@ -262,6 +305,12 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Observed result:** Full regression passed 2,485 tests with 11 existing OCR/PyTorch warnings; 97 reference checks passed after the final counter refinement. All 25 historical runs loaded, and read-only checks preserved 9,422 research files. Both development C inputs included the updated guidance for all three roles. Documentation checks passed for 91 local links/anchors, 12 CLI examples, and the reference/freeze format tables against their schemas. Freetown remains an unfrozen guided draft. No paid requests were made.
 - **Remaining questions:** The shared guidance's effect on model quality and live execution under the latest settings are **Not yet tested**. Reference completion, assessment, metrics, formal comparison controls, and instruction export remain pending.
 
+</details>
+
+<a id="2026-11-24"></a>
+<details open>
+<summary><strong>2026-11-24</strong> — assessments, metrics, and summaries (4 entries)</summary>
+
 ### 2026-11-24 — Create assessment review files and move references under data
 
 - **Category:** Code / Data / Research
@@ -297,3 +346,5 @@ Add dated entries at the bottom. Record observed results separately from expecta
 - **Reason:** Make study summaries reproducible while keeping plan weighting, paired eligibility, and missing observations explicit.
 - **Observed result:** All 369 related summary, metric, assessment, CLI, reference-freeze, and migration regression tests passed, including 46 summary tests. Checks covered unequal plan sizes, different contributing sets, paired changes, zero/missing values, archived recalculation, changed files, duplicate selections, two distinct fictional source packages, and preserved/interrupted reports. Documentation checks passed for 99 local links/anchors and 18 CLI examples. Freetown's reference remains unchanged and unfrozen; no real assessments/reports or paid model requests were created.
 - **Remaining questions:** Failure-reporting scope/counts, the real-plan assessment pilot, formal comparison controls, and instruction export remain pending. Scientific cross-plan results from completed real assessments are **Not yet tested**.
+
+</details>

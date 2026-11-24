@@ -2,219 +2,141 @@
 
 **Research design · updated 2026-11-24**
 
+[Sample](#study-sample) · [Workflow](#workflow-and-comparison) · [Evaluation](#4-evaluation) · [Coding rules](#f-action-coding-rules) · [Calculations](#g-evaluation-measures-and-calculations)
+
 ## 1. Context and problem
 
-Plans issued by governments and public agencies describe actions to address heat risk. Extracting these actions into a consistent dataset would support comparison across jurisdictions. The work requires reading varied documents, combining descriptions spread across pages, and preserving details such as implementation status, costs, and expected benefits.
+Heat adaptation actions are spread across government plans, with varied terminology, layouts, and evidence. Extracting them into consistent records could support comparison across jurisdictions, but requires careful grouping, source interpretation, and review.
 
-Large language models (LLMs) could assist this work, but their outputs require assessment against the source. This study will examine a workflow combining open-weight models, document tools, and heat adaptation experts. Open-weight models publish their trained parameters; the study accesses these models through hosted APIs using Hugging Face Inference Providers. Preserving the source documents, model identities, available version information, prompts, settings, and expert judgments supports reproducibility.
+This study pairs heat adaptation experts with open-weight large language models (LLMs) accessed through hosted APIs. It preserves source documents, prompts, settings, available model-version information, outputs, and expert judgments so the workflow can be examined and reproduced.
 
 ## 2. Research aim and objectives
 
-The study will develop and evaluate a workflow pairing heat adaptation experts with open-weight LLMs to extract actions from plans and produce a curated pilot instruction dataset. The workflow is agentic, meaning models can request tools while completing a task. An instruction example pairs task instructions and source input with a reviewed answer for future fine-tuning.
+Develop and evaluate an expert–LLM extraction workflow and produce a curated pilot instruction dataset.
 
-The study has two objectives.
+1. **Understand how experts and LLMs build the workflow.** Document problems, revisions, and practical lessons from development.
+2. **Evaluate verification and collaboration.** Compare E, E+V, and C for action accuracy/completeness, evidence, unresolved issues, and successful-run resource use.
 
-1. **To show how experts and LLMs can be paired to build an extraction workflow.** The study will examine how expert knowledge, model outputs, and successive revisions shape the workflow and identify practical lessons for researchers developing similar workflows.
-2. **To evaluate verification and collaboration.** The study will compare an extractor alone (E), that extraction revised by a different model (E+V), and a collaborative multi-agent configuration (C). The comparison will examine accuracy, completeness, supporting evidence, unresolved issues, and computational requirements.
+The workflow is agentic: models can request document tools while completing their tasks. A future instruction example will pair task instructions and source input with an expert-curated answer. Fine-tuning and wider dataset expansion are deferred.
 
 ## 3. Methods
 
 ### Eligible plans
 
-Eligible plans meet all of the following criteria.
+Plans must be:
 
-- They are final, publicly available English plans issued by governments or public agencies, published or updated in 2010 or later.
-- They address heat directly, or contain a dedicated heat section with at least one action.
-- They are available as PDFs with stable page positions and content readable by a person, including scanned pages.
+- Final, publicly available English documents issued by governments or public agencies, published or updated in 2010 or later.
+- Explicitly about heat, or contain a dedicated heat section with at least one action.
+- Available as PDFs with stable physical pages and content readable by a person, including scanned documents.
 
-Experts will screen eligibility, with preference for recent versions. City, county, regional, state, and national plans are eligible, with particular interest in city plans. Broader plans may cover heat adaptation across their jurisdiction.
+Experts screen eligibility and select varied lengths, layouts, and plan types, excluding near-duplicates. Recent versions and city plans are preferred; other jurisdictional scales are eligible.
 
 ### Study sample
 
-| Stage | Planned size | Purpose |
+| Stage | Plans | Use |
 | --- | --- | --- |
-| Initial development | 2 plans | Build the workflow, refine prompts and tools, and check execution. Observed problems and revisions inform practical lessons. |
-| Additional plans | 8 plans | Extend the sample after initial development, with any further refinements documented. |
-| Final comparison | All 10 plans | Run E, E+V, and C successfully on the two initial and eight additional plans under one frozen study round. |
-| Expansion | Deferred | Possible dataset expansion after evaluation of the workflow. |
+| Initial development | 2: Freetown and Paris | Build the workflow, refine prompts/tools, and check execution. |
+| Additional sample | 8 | Extend the study after initial development; document further refinements. |
+| Final comparison | All 10 | Run and assess E, E+V, and C under the final settings. |
 
-Plans will be selected to provide variation in length, layout, and type, with near-duplicates excluded. The ten-plan sample will be fixed before the final study round. Initial development plans remain in the final comparison and are rerun with the other eight. The selection rationale, document characteristics, and each plan's role in refinement will be recorded.
+The original two plans are rerun and remain in the main comparison. Record selection reasons, document characteristics, and which plans informed refinements.
 
 ### Extracted dataset and action records
 
-Each configuration will produce one JSON dataset for a plan, containing plan information, action records, and review issues. JSON stores named fields in objects and lists of objects in arrays.
+Each output contains three components:
 
-Within a plan, actions are grouped by the specific activity undertaken. For example, all tree planting belongs in one action object, including planting in different neighborhoods or phases. Details associated with each location or phase are preserved. Tree planting and drinking fountain installation form separate actions. The broad `action_type` categories classify each activity and may overlap.
+| Component | Contents |
+| --- | --- |
+| `plan_data.metadata` | Plan and jurisdiction information. |
+| `plan_data.actions` | One record per specific heat adaptation activity across the plan. |
+| `plan_issues.issues` | Grouped concerns, source gaps, conflicts, and possible omissions. |
 
-One source heading, pathway, or programme may contain several distinct activities. Activities with different primary tasks or outputs receive separate records, even when they share a goal, recipient group, or implementer. Routine implementation choices remain part of their activity: heat-resistant species specified for tree planting belong in that planting record, while a separately commissioned species experiment has a different primary task.
+Group repeated occurrences of the same activity while retaining quantities, implementers, locations, phases, timing, costs, benefits, and evidence. Separate different primary tasks or outputs, even under one programme. Tree planting and drinking fountains are separate activities; differing planting locations alone do not create separate records.
 
-#### Plan dataset components
-
-| Component | Meaning and information gathered | JSON representation |
-| --- | --- | --- |
-| Plan | One document version, processed in full. | One dataset containing `plan_data` and `plan_issues`. |
-| Plan information | Document and jurisdiction metadata. | `plan_data.metadata`. |
-| Actions | One record per specific heat adaptation activity, combining its occurrences throughout the plan. | `plan_data.actions`. |
-| Plan issues | Uncertainty, conflicts, source gaps, or possible omissions requiring review. | `plan_issues.issues`. |
-
-#### Fields within each action object
-
-| Action field | Meaning and information gathered | JSON representation |
-| --- | --- | --- |
-| Action identifier | Stable local ID followed through revisions within a workflow. | `action_id` |
-| Action description | Activity, implementers, quantities, timing, conditions, and phase-specific details. | `action` |
-| Action type | Infrastructural, institutional, behavioral/cultural, and/or nature-based. | `action_type` |
-| Action status | Unspecified unless the source clearly establishes that the grouped activity is planned, underway, or completed. | `action_status` |
-| Action location | All stated locations or geographic coverage. | `action_location` |
-| Action recipients | Stated intended populations or affected groups. | `action_recipient` |
-| Action cost | Stated amounts, units, periods, and whether estimated, allocated, spent, or needed. | `action_cost` |
-| Action benefit | Stated outcomes and qualifications, preserving whether expected, modelled, or observed. | `action_benefit` |
-| Supporting evidence | Exact quotations and physical PDF page numbers supporting the recorded details. | `evidence` |
-
-Costs, benefits, and evidence are attached to the activity they describe. The [appendix](#appendix-dataset-coding-rules-and-evaluation) defines the fields and coding rules used by models and experts.
+The [appendix](#appendix-dataset-coding-rules-and-evaluation) defines all fields, categories, missing values, and coding rules.
 
 ### Evidence and issues
 
-Evidence consists of exact, continuous quotations with physical PDF page numbers counted from 1. Quotations preserve wording, punctuation, and line breaks without rewriting or silent omissions; hyphens at line breaks are retained. Unreliable OCR passages are represented by locatable continuous excerpts and unresolved evidence gaps. Every page containing quoted words is cited. Separate passages are represented by separate evidence entries, including relevant headings or footnotes. Adequate evidence collectively supports the activity and its stated details.
+Evidence uses exact continuous quotations and every physical PDF page containing the quoted words, counted from 1. Separate passages have separate evidence entries. Quotations preserve wording, punctuation, and line breaks. When optical character recognition (OCR) is unreliable, use locatable excerpts and record unresolved gaps.
 
-Concerns about one action are grouped into one issue. Omissions and source gaps are recorded without an action link when necessary. Ordinary unstated details are represented by the defined missing values. The verifier retains E issue IDs, may add issues, and explains claimed resolutions. C maintains its own action and issue IDs, with the role that raised or resolved each issue recorded. Curated copies of E, E+V, and C retain their workflow's issue identities and allow expert resolutions. Expert curation corrects or excludes unsupported material.
-
-### Example data output
-
-This fictional example groups tree planting across two wards. A linked issue records costs that could not be recovered from a table.
-
-```json
-{
-  "plan_data": {
-    "metadata": {
-      "plan_title": "Example City Heat Action Plan",
-      "jurisdiction_name": "Example City",
-      "country": "Example Country",
-      "plan_scale": "city",
-      "plan_type": "heat_specific_plan",
-      "publication_year": 2026,
-      "lead_agencies": ["Example City Council"],
-      "source_url": "https://example.org/heat-plan.pdf",
-      "date_accessed": "2026-11-18",
-      "language": "English"
-    },
-    "actions": [{
-      "action_id": "action_0001",
-      "action": "Example City Council plans to plant 100 street trees in North Ward and 200 in South Ward.",
-      "action_type": ["nature-based"],
-      "action_status": "planned",
-      "action_location": "North Ward; South Ward",
-      "action_recipient": null,
-      "action_cost": null,
-      "action_benefit": "Expected reduction in heat.",
-      "evidence": [{
-        "quote": "Example City Council plans to plant 100 street trees in North Ward and 200 in South Ward to reduce heat.",
-        "page_numbers": [4]
-      }]
-    }]
-  },
-  "plan_issues": {
-    "issues": [{
-      "issue_id": "issue_0001",
-      "related_action_id": "action_0001",
-      "issue_description": "Planting costs in the table on PDF page 5 could not be recovered from prepared text or OCR.",
-      "issue_type": "source_issue",
-      "issue_origin": "extractor",
-      "issue_status": "open",
-      "resolved_by": null,
-      "resolution": null
-    }]
-  }
-}
-```
+Group concerns about one action into one issue. Source problems and possible omissions may have no action link. V retains E issue IDs/origins and records its claimed fixes. C maintains independent action/issue identities. Experts record later corrections in separate curated copies.
 
 ### Workflow and comparison
 
-During development, models will draft action records and flag uncertainties. Experts will examine the outputs against the plans and identify changes needed in coding rules, prompts, tools, and review procedures. Examples showing what prompted a revision, how it was addressed, and what was observed afterwards will be preserved. These examples will support the study's account of building the workflow and the lessons drawn from that process.
+| Configuration | Models and task | Input |
+| --- | --- | --- |
+| E | Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) extracts actions. | Whole prepared plan. |
+| E+V | DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) checks and revises E. | That exact saved E and its prepared plan. |
+| C | GLM-5.3-Flash (`zai-org/GLM-5.3-Flash`) coordinates Inkling and DeepSeek as flexible workers. | Same prepared plan, independently of E/E+V and expert references. |
 
-For E and E+V, Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) is the extractor and DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) is the verifier. GLM-5.3-Flash (`zai-org/GLM-5.3-Flash`) is the coordinator for C. All three models will be accessed through Hugging Face Inference Providers with DeepInfra as the fixed host. E consists of the Inkling extraction with shared Python processing. E+V begins with that exact saved extraction, which DeepSeek checks and revises.
+All inference uses Hugging Face with DeepInfra as the fixed host. PDF preparation, EasyOCR, and source tools run locally through MCP, the interface connecting models to document tools. C may run independent assignments in parallel, exchange relevant findings, revise a shared draft, and assemble one answer. Both workers contribute; roles remain fixed while tasks vary.
 
-C will start independently from the same prepared plan, without access to the selected E/E+V outputs or expert reference. Inkling and DeepSeek will serve as two flexible workers with the same task instructions and document tools; either can extract or check information. The coordinator will give each task a clear objective, source scope, and expected findings, arrange parallel work where tasks are independent, and request follow-up or cross-checks. Both workers will contribute source-supported findings. Worker identities will remain fixed as assignments change. The coordinator will maintain a provisional draft while capacity remains and direct checks of grouping, heat eligibility, coverage beyond the main heat sections, associated details, and quotation fidelity. It will assemble one complete JSON answer, retaining unresolved concerns as issues. Task order and the number of exchanges may vary within fixed execution budgets.
+During development, experts review outputs against the PDFs and refine prompts, coding guidance, tools, and review procedures. Preserve examples showing the problem, revision, and observed outcome. Current development results and implementation limits are described in [IMPLEMENTATION.MD](IMPLEMENTATION.MD#current-development-checkpoint).
 
-DeepSeek was selected for its low listed cost and strong author-reported reasoning and agent benchmark results. GLM was selected for its low listed cost, long context, and listed tool and structured-output support. All three models have passed basic compatibility checks. E, E+V, and C have completed development runs on both plans. Live checks under the latest shared guidance, C prompts, and budgets, and formal expert quality assessment, remain pending. The shared guidance's effect on model quality is **Not yet tested**. PDF preparation, optical character recognition (OCR) with EasyOCR, and document tools run locally; LLM inference is hosted.
+#### Final versions and output selection
 
-Model and hosting details, prompts, response controls, execution budgets, tool use, runtime, and provider-reported tokens will be recorded. Generation will use a provider-compatible schema, with compatibility checked separately using fictional inputs. Python will enforce the complete field and relationship rules for every final output. Structural compliance does not establish substantive accuracy. Earlier trial outputs remain development evidence; final comparison outputs for all ten plans will come from the same complete study round.
+Version and run selection are tracked manually:
 
-Each complete configuration will have a 90-minute execution ceiling, with 30 minutes protected for its final answer. For E+V, the complete extraction and verifier investigation will share the preceding 60 minutes; an extraction exceeding that allowance cannot enter the timed E+V workflow. Human waiting between commands will be excluded. C will share its time across all agents. Request, tool, and estimated-token ceilings will be fixed within a study round. Reported resource use will cover the selected successful runs; failures and retries will remain in execution records and development notes. Final generation may begin earlier when investigation finishes. Common ceilings do not establish equal computational effort; the current settings are specified in the implementation document's [configuration table](IMPLEMENTATION.MD#current-configuration-settings).
+1. Record the final code version, model/host identities, prompts, generation controls, tools, budgets, timeouts, validation/repair policies, and each plan's source/preparation version. Fix coding and scoring rules.
+2. Run all ten plans. For each, record the first validated successful E, its first successful linked V, and the first successful independent C. V retries retain that E.
+3. Retry execution failures with unchanged settings. **Any workflow change requires rerunning all three configurations across all ten plans**, including earlier successes.
+4. Check the manual log and saved evidence before assessment/reporting: all **30 selected outputs** must use the final versions. Keep earlier outputs as development history.
 
-A submitted document-tool request exceeding its deadline will fail the configuration, including when a reply arrives late. Failure evidence and available late replies will be preserved, and no further model requests will start. Ordinary source problems, such as unreadable OCR, may remain recoverable and be retained as unresolved issues.
+Each configuration uses its own fixed definition across plans. C's task sequence may adapt within that definition. No software command to create or freeze a study round is required.
 
-All agents will use the same preparation and document tool capabilities through Model Context Protocol (MCP), the interface connecting agents to tools. C agents will receive the shared coding rules and field definitions; assignments and relevant findings will be exchanged through the coordinator. Shared field guidance will distinguish complete answers from worker task results and identify each workflow's issue roles.
+#### Budgets, processing, and preservation
 
-The final E, E+V, and C answers will receive the same automatic quotation-location checks. A single-page citation is corrected only when its cited page has available text, the quotation does not match there, and the complete quotation matches exactly one other physical page in the prepared text or successful OCR readings available within that workflow. Matching allows whitespace differences while preserving wording and punctuation. Ambiguous locations and unmatched quotations remain flagged. Raw responses, corrected candidates, and repair records will be preserved. V receives the processed E answer; expert assessment covers each configuration's processed output. Citation corrections do not establish evidence adequacy or change model-reported issue statuses.
+Each configuration has a 90-minute ceiling, including a protected 30-minute final-answer window. E+V shares the first 60 minutes between complete E execution and V investigation; an E exceeding that allowance cannot enter timed E+V. C shares its budget across all agents. Human waiting is excluded. Common ceilings do not establish equal computation; [implementation settings](IMPLEMENTATION.MD#current-configuration-settings) define the other limits.
 
-| Stage | Procedure and saved result |
-| --- | --- |
-| 1. Registration and preparation | The original PDFs, collection metadata, page text, and preparation problems will be preserved for all ten plans. |
-| 2. Extraction (E) | Inkling 2 Small will receive the whole prepared plan through the Hugging Face API. Its answer, issues, settings, tool activity, and execution records will be saved. |
-| 3. Verification (E+V) | DeepSeek V4.1 Flash 1017 will check a copy of that exact Inkling extraction, including unflagged content and possible omissions. Its full revised answer will be saved. |
-| 4. Collaboration (C) | GLM-5.3-Flash will coordinate Inkling and DeepSeek as flexible workers with clear assignments for extraction and checking. C will start independently from the prepared plan, preserving task exchanges, execution evidence, and one complete JSON answer. |
-| 5. Expert reference preparation | Experts will complete one form per plan from the original PDF, recording prior output exposure. Forms will be completed before viewing model outputs where no exposure has occurred, then validated and frozen before assessment. |
-| 6. Manual expert assessment | After all 30 configuration outputs are complete in one study round, experts will assess each plan's E, E+V, and C against its shared frozen reference, using the agreed rubric, evidence judgments, and issue checks. |
-| 7. Analysis and dataset assembly | Lessons about pairing experts and LLMs will be synthesized, the three configurations compared, and instruction examples assembled from expert-curated answers and supporting inputs. |
+A submitted tool timeout fails the execution, preserves available evidence/late replies, and stops further model requests. Ordinary unreadable-source/OCR replies may remain recoverable. Execution success means format and execution checks pass; experts still judge substantive quality.
 
-During development, verification can default to the most recent validated, successful E run or use an explicit run ID. For final comparison, V will use the selected E from that study round. The E run ID will be saved with V, and verifier retries will retain that input.
-
-The final study round will fix the workflow code, models and hosts, prompts, response controls, source versions and preparations, tools, coding rules, budgets, timeouts, validation, and processing/repair policies. Each configuration will use its own fixed definition across all ten plans. C's task sequence may adapt within that protocol. Scoring rules will be fixed before assessment.
-
-For each plan, select the first validated, successful E, the first successful V linked to that E, and the first successful independent C within the round. Execution failures can be retried under unchanged settings. Successful execution means that format and execution checks pass; expert scoring may still identify substantive errors. The complete final round will contain 10 E, 10 E+V, and 10 C outputs. Selected run IDs, round identity, frozen reference fingerprints, and reviewers will accompany assessment and reporting.
-
-Any change to the frozen workflow will supersede the entire round. The revised workflow will start a new round and rerun all three configurations across all ten plans, including previously successful runs. A change required during C on the eighth plan therefore requires a full restart. Earlier attempts and superseded outputs will remain development history. Only one complete round will supply the final comparison. [IMPLEMENTATION.MD](IMPLEMENTATION.MD) describes current software and planned controls, and [README.md](README.md) provides available commands.
+All outputs receive the same quotation-location checks. A single-page citation is corrected only when its readable cited page does not match and the full quotation matches exactly one other available physical page. Matching tolerates whitespace differences while preserving wording/punctuation. Ambiguous and unmatched quotations remain flagged. Raw replies, candidates, repairs, settings, tool activity, and available usage are preserved. V receives processed E; assessment uses processed outputs before curation.
 
 ## 4. Evaluation
 
 ### Expert reference and scoring
 
-Experts will complete one reference form per plan using the same grouping and coding rules as the models. The form will contain expert-coded activities, details, and source evidence from the original PDF. Where experts have not viewed model outputs, they will complete the form before doing so. Prior exposure on the initial development plans or during later refinement will be recorded. All three final-round outputs for a plan will be assessed against the same frozen form.
+Experts code one reference per plan from the original PDF using the same activity rules. Complete it before viewing outputs where no prior exposure has occurred; record exposure from initial development or later refinement. Review, validate, and freeze the completed form before scoring all three outputs against it.
 
-Reference forms begin with guided action and issue placeholders. Experts will replace the guidance or remove unused records while coding the PDF. Reference issues use `expert` origin and, when resolved, `expert` resolver. These concerns remain separate from model-output issues used in evaluation. Structural validation does not establish reference completeness or factual accuracy.
+Reference freezing records exact reference/PDF fingerprints and reviewer confirmation. Software checks structure and links; experts establish completeness and source meaning. Reference IDs remain stable and deleted IDs are not reused. Guided placeholders must be completed or removed. Reference issues use expert identities and remain separate from model issues.
 
-Reference action and issue IDs will remain stable, with deleted IDs unavailable for reuse. The same evidence/type-to-issue rules apply to reference actions; an omitted optional issues container means no issues. Before assessment, a named reviewer will confirm readiness and freeze the completed form. The freeze will identify the exact reference and original PDF by SHA-256 fingerprints, with reviewer and time recorded. Subsequent file changes will fail validation. This records the reviewer's decision; it does not establish scientific completeness or enable formal comparison.
+Match activities by meaning. Combine split/duplicate output records, retain all substantive claims, and assess each activity in a bundled record separately. Each reference activity receives one score:
 
-Development forms will pilot coding and assessment procedures and can supply the shared references for the initial two plans in the final comparison after completion, review, and freezing. Prior exposure will remain documented when interpreting the results.
-
-Assessments will use prefilled CSV tables for reference-activity scores, output-activity support/evidence judgments, and confirmation of V's claimed resolutions. Generated metadata will identify selected runs, the frozen reference, reviewers, and source fingerprints. Judgment fields will begin blank; experts will confirm activity grouping and matches before scoring. Development validation checks these records and their saved inputs, separating invalid data from blank or undetermined judgments. Every reference activity requires one scoring row per configuration, and output groups must cover every output record before review is complete. Validation checks consistency; experts establish source meaning. Development calculation exports per-plan results and selected cross-plan summaries as JSON/CSV, retaining pending measures as unavailable and preserving reviewed inputs and calculation code. Final-round membership and completeness controls remain to be implemented. References, assessments, and reports will be preserved under `data/expert_references/`, `data/assessments/`, and `data/reports/`.
-
-Development assessment creation can select the latest validated, successful E, its latest eligible V, and the latest eligible C from the same preparation, or use explicit run IDs. Final assessment will use the selected outputs from the complete ten-plan round above. Creation of review files does not establish scientific judgments or enable final-round execution.
-
-Actions will be matched by activity and meaning. Split or duplicate records will be assessed together, with each reference activity counted once. All substantive claims in matched records, including conflicting or unsupported details, will be considered in scoring. If a record bundles different activities, its relevant content will be assessed against each matching reference activity.
-
-| Score | Judgment about a reference action and its matched output |
+| Score | Judgment |
 | --- | --- |
-| 1 | The activity and all required substantive details are correct, with source support for every substantive addition. |
-| 0.5 | Some substantive information about the activity is correct, but a required detail is wrong, omitted, or unsupported. |
-| 0 | The activity is omitted, or the matched content contains no correct substantive information about it. |
+| 1 | Activity and all required substantive details are correct; every substantive addition has source support. |
+| 0.5 | Some substantive information is correct, but a required detail is wrong, missing, or unsupported. |
+| 0 | Activity is omitted, or matched content contains no correct substantive information about it. |
 
-Assessment will cover the description, classification, status, locations, recipients, costs, and benefits under the coding rules. Required substantive details include stated quantities, implementers, timing, conditions, and differences between neighborhoods or phases. Defined missing values are correct when the source is silent. Experts will judge content against the original PDF, with supplied quotations and citations assessed through the evidence measure. Plan information will be checked during curation, and issues will be assessed through their own measures.
-
-This study-specific rubric will be piloted on development plans. A worked scoring example appears in [IMPLEMENTATION.MD](IMPLEMENTATION.MD#worked-scoring-example).
+Required details include description, type, status, places, recipients, costs/benefits, quantities, implementers, timing, and conditions. Defined missing values are correct when the source is silent. Evidence is judged separately, so correct content can receive full credit with inadequate citations.
 
 ### Evaluation outcomes
 
-| Outcome | Measure and purpose |
+| Outcome | Measure |
 | --- | --- |
-| Action accuracy and completeness | **Action score percentage**, using the 0/0.5/1 scores for activities in the expert reference form. |
-| Unsupported activities | **Unsupported action count**, reported alongside the total distinct output activities. This captures invented or ineligible activities outside the reference-based score. |
-| Evidence quality | **Actions with adequate evidence**, the percentage of output activities whose supplied evidence supports all recorded substantive details and uses faithful quotations with correct pages. |
-| Issues requiring review | **Open issues** in all three outputs, and **expert-confirmed verifier resolutions** reported against resolutions claimed for initially open E issues in E+V. C's issue handling will be described in review notes. |
-| Computational requirements | Processing runtime and provider-reported tokens for the selected successful runs. |
+| Accuracy and completeness | Reference action-score percentage using 0/0.5/1 scores. |
+| Unsupported activities | Unsupported/ineligible activity count alongside total distinct output activities. |
+| Evidence quality | Percentage of output activities with faithful, correctly cited evidence supporting all substantive details. |
+| Review issues | Open issues in E, E+V, and C; expert-confirmed/claimed V resolutions for initially open E issues. |
+| Resources | Runtime and provider-reported input/output tokens for selected successful runs. |
 
-The [evaluation appendix](#g-evaluation-measures-and-calculations) defines calculations and denominators. Assessment notes explain errors and corrections without requiring separate scores for every quotation or page.
+Check activities absent from the reference against the PDF before judging them unsupported. Confirm a V resolution only when every grouped concern is addressed. Describe C issue handling and agent disagreements in notes, without matching its issue IDs to E's.
+
+Experts fill prepopulated assessment CSVs; generated metadata identifies inputs, reviewers, and fingerprints. Software validates records and calculates measures without supplying judgments. Curated answers are prepared separately after assessment. See [calculation rules](#g-evaluation-measures-and-calculations) and the [worked scoring example](IMPLEMENTATION.MD#worked-scoring-example).
 
 ### Analysis and limitations
 
-The analysis will examine how heat adaptation experts and LLMs work together to develop the extraction workflow. Examples of decisions, revisions, and failures will help identify practical lessons about combining expert knowledge with model outputs to build and refine the workflow.
+Compare E+V minus E and C minus E+V within each plan. Report all ten plans, counts/denominators, and equal-weight means of valid per-plan percentages. Each paired summary uses plans with both measures available. Identify contributing/excluded plans for every measure.
 
-Comparisons within each plan will examine how sequential verification and coordinated collaboration affect action accuracy and completeness, supporting evidence, and unresolved concerns. Review notes will describe corrected errors, recovered omissions, introduced errors, and how C's agents investigate disagreements. Runtime and token use will describe the selected successful workflows. Execution failures remain part of the development account rather than a quantitative study outcome.
+Pending judgments and missing observations remain `null`; zero denominators are not applicable. Runtime/token totals cover selected successful runs, excluding retries, superseded work, preparation, and human review. Failures remain development history, outside quantitative outcomes.
 
-With ten selected plans and one final workflow version, findings will be descriptive and specific to this setting. The analysis will identify the initial development plans and any additional plans used for refinement, interpreting results with that history. Differences involving C will reflect its complete workflow, including its third model, resource allowances, and coordination, rather than isolating coordination alone. Document layout and PDF/OCR errors may affect quality. Hosted services may disclose limited model revision and serving details; unavailable information will remain unknown. Expert judgments about grouping and scoring may vary, and omissions or misinterpretations in the reference form may influence results.
+Interpretation will account for:
 
-The coarse action scores and combined evidence judgment may hide differences in the nature or severity of errors. Grouping an activity across locations or phases also gives records with different amounts of detail equal weight. Issue counts depend on what the models flag and provide only a partial view of review needs.
+- The small, selected sample and any plans used for refinement. Results describe the final workflows on these documents.
+- C's extra model, allowances, and complete coordination workflow; differences do not isolate coordination alone.
+- PDF layout/OCR errors and undisclosed hosted model/serving details.
+- Expert grouping/scoring variability and possible omissions or errors in the reference.
+- Coarse scores, unequal detail within grouped activities, and issue counts that depend on what models notice.
 
 ## Appendix: dataset, coding rules, and evaluation
 
@@ -223,6 +145,9 @@ A **schema** defines fields, types, and permitted values. An **object** groups n
 Sections A–D define the target plan dataset, E defines category options, F gives coding rules, and G defines evaluation. [IMPLEMENTATION.MD](IMPLEMENTATION.MD#appendix-supporting-json-files) specifies the supporting workflow files.
 
 All fields are required unless marked optional. Text is nonblank unless stated otherwise. Dates use `YYYY-MM-DD`. Record links refer to items within the same plan dataset, and cited page numbers fall within the original PDF's page range.
+
+<details>
+<summary>Dataset fields and category definitions (A–E)</summary>
 
 ### A. Plan dataset and plan data
 
@@ -337,6 +262,8 @@ An issue type describes the concern requiring review. Several concerns about the
 | `extraction_process_issue` | A problem during extraction, tool use, or application of the coding rules raises concern about the output's accuracy or completeness. |
 | `no_records_found` | No eligible heat adaptation actions were identified, and review is needed to confirm that finding or investigate possible omissions. |
 
+</details>
+
 ### F. Action coding rules
 
 These rules describe how models and experts interpret the source and organize action records.
@@ -362,7 +289,7 @@ These rules describe how models and experts interpret the source and organize ac
 
 ### G. Evaluation measures and calculations
 
-The complete final study round supplies E, linked E+V, and independent C outputs for all ten plans. Quality is assessed on saved processed outputs before curation. E+V includes the shared extractor and verifier; C includes its own coordinator and all worker activity.
+The final comparison uses the manually recorded E, linked E+V, and independent C outputs for all ten plans. Quality is assessed on saved processed outputs before curation. E+V includes the shared extractor and verifier; C includes its own coordinator and all worker activity.
 
 #### Before expert assessment
 
@@ -393,8 +320,62 @@ For issue assessment, only initially open E issues that V marks resolved require
 
 #### Paired comparisons and reporting conventions
 
-Paired changes are calculated within plans as E+V minus E and C minus E+V, with percentage differences expressed in percentage points. Results are reported for each plan with counts and denominators. The final summary will include all ten plans from one complete study round. A descriptive overall summary uses the mean of valid per-plan percentages, giving each plan equal weight. Paired summaries average within-plan changes over plans with both required measures. Counts and successful-run resource use are reported as totals by configuration; confirmed/claimed V resolutions use the same contributing plans for both counts. Each summary selects one exact saved calculation per plan and identifies contributing and excluded plans for every measure. An incomplete execution round is not the final comparison; unavailable judgments and zero denominators remain explicit.
+Paired changes are calculated within plans as E+V minus E and C minus E+V, with percentage differences expressed in percentage points. Results are reported for each plan with counts and denominators. The final summary will include all ten plans using the same documented workflow settings. A descriptive overall summary uses the mean of valid per-plan percentages, giving each plan equal weight. Paired summaries average within-plan changes over plans with both required measures. Counts and successful-run resource use are reported as totals by configuration; confirmed/claimed V resolutions use the same contributing plans for both counts. Each summary selects one exact saved calculation per plan and identifies contributing and excluded plans for every measure. Manually check that all 30 outputs are complete and use the final settings. Unavailable judgments and zero denominators remain explicit.
 
 The value `null` indicates pending judgments or unavailable measurements. Missing required usage or duration makes the corresponding total unavailable. Zero denominators are not applicable. An output activity absent from the reference is checked against the PDF for source support; absence alone does not make it unsupported. Reference coverage gaps are recorded in manual review notes. Any activity whose support is still undetermined keeps the relevant quality measures pending.
 
 The study reports three quality measures across all configurations, open issue counts across all configurations, and expert-confirmed verifier resolutions for E+V only. Review notes describe quotation, citation, addition, and issue examples, including C's collaboration process. Manually recorded judgments provide the inputs to the agreed measures.
+
+<details>
+<summary>Fictional JSON example</summary>
+
+### Example data output
+
+This fictional example groups tree planting across two wards. A linked issue records costs that could not be recovered from a table.
+
+```json
+{
+  "plan_data": {
+    "metadata": {
+      "plan_title": "Example City Heat Action Plan",
+      "jurisdiction_name": "Example City",
+      "country": "Example Country",
+      "plan_scale": "city",
+      "plan_type": "heat_specific_plan",
+      "publication_year": 2026,
+      "lead_agencies": ["Example City Council"],
+      "source_url": "https://example.org/heat-plan.pdf",
+      "date_accessed": "2026-11-18",
+      "language": "English"
+    },
+    "actions": [{
+      "action_id": "action_0001",
+      "action": "Example City Council plans to plant 100 street trees in North Ward and 200 in South Ward.",
+      "action_type": ["nature-based"],
+      "action_status": "planned",
+      "action_location": "North Ward; South Ward",
+      "action_recipient": null,
+      "action_cost": null,
+      "action_benefit": "Expected reduction in heat.",
+      "evidence": [{
+        "quote": "Example City Council plans to plant 100 street trees in North Ward and 200 in South Ward to reduce heat.",
+        "page_numbers": [4]
+      }]
+    }]
+  },
+  "plan_issues": {
+    "issues": [{
+      "issue_id": "issue_0001",
+      "related_action_id": "action_0001",
+      "issue_description": "Planting costs in the table on PDF page 5 could not be recovered from prepared text or OCR.",
+      "issue_type": "source_issue",
+      "issue_origin": "extractor",
+      "issue_status": "open",
+      "resolved_by": null,
+      "resolution": null
+    }]
+  }
+}
+```
+
+</details>

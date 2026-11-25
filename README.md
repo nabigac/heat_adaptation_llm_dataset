@@ -14,7 +14,7 @@ LLM inference uses hugging face with deepinfra as the fixed host. PDF preparatio
 
 ## study design
 
-1. develop and refine the workflow on freetown and paris.
+1. develop and refine the workflow on two plans.
 2. add eight plans and fix the final code, prompts, settings, and preparations.
 3. run all ten plans through E, E+V, and C: **30 successful outputs**.
 4. compare each plan's outputs against one shared expert reference.

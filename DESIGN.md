@@ -10,6 +10,14 @@ Heat adaptation actions are spread across government plans, with varied terminol
 
 This study pairs heat adaptation experts with open-weight large language models (LLMs) accessed through hosted APIs. It preserves source documents, prompts, settings, available model-version information, outputs, and expert judgments so the workflow can be examined and reproduced.
 
+The study compares three configurations:
+
+| Configuration | How it works |
+| --- | --- |
+| **Extractor (E)** | One model extracts actions and supporting evidence from the prepared plan. |
+| **Extractor + Verifier (E+V)** | A second model, the verifier (V), checks that exact saved extractor output against the same plan and revises it. |
+| **Collaboration (C)** | A coordinator directs two model workers to investigate the plan and assemble one answer, independently of E/E+V. |
+
 ## 2. Research aim and objectives
 
 Develop and evaluate an expert–LLM extraction workflow and produce a curated pilot instruction dataset.
@@ -35,7 +43,7 @@ Experts screen eligibility and select varied lengths, layouts, and plan types, e
 
 | Stage | Plans | Use |
 | --- | --- | --- |
-| Initial development | 2: Freetown and Paris | Build the workflow, refine prompts/tools, and check execution. |
+| Initial development | 2 | Build the workflow, refine prompts/tools, and check execution. |
 | Additional sample | 8 | Extend the study after initial development; document further refinements. |
 | Final comparison | All 10 | Run and assess E, E+V, and C under the final settings. |
 
@@ -65,9 +73,9 @@ Group concerns about one action into one issue. Source problems and possible omi
 
 | Configuration | Models and task | Input |
 | --- | --- | --- |
-| E | Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) extracts actions. | Whole prepared plan. |
-| E+V | DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) checks and revises E. | That exact saved E and its prepared plan. |
-| C | GLM-5.3-Flash (`zai-org/GLM-5.3-Flash`) coordinates Inkling and DeepSeek as flexible workers. | Same prepared plan, independently of E/E+V and expert references. |
+| **Extractor (E)** | Inkling 2 Small (`thinkingmachines/Inkling-2-Small`) extracts actions. | Whole prepared plan. |
+| **Extractor + Verifier (E+V)** | DeepSeek V4.1 Flash 1017 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`) checks and revises E. | That exact saved E and its prepared plan. |
+| **Collaboration (C)** | GLM-5.3-Flash (`zai-org/GLM-5.3-Flash`) coordinates Inkling and DeepSeek as flexible workers. | Same prepared plan, independently of E/E+V and expert references. |
 
 All inference uses Hugging Face with DeepInfra as the fixed host. PDF preparation, EasyOCR, and source tools run locally through MCP, the interface connecting models to document tools. C may run independent assignments in parallel, exchange relevant findings, revise a shared draft, and assemble one answer. Both workers contribute; roles remain fixed while tasks vary.
 

@@ -24,7 +24,7 @@ import storage
 
 
 PLAN_ID = "plan_0099"
-SOURCE_PATH = f"data/processed/{PLAN_ID}/preparation_02/preparation.json"
+SOURCE_PATH = f"data/prepared_plans/{PLAN_ID}/preparation_02/preparation.json"
 EXACT_QUOTE = "Plant 20 trees."
 
 
@@ -32,7 +32,7 @@ EXACT_QUOTE = "Plant 20 trees."
 def project(tmp_path):
     """Create a real saved source with native, blank, mixed and unavailable text."""
     root = tmp_path / "project"
-    pdf_path = root / f"data/raw/{PLAN_ID}.pdf"
+    pdf_path = root / f"data/source_pdfs/{PLAN_ID}.pdf"
     pdf_path.parent.mkdir(parents=True)
     with PdfWriter() as writer:
         for _ in range(5):
@@ -40,7 +40,7 @@ def project(tmp_path):
         writer.write(pdf_path)
     checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
     preparation = {
-        "schema_version": 3, "plan_id": PLAN_ID, "pdf_path": f"data/raw/{PLAN_ID}.pdf",
+        "schema_version": 3, "plan_id": PLAN_ID, "pdf_path": f"data/source_pdfs/{PLAN_ID}.pdf",
         "document_sha256": checksum, "source_url": "https://example.org/saved-plan.pdf",
         "date_accessed": "2026-11-05", "prepared_at": "2026-11-05T12:00:00Z",
         "pages_path": SOURCE_PATH.replace("preparation.json", "pages.json"), "page_count": 5,
@@ -53,7 +53,7 @@ def project(tmp_path):
              "Native text.\n[Regional OCR supplement]\nPlant 20 trees.\nCost £500,000.", None]
     pages, images = [], {}
     for number, text in enumerate(texts, 1):
-        image_path = f"data/processed/{PLAN_ID}/preparation_02/images/page_{number:04d}.png" if number >= 4 else None
+        image_path = f"data/prepared_plans/{PLAN_ID}/preparation_02/images/page_{number:04d}.png" if number >= 4 else None
         if image_path:
             with BytesIO() as output:
                 Image.new("RGB", (20, 20), "white").save(output, format="PNG")
@@ -80,7 +80,7 @@ def project(tmp_path):
     storage.save_registry(root, {"schema_version": 1, "plans": [{
         "plan_id": PLAN_ID, "plan_title": "Fictional plan", "pdf_path": preparation["pdf_path"],
         "document_sha256": checksum, "source_url": "https://example.org/later-correction.pdf",
-        "date_accessed": "2026-11-06", "study_set": "development", "prepared_source_path": SOURCE_PATH,
+        "date_accessed": "2026-11-06", "study_set": "comparison", "prepared_source_path": SOURCE_PATH,
     }]})
     # This file must never be made available through a document tool.
     private = root / f"runs/{PLAN_ID}/reference_initial.json"
@@ -119,7 +119,7 @@ def test_page_result_preserves_exact_text_physical_number_and_source_notes(proje
     assert result["page_count"] == 5
     assert result["preparation_status"] == "ready_with_gaps"
     assert result["preparation_problem"] == "OCR and image-only material need review."
-    assert result["document_sha256"] == hashlib.sha256((project / f"data/raw/{PLAN_ID}.pdf").read_bytes()).hexdigest()
+    assert result["document_sha256"] == hashlib.sha256((project / f"data/source_pdfs/{PLAN_ID}.pdf").read_bytes()).hexdigest()
 
 
 def test_blank_unavailable_and_mixed_pages_keep_distinct_saved_meanings(project):
@@ -196,7 +196,7 @@ def test_server_uses_explicit_saved_snapshot_instead_of_newer_registry_selection
 
 
 @pytest.mark.parametrize("source_path", [
-    "../preparation.json", "/tmp/preparation.json", "data/processed/plan_0001/preparation_02/preparation.json",
+    "../preparation.json", "/tmp/preparation.json", "data/prepared_plans/plan_0001/preparation_02/preparation.json",
     f"runs/{PLAN_ID}/reference_initial.json", SOURCE_PATH.replace("02", "99"),
 ])
 def test_source_selection_cannot_open_unrelated_or_missing_files(project, source_path):
@@ -205,7 +205,7 @@ def test_source_selection_cannot_open_unrelated_or_missing_files(project, source
 
 
 def test_source_identity_is_checked_against_actual_pdf_bytes(project):
-    with (project / f"data/raw/{PLAN_ID}.pdf").open("ab") as pdf:
+    with (project / f"data/source_pdfs/{PLAN_ID}.pdf").open("ab") as pdf:
         pdf.write(b"changed original")
     with pytest.raises(document_tools.DocumentToolError, match="checksum"):
         tools(project)

@@ -5,6 +5,9 @@ bounded model/tool loop and one incremental recorder. Verification additionally
 pins an exact extractor snapshot and checks issue continuity. Bare loops return
 evidence in memory; saved runners publish separate numbered attempts. No helper
 silently retries a failed run.
+
+Read build_extractor_input/build_verifier_input for source selection,
+_run_agent_loop for model/tool phases, and _run_saved_agent for durable saving.
 """
 
 import asyncio
@@ -42,11 +45,15 @@ from storage import (
     append_run_tool_log, create_run_record, next_run_id, save_run_file, save_run_record,
 )
 from validation import (
+    RUN_PURPOSES,
     FinalResponseValidation, ValidationProblem,
     parse_agent_response_json, parse_profiles_json,
     validate_and_repair_agent_response,
     validate_verifier_issue_continuity,
+    validate_run_purpose,
+    require_run_purpose,
 )
+from legacy_records import effective_run_purpose
 
 
 # Input assembly: select configuration and an exact saved source before execution.
@@ -113,7 +120,7 @@ class VerifierInput(AgentInput):
     input_run_id: str
     input_run: dict
     input_run_fingerprint: str
-    purpose: Literal["development", "comparison", "exploratory"]
+    purpose: Literal["comparison", "dataset_building"]
     retry_of_run_id: str | None
 
 
@@ -154,8 +161,8 @@ def load_profile(
     settings. run_extractor adds observed environment details before
     creating a run record. We do not fabricate versions, hardware, or Git state.
     No profile is selected by position, guessed from a stage, or silently reused.
-    C profile loading prepares coordinator/worker settings; it does not enable
-    a C run command or extend the saved E/V response and run contracts.
+    C reuses these coordinator/worker profiles through its separate controller
+    and saved runner; its identities do not extend E/V answer contracts.
     """
     if stage not in ("extractor", "verifier", "coordinator", "worker"):
         raise ProfileValidationError([ValidationProblem(
@@ -207,7 +214,7 @@ def select_verifier_input_run(
     project_root: Path | str,
     plan_id: str,
     *,
-    purpose: Literal["development", "comparison", "exploratory"],
+    purpose: Literal["comparison", "dataset_building"] = "comparison",
     input_run_id: str | None = None,
     retry_of_run_id: str | None = None,
 ) -> dict:
@@ -217,15 +224,15 @@ def select_verifier_input_run(
     saved-run validation, including its preparation and supporting files. An
     explicit ID never falls back. A failed verifier retry keeps its original E.
     This returns a fresh in-memory snapshot without writing or calling a model.
-    The future verifier runner must save its run_id as input_run_id at startup
-    and use the returned source, answer/issues, and shared tool settings.
+    The saved runner records input_run_id at startup and uses the returned
+    source, answer/issues, and shared tool settings.
 
-    Selection does not enable comparison execution or certify factual accuracy.
-    The runner must still enforce frozen settings before formal comparison.
+    Selection checks provenance, not factual accuracy or the manually tracked
+    final settings and first-successful-run rule.
     """
-    if purpose not in ("development", "comparison", "exploratory"):
+    if purpose not in RUN_PURPOSES:
         raise VerifierInputError([ValidationProblem(
-            "other", "$.purpose", "Select development, comparison, or exploratory."
+            "other", "$.purpose", "Run purpose must be comparison or dataset_building."
         )])
     root = Path(project_root).resolve()
     registry = load_registry(root)
@@ -234,16 +241,19 @@ def select_verifier_input_run(
         raise VerifierInputError([ValidationProblem(
             "reference", "$.plan_id", f"No registered plan named {plan_id!r}."
         )])
-    if purpose in ("development", "comparison") and plan["study_set"] != purpose:
-        raise VerifierInputError([ValidationProblem(
-            "reference", "$.purpose", "Development/comparison work must match the plan's study-set assignment."
-        )])
+    problems = validate_run_purpose(purpose, plan["study_set"])
+    if problems:
+        raise VerifierInputError(problems)
 
     if retry_of_run_id is not None:
         retry = _load_verifier_selection_record(root, plan_id, retry_of_run_id, "retry_of_run_id")
         if retry["status"] != "failed":
             raise VerifierInputError([ValidationProblem(
                 "reference", "$.retry_of_run_id", "Only a failed verifier attempt can be retried."
+            )])
+        if effective_run_purpose(retry["purpose"]) != purpose:
+            raise VerifierInputError([ValidationProblem(
+                "reference", "$.retry_of_run_id", "A verifier retry must retain its original purpose."
             )])
         if input_run_id is not None and input_run_id != retry["input_run_id"]:
             raise VerifierInputError([ValidationProblem(
@@ -252,7 +262,7 @@ def select_verifier_input_run(
         input_run_id = retry["input_run_id"]
 
     if input_run_id is not None:
-        return _eligible_verifier_input(root, plan_id, input_run_id, purpose)
+        return _eligible_verifier_input(root, plan_id, input_run_id, purpose=purpose)
 
     parent = resolve_project_path(root, f"runs/{plan_id}")
     candidates = []
@@ -265,9 +275,9 @@ def select_verifier_input_run(
     # can change during copying/recovery and must not choose a different baseline.
     for _, run_id in sorted(candidates, reverse=True):
         try:
-            return _eligible_verifier_input(root, plan_id, run_id, purpose)
+            return _eligible_verifier_input(root, plan_id, run_id, purpose=purpose)
         except VerifierInputError:
-            # Incomplete, failed, damaged, and purpose-ineligible attempts are
+            # Incomplete, failed, and damaged attempts are
             # not eligible defaults. Explicit selection above remains strict.
             continue
     raise VerifierInputError([ValidationProblem(
@@ -301,17 +311,15 @@ def _load_verifier_selection_record(
     return record
 
 
-def _eligible_verifier_input(root: Path, plan_id: str, run_id: str, purpose: str) -> dict:
+def _eligible_verifier_input(root: Path, plan_id: str, run_id: str, *, purpose: str) -> dict:
     record = _load_verifier_selection_record(root, plan_id, run_id, "input_run_id")
     if record["status"] != "succeeded":
         raise VerifierInputError([ValidationProblem(
             "reference", "$.input_run_id", "Verification requires a successful extractor run."
         )])
-    # Keep the same purpose rule as validate_run_links: exploratory verification
-    # can inspect a comparison E, but an exploratory E cannot enter comparison.
-    if purpose == "comparison" and record["purpose"] != "comparison":
+    if effective_run_purpose(record["purpose"]) != purpose:
         raise VerifierInputError([ValidationProblem(
-            "reference", "$.input_run_id", "A comparison verifier requires a comparison extractor run."
+            "reference", "$.input_run_id", "The selected extractor's purpose must match the verifier purpose."
         )])
     return record
 
@@ -367,7 +375,7 @@ def build_extractor_input(
 
 def build_verifier_input(
     project_root: Path | str, plan_id: str, *, profile_name: str,
-    purpose: Literal["development", "comparison", "exploratory"],
+    purpose: Literal["comparison", "dataset_building"] = "comparison",
     input_run_id: str | None = None, retry_of_run_id: str | None = None,
     config_path: str = "configs/profiles.json",
 ) -> VerifierInput:
@@ -378,6 +386,7 @@ def build_verifier_input(
     retains E's full record and byte fingerprint for reproducibility checks.
     """
     root = Path(project_root).resolve()
+    require_run_purpose(purpose)
     settings = load_profile(root, profile_name, stage="verifier", config_path=config_path)
     baseline = select_verifier_input_run(root, plan_id, purpose=purpose,
         input_run_id=input_run_id, retry_of_run_id=retry_of_run_id)
@@ -955,7 +964,7 @@ async def run_extractor_loop(
 
 async def run_verifier_loop(
     project_root: Path | str, plan_id: str, *, profile_name: str,
-    purpose: Literal["development", "comparison", "exploratory"],
+    purpose: Literal["comparison", "dataset_building"] = "comparison",
     input_run_id: str | None = None, retry_of_run_id: str | None = None,
     config_path: str = "configs/profiles.json", response_directory: str = "responses",
     _transport=None, _on_progress: Callable | None = None,
@@ -965,8 +974,7 @@ async def run_verifier_loop(
     """Verify one pinned E answer with the shared bounded model/tool lifecycle."""
     started = time.monotonic() if _started_monotonic is None else _started_monotonic
     root = Path(project_root).resolve()
-    if purpose == "comparison":
-        raise ValueError("Formal comparison is not yet enabled; validate the verifier and reference workflow and freeze settings first.")
+    require_run_purpose(purpose)
     packet = deepcopy(_prepared_input if _prepared_input is not None else build_verifier_input(
         root, plan_id, profile_name=profile_name, purpose=purpose, input_run_id=input_run_id,
         retry_of_run_id=retry_of_run_id, config_path=config_path))
@@ -1419,7 +1427,7 @@ class _RunRecorder:
 
 async def run_extractor(
     project_root: Path | str, plan_id: str, *, source_path: str, profile_name: str,
-    purpose: Literal["development", "comparison", "exploratory"],
+    purpose: Literal["comparison", "dataset_building"] = "comparison",
     retry_of_run_id: str | None = None, config_path: str = "configs/profiles.json",
     _transport=None,
 ) -> SavedExtractorRun:
@@ -1433,6 +1441,7 @@ async def run_extractor(
     """
     started, started_at = time.monotonic(), _utc_now()
     root = Path(project_root).resolve()
+    require_run_purpose(purpose)
     packet = build_extractor_input(root, plan_id, source_path=source_path,
                                    profile_name=profile_name, config_path=config_path)
     return await _run_saved_agent(root, packet, purpose=purpose, retry_of_run_id=retry_of_run_id,
@@ -1441,15 +1450,14 @@ async def run_extractor(
 
 async def run_verifier(
     project_root: Path | str, plan_id: str, *, profile_name: str,
-    purpose: Literal["development", "comparison", "exploratory"],
+    purpose: Literal["comparison", "dataset_building"] = "comparison",
     input_run_id: str | None = None, retry_of_run_id: str | None = None,
     config_path: str = "configs/profiles.json", _transport=None,
 ) -> SavedVerifierRun:
     """Preserve one full revised answer separately from its selected E input."""
     started, started_at = time.monotonic(), _utc_now()
     root = Path(project_root).resolve()
-    if purpose == "comparison":
-        raise ValueError("Formal comparison is not yet enabled; validate the verifier and reference workflow and freeze settings first.")
+    require_run_purpose(purpose)
     packet = build_verifier_input(root, plan_id, profile_name=profile_name, purpose=purpose,
         input_run_id=input_run_id, retry_of_run_id=retry_of_run_id, config_path=config_path)
     return await _run_saved_agent(root, packet, purpose=purpose, retry_of_run_id=retry_of_run_id,
@@ -1461,19 +1469,21 @@ async def _run_saved_agent(
     config_path: str, started: float, started_at: str, _transport,
 ) -> SavedAgentRun:
     """Record the same lifecycle and failures for both independently saved stages."""
+    require_run_purpose(purpose)
     stage = packet.settings["stage"]
     time_budget = _configuration_time_budget(packet)
     _configuration_request_budget(root, packet)
     # Input assembly already checks connection settings without contacting the
     # API. Credentials are required here, before allocating a research run.
-    require_huggingface_token()
-    if purpose == "comparison":
-        raise ValueError("Formal comparison is not yet enabled; validate the verifier and reference workflow and freeze settings first.")
     if packet.settings["image_input_enabled"]:
         raise ValueError(f"Direct image input is not supported by the saved {stage}.")
-    _, preparation, pages = load_plan_preparation(root, packet.plan_id, packet.source_path)
+    entry, preparation, pages = load_plan_preparation(root, packet.plan_id, packet.source_path)
+    problems = validate_run_purpose(purpose, entry["study_set"])
+    if problems:
+        raise ValueError("; ".join(problem.message for problem in problems))
     if preparation_text_fingerprint(preparation, pages) != packet.source_fingerprint:
         raise ValueError("The selected source changed during saved-run setup.")
+    require_huggingface_token()
     environment = _execution_environment(packet, preparation)
     snapshot = _code_snapshot()
     settings = {**deepcopy(packet.settings), "environment": environment}

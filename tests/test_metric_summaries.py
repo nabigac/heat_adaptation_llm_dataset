@@ -31,7 +31,7 @@ from test_saved_extractor import facts
 
 @pytest.fixture
 def results(calculation_report):
-    result = {"plan_id": "plan_A", "purpose": "development", "method_version": 1,
+    result = {"plan_id": "plan_A", "purpose": "comparison", "method_version": 1,
               **metrics.summarize_assessment(calculation_report)}
     second = deepcopy(result)
     second["plan_id"] = "plan_B"
@@ -119,9 +119,7 @@ def test_no_claims_contributes_known_zero_counts_without_a_zero_ratio(results):
     assert current["status"] == "not_applicable" and current["contributing_plan_count"] == 2
 
 
-def test_failures_remain_unavailable_and_overflow_does_not_become_infinity(results):
-    current = aggregate(results, "failure_reporting", "E", "failed_executions")
-    assert current["status"] == "unavailable" and current["value"] is None
+def test_overflow_remains_unavailable_without_becoming_infinity(results):
     for source in results:
         source["configurations"]["E"]["metrics"]["runtime_seconds"] = metrics._measure(1e308, "seconds")
         source["paired_changes"]["E+V_minus_E"]["metrics"]["runtime_seconds"] = metrics._measure(1e308, "seconds")
@@ -133,7 +131,7 @@ def test_failures_remain_unavailable_and_overflow_does_not_become_infinity(resul
 def test_incompatible_selections_are_rejected(results, damage):
     if damage == "empty": results.clear()
     elif damage == "duplicate": results[1]["plan_id"] = results[0]["plan_id"]
-    elif damage == "purpose": results[1]["purpose"] = "comparison"
+    elif damage == "purpose": results[1]["purpose"] = "outside_study"
     elif damage == "method": results[1]["method_version"] = 2
     else: results[1]["configurations"]["E"]["metrics"]["action_score_percentage"]["unit"] = "tokens"
     with pytest.raises(ValueError):
@@ -163,15 +161,15 @@ def clone_plan(root, new_id="plan_0100"):
     _, preparation, pages = storage.load_plan_preparation(root, PLAN_ID, SOURCE)
     old_pdf_hash = preparation["document_sha256"]
     old_fingerprint = storage.preparation_text_fingerprint(preparation, pages)
-    new_pdf = root / f"data/raw/{new_id}.pdf"
-    new_pdf.write_bytes((root / f"data/raw/{PLAN_ID}.pdf").read_bytes() + b"\n% Second fictional PDF.\n")
+    new_pdf = root / f"data/source_pdfs/{new_id}.pdf"
+    new_pdf.write_bytes((root / f"data/source_pdfs/{PLAN_ID}.pdf").read_bytes() + f"\n% Fictional PDF {new_id}.\n".encode())
     new_pdf_hash = hashlib.sha256(new_pdf.read_bytes()).hexdigest()
     new_preparation = json.loads(json.dumps(preparation).replace(PLAN_ID, new_id).replace(old_pdf_hash, new_pdf_hash))
     new_fingerprint = storage.preparation_text_fingerprint(new_preparation, pages)
     registry = storage.load_registry(root)
     registry["plans"].append(json.loads(json.dumps(registry["plans"][0]).replace(PLAN_ID, new_id).replace(old_pdf_hash, new_pdf_hash)))
     storage.save_registry(root, registry)
-    for parent in ("data/processed", "data/expert_references", "runs"):
+    for parent in ("data/prepared_plans", "data/comparison/expert_references", "runs"):
         destination = root / parent / new_id
         shutil.copytree(root / parent / PLAN_ID, destination)
         for path in destination.rglob("*.json"):
@@ -179,7 +177,7 @@ def clone_plan(root, new_id="plan_0100"):
             revised = text.replace(PLAN_ID, new_id).replace(old_pdf_hash, new_pdf_hash).replace(old_fingerprint, new_fingerprint)
             if revised != text:
                 path.write_text(revised)
-    reference = root / f"data/expert_references/{new_id}/expert_reference.json"
+    reference = root / f"data/comparison/expert_references/{new_id}/expert_reference.json"
     freeze = reference.with_name("reference_freeze.json")
     data = json.loads(freeze.read_text())
     data["reference_sha256"] = hashlib.sha256(reference.read_bytes()).hexdigest()
@@ -210,14 +208,14 @@ def test_loader_recomputes_saved_package_and_ignores_later_live_csv_edits(packag
 def test_end_to_end_two_plan_report_preserves_inputs_and_per_plan_rows(package, monkeypatch):
     root, _, folder = package
     new_id = clone_plan(root)
-    path = assessments.create_assessment(root, new_id, reviewers=["fictional_reviewer"])
+    path = assessments.create_assessment(root, new_id)
     finish(root, path)
     change_row(root, path, "action_scores.csv", score="0.5")
     second = metrics.calculate_metrics(root, new_id, "assessment_0001")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     before = snapshot(root)
     exported = summaries.summarize_metrics(root, [second, folder])
-    assert exported == "data/reports/summary_0001"
+    assert exported == "data/comparison/reports/summary_0001"
     result = json.loads((root / exported / "summary.json").read_text())
     assert validation.validate_metrics_summary(result) == []
     assert [selection["plan_id"] for selection in result["selections"]] == [PLAN_ID, new_id]
@@ -232,9 +230,16 @@ def test_end_to_end_two_plan_report_preserves_inputs_and_per_plan_rows(package, 
     assert hashlib.sha256(csv_path.read_bytes()).hexdigest() == result["summary"]["sha256"]
     with csv_path.open(newline="") as stream:
         rows = list(csv.DictReader(stream))
-    assert len(rows) == 47 * 3
+    assert len(rows) == 44 * 3
+    assert all(row["metric"] != "failed_executions" and row["scope"] != "failure_reporting" for row in rows)
     assert {row["plan_id"] for row in rows if row["level"] == "per_plan"} == {PLAN_ID, new_id}
     assert all(row["contributing_plans"] for row in rows if row["level"] == "aggregate")
+    assert all(item["scope"] != "failure_reporting" for item in result["aggregates"])
+    for field, value in (("scope", "failure_reporting"), ("configuration", "V"),
+                         ("metric", "failed_executions"), ("unit", "executions")):
+        changed = deepcopy(result)
+        changed["aggregates"][0][field] = value
+        assert validation.validate_metrics_summary(changed)
     after = snapshot(root)
     assert all(after[name] == raw for name, raw in before.items())
     assert all(name.startswith(exported + "/") for name in set(after) - set(before))
@@ -246,15 +251,15 @@ def test_altered_result_claims_are_rejected(package, damage):
     def change(result):
         if damage == "metrics": result["configurations"]["E"]["metrics"]["action_score_percentage"]["value"] = 99
         elif damage == "review": result["review"]["complete"] = False
-        elif damage == "metadata": result["assessment"]["metadata"]["reviewers"] = ["Different reviewer"]
+        elif damage == "metadata": result["assessment"]["metadata"]["notes"] = "Different assessment context."
         elif damage == "identity": result["plan_id"] = "plan_9999"
         elif damage == "path": result["assessment"]["path"] = "elsewhere"
         elif damage == "version": result["method_version"] = 2
-        elif damage == "purpose": result["purpose"] = "comparison"
+        elif damage == "purpose": result["purpose"] = "outside_study"
         else: result["code_files"].pop("src/metrics.py")
     rewrite_result(root, folder, change)
     with pytest.raises(ValueError): summaries.summarize_metrics(root, [folder])
-    assert not (root / "data/reports").exists()
+    assert not (root / "data/comparison/reports").exists()
 
 
 @pytest.mark.parametrize("name", ["summary.csv", "assessment_inputs/action_scores.csv", "code/src/metrics.py"])
@@ -284,10 +289,23 @@ def test_rehashed_csv_must_match_the_saved_calculation(package):
         summaries.load_metric_snapshot(root, folder)
 
 
-def test_changed_underlying_model_evidence_is_rejected(package):
+@pytest.mark.parametrize("damage", ["record", "E_candidate", "E+V_candidate", "E_code", "E+V_code"])
+def test_changed_underlying_model_evidence_is_rejected(package, damage):
     root, _, folder = package
-    file = root / f"runs/{PLAN_ID}/run_extract_0001/output.json"
-    file.write_bytes(file.read_bytes() + b"\n")
+    result = json.loads((root / folder / "results.json").read_text())
+    configuration = "E" if damage == "record" else damage.rsplit("_", 1)[0]
+    output = root / result["assessment"]["metadata"]["runs"][configuration]["record_path"]
+    if damage == "record":
+        output.write_bytes(output.read_bytes() + b"\n")
+    elif damage.endswith("_candidate"):
+        report = json.loads(output.with_name("validation_report.json").read_text())
+        file = root / (report["repaired_response_path"] or report["raw_response_path"])
+        candidate = json.loads(file.read_text())
+        candidate["plan_data"]["actions"][0]["action"] = "Changed preserved answer."
+        file.write_text(json.dumps(candidate))
+    else:
+        manifest = json.loads((output.parent / "artifacts/code_fingerprints.json").read_text())
+        (output.parent / "artifacts/code" / next(iter(manifest["sha256"]))).write_bytes(b"changed archive")
     with pytest.raises(ValueError, match="Archived assessment validation failed"):
         summaries.load_metric_snapshot(root, folder)
 
@@ -303,7 +321,7 @@ def test_package_symlinks_are_rejected_inside_project_too(package, name):
         summaries.load_metric_snapshot(root, folder)
 
 
-@pytest.mark.parametrize("value", ["../metrics_0001", "/tmp/metrics_0001", "data/assessments/plan_0099/assessment_0000/metrics_0001", "data/assessments/plan_0099/assessment_0001/metrics_0000", None])
+@pytest.mark.parametrize("value", ["../metrics_0001", "/tmp/metrics_0001", "data/comparison/assessments/plan_0099/assessment_0000/metrics_0001", "data/comparison/assessments/plan_0099/assessment_0001/metrics_0000", None])
 def test_selection_paths_are_canonical(value, tmp_path):
     with pytest.raises(ValueError): summaries.summarize_metrics(tmp_path, [value])
     assert list(tmp_path.iterdir()) == []
@@ -313,23 +331,23 @@ def test_duplicate_plans_are_rejected_before_publication(package):
     root, _, folder = package
     with pytest.raises(ValueError, match="one calculation per plan"):
         summaries.summarize_metrics(root, [folder, folder + "/results.json"])
-    assert not (root / "data/reports").exists()
+    assert not (root / "data/comparison/reports").exists()
 
 
 def test_reports_keep_earlier_versions_and_reserve_interrupted_numbers(package):
     root, _, folder = package
     first = summaries.summarize_metrics(root, [folder])
     before = snapshot(root / first)
-    (root / "data/reports/summary_0004").write_bytes(b"interrupted")
+    (root / "data/comparison/reports/summary_0004").write_bytes(b"interrupted")
     second = summaries.summarize_metrics(root, [folder])
-    assert second == "data/reports/summary_0005" and snapshot(root / first) == before
+    assert second == "data/comparison/reports/summary_0005" and snapshot(root / first) == before
 
 
 def test_reports_cannot_redirect_inside_project(package):
     root, _, folder = package
     target = root / "elsewhere"
     target.mkdir()
-    (root / "data/reports").symlink_to(target, target_is_directory=True)
+    (root / "data/comparison/reports").symlink_to(target, target_is_directory=True)
     with pytest.raises(ValueError, match="symbolic"):
         summaries.summarize_metrics(root, [folder])
     assert list(target.iterdir()) == []
@@ -344,7 +362,7 @@ def test_failed_publication_leaves_partial_evidence_without_completion_marker(pa
     monkeypatch.setattr(storage, "_publish_new_bytes", failed)
     with pytest.raises(OSError, match="publication failure"):
         summaries.summarize_metrics(root, [folder])
-    partial = root / "data/reports/summary_0001"
+    partial = root / "data/comparison/reports/summary_0001"
     assert (partial / "inputs" / PLAN_ID / "results.json").exists()
     assert not (partial / "summary.json").exists()
 
@@ -360,7 +378,7 @@ def test_source_package_changes_during_publication_are_detected(package, monkeyp
     monkeypatch.setattr(storage, "_publish_new_bytes", edited)
     with pytest.raises(ValueError, match="package changed"):
         summaries.summarize_metrics(root, [folder])
-    assert not (root / "data/reports/summary_0001/summary.json").exists()
+    assert not (root / "data/comparison/reports/summary_0001/summary.json").exists()
 
 
 def test_cli_requires_explicit_results_and_reports_contributing_plans(package, capsys):
@@ -368,7 +386,8 @@ def test_cli_requires_explicit_results_and_reports_contributing_plans(package, c
     command = ["summarize_metrics", "--result", folder, "--project-root", str(root)]
     assert cli.main(command) == 0
     output = capsys.readouterr()
-    assert "Summary: data/reports/summary_0001" in output.out and "1 contributing plans" in output.out
+    assert "Summary: data/comparison/reports/summary_0001" in output.out and "1 contributing plans" in output.out
+    assert "Failure counts" not in output.out
     assert cli.main([*command, "--result", folder]) == 1
     assert "one calculation per plan" in capsys.readouterr().err
     with pytest.raises(SystemExit) as error: cli.main(["summarize_metrics"])

@@ -94,8 +94,8 @@ def _input_context(root, plan_id, metadata):
     if (metadata["runs"]["E"]["selected_via"] == "verifier_link"
             and metadata["runs"]["E+V"]["selected_via"] != "explicit"):
         raise ValueError("An E selected through a verifier link requires an explicit V selection.")
-    expected_reference = f"data/expert_references/{plan_id}/expert_reference.json"
-    expected_freeze = f"data/expert_references/{plan_id}/reference_freeze.json"
+    expected_reference = f"data/comparison/expert_references/{plan_id}/expert_reference.json"
+    expected_freeze = f"data/comparison/expert_references/{plan_id}/reference_freeze.json"
     if (metadata["reference"]["path"] != expected_reference
             or metadata["reference"]["freeze_path"] != expected_freeze):
         raise ValueError("The assessment must identify this plan's canonical reference and freeze paths.")
@@ -371,10 +371,10 @@ def validate_assessment(project_root: Path | str, plan_id: str, assessment_id: s
 
     Validity does not require completed judgments. Readiness describes review
     tables, not scientific correctness or whether future metrics have nonzero
-    denominators. Failure-reporting scope is separate from manual completion.
+    denominators.
     """
     return _validate_assessment_folder(project_root, plan_id, assessment_id,
-                                       f"data/assessments/{plan_id}/{assessment_id}")
+                                       f"data/comparison/assessments/{plan_id}/{assessment_id}")
 
 
 def _validate_assessment_folder(project_root, plan_id, assessment_id, folder):

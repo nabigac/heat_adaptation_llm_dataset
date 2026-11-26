@@ -30,7 +30,7 @@ import validation
 
 
 PLAN_ID = "plan_0099"
-SOURCE = f"data/processed/{PLAN_ID}/preparation_02/preparation.json"
+SOURCE = f"data/prepared_plans/{PLAN_ID}/preparation_02/preparation.json"
 PROFILE = "fictional_extractor"
 REAL_DOCUMENT_CLIENT = agents._document_client
 
@@ -41,14 +41,14 @@ REAL_DOCUMENT_CLIENT = agents._document_client
 def project(tmp_path, run_record, monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "fictional-test-token")
     root = tmp_path / "project"
-    pdf = root / f"data/raw/{PLAN_ID}.pdf"
+    pdf = root / f"data/source_pdfs/{PLAN_ID}.pdf"
     pdf.parent.mkdir(parents=True)
     with PdfWriter() as writer:
         for _ in range(3):
             writer.add_blank_page(width=100, height=100)
         writer.write(pdf)
     prep = {
-        "schema_version": 3, "plan_id": PLAN_ID, "pdf_path": f"data/raw/{PLAN_ID}.pdf",
+        "schema_version": 3, "plan_id": PLAN_ID, "pdf_path": f"data/source_pdfs/{PLAN_ID}.pdf",
         "document_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(),
         "source_url": "https://example.org/plan.pdf", "date_accessed": "2026-11-03",
         "prepared_at": "2026-11-06T12:00:00Z", "pages_path": SOURCE.replace("preparation.json", "pages.json"),
@@ -63,7 +63,7 @@ def project(tmp_path, run_record, monkeypatch):
     storage.save_registry(root, {"schema_version": 1, "plans": [{
         "plan_id": PLAN_ID, "plan_title": "Fictional plan", "pdf_path": prep["pdf_path"],
         "document_sha256": prep["document_sha256"], "source_url": prep["source_url"],
-        "date_accessed": prep["date_accessed"], "study_set": "development", "prepared_source_path": SOURCE,
+        "date_accessed": prep["date_accessed"], "study_set": "comparison", "prepared_source_path": SOURCE,
     }]})
     profile = copy.deepcopy(run_record["settings"])
     shared = profile.pop("document_tools")

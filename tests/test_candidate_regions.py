@@ -182,7 +182,7 @@ def register_pdf(project, tmp_path, data=None):
     source.write_bytes(make_pdf() if data is None else data)
     return documents.register_document(project, source, plan_title="Image chart fixture",
         source_url="https://example.org/plan.pdf", date_accessed="2026-11-02",
-        study_set="development")[0]
+        study_set="comparison")[0]
 
 
 @pytest.fixture
@@ -308,7 +308,7 @@ def test_interrupted_image_publication_preserves_previous_attempt_and_registry(
     monkeypatch.setattr(storage, "_publish_new_bytes", fail_crop)
     with pytest.raises(OSError, match="image-publication failure") as caught:
         documents.prepare_document(project, entry["plan_id"])
-    second = project / "data/processed/plan_0001/preparation_02"
+    second = project / "data/prepared_plans/plan_0001/preparation_02"
     assert (second / "images/page_0001.png").is_file()
     assert not (second / "pages.json").exists()
     assert not (second / "preparation.json").exists()
@@ -328,7 +328,7 @@ def test_image_references_and_crop_dimensions_are_checked_on_load(
     _, pages = storage.load_preparation(project, record_path)
     region = pages[0]["image_regions"][0]
     if damage == "wrong-directory":
-        region["image_path"] = "data/raw/elsewhere.png"
+        region["image_path"] = "data/source_pdfs/elsewhere.png"
     elif damage == "wrong-crop-size":
         with Image.new("RGB", (5, 5)) as image:
             image.save(project / region["image_path"])
@@ -364,7 +364,7 @@ def test_version_2_preparations_remain_readable_without_rewriting(project, tmp_p
     legacy = copy.deepcopy(preparation)
     legacy["schema_version"] = 2
     legacy["settings"].pop("candidate_image_min_area")
-    legacy["pages_path"] = "data/processed/plan_0001/preparation_02/pages.json"
+    legacy["pages_path"] = "data/prepared_plans/plan_0001/preparation_02/pages.json"
     legacy_pages = copy.deepcopy(pages)
     for page in legacy_pages:
         page.pop("image_path")

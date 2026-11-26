@@ -5,13 +5,14 @@ Supporting evidence is published once. One Python recorder owns an attempt;
 MCP may add immutable OCR files but never changes the record itself.
 """
 
-import hashlib
 from pathlib import PurePosixPath
 
 from collaboration_contracts import SCHEMAS, validate_bindings, validate_collaboration_response
 from models import _json_object
 import storage
-from validation import _nonfinite_json_numbers, _validate_structure, validate_validation_report
+from artifact_io import canonical_json_bytes
+from validation import parse_utc_timestamp, require_run_purpose, validate_run_purpose, _nonfinite_json_numbers, _validate_structure, validate_validation_report
+from legacy_records import canonical_data_path, effective_run_purpose, validation_view
 
 
 def validate_record(record, *, check_settings=True):
@@ -21,7 +22,7 @@ def validate_record(record, *, check_settings=True):
         ("urn:heat-adaptation:collaboration-response", "collaboration_response.schema.json"),
         ("urn:heat-adaptation:collaboration-config", "collaboration_config.schema.json"),
     ))
-    problems = _validate_structure(record, SCHEMAS / "collaboration_run.schema.json", "C run",
+    problems = _validate_structure(validation_view(record, "collaboration"), SCHEMAS / "collaboration_run.schema.json", "C run",
                                    required_formats=("date", "date-time"), schema_references=references)
     problems += _nonfinite_json_numbers(record)
     if problems:
@@ -31,7 +32,10 @@ def validate_record(record, *, check_settings=True):
         validate_bindings(settings["configuration"], settings["profiles"])
     if settings["document_tools"] != settings["profiles"]["coordinator"]["document_tools"]:
         raise ValueError("Saved shared tools must match the C binding.")
-    if record["ended_at"] is not None and record["ended_at"] < record["started_at"]:
+    # UTC timestamps may use different fractional precision or Z/+00:00 forms.
+    # Compare their times, not the alphabetical order of their representations.
+    if (record["ended_at"] is not None
+            and parse_utc_timestamp(record["ended_at"]) < parse_utc_timestamp(record["started_at"])):
         raise ValueError("Run end must follow its start.")
     if record["budget"] is not None and record["budget"]["limits"] != settings["configuration"]["limits"]:
         raise ValueError("Observed budget limits must match the saved C configuration.")
@@ -63,11 +67,28 @@ def read_record(root, path, *, check_settings=True):
 
 def _source(root, record):
     entry, preparation, pages = storage.load_plan_preparation(root, record["plan_id"], record["source_path"])
-    if entry["study_set"] != "development":
-        raise ValueError("Saved C pilots require a development plan.")
+    problems = validate_run_purpose(record["purpose"], entry["study_set"])
+    if problems:
+        raise ValueError("; ".join(problem.message for problem in problems))
     if storage.preparation_text_fingerprint(preparation, pages) != record["source_fingerprint"]:
         raise ValueError("The preparation text differs from the C startup fingerprint.")
     return preparation, pages
+
+
+def _check_retry(root, record):
+    """Keep retry provenance valid on creation and later read-only loading.
+
+    Read the prior lifecycle without requiring its source/evidence: a failure
+    may have happened before those files could be preserved.
+    """
+    retry_id = record["retry_of_run_id"]
+    if retry_id is None:
+        return
+    previous = read_record(root, f"runs/{record['plan_id']}/{retry_id}/output.json")
+    if (previous["status"] != "failed"
+            or canonical_data_path(previous["source_path"]) != canonical_data_path(record["source_path"])
+            or effective_run_purpose(previous["purpose"]) != effective_run_purpose(record["purpose"])):
+        raise ValueError("Retry links require a failed C attempt for the same source and purpose.")
 
 
 def _evidence_file(root, path, name):
@@ -91,39 +112,39 @@ def _check_files(root, path, record):
 
 def _check_record_evidence(root, path, record):
     """Use the same evidence checks before acceptance and on later loading."""
+    _check_retry(root, record)
     preparation, pages = _source(root, record)
     _check_files(root, path, record)
     if record["status"] == "succeeded":
         folder = str(PurePosixPath(path).parent)
         saved = _json_object(_evidence_file(root, path, folder + "/artifacts/collaboration_input.json").read_bytes())
-        packet = saved["packet"]
+        packet = saved.get("packet")
+        if not isinstance(packet, dict):
+            raise ValueError("Preserved C input must contain a packet object.")
         from agents import _format_plan_source
-        if (packet["plan_id"] != record["plan_id"] or packet["source_path"] != record["source_path"]
-                or packet["source_fingerprint"] != record["source_fingerprint"]
-                or packet["configuration"] != record["settings"]["configuration"]
-                or packet["profiles"] != record["settings"]["profiles"]
-                or saved["preparation"] != preparation or saved["pages"] != pages
-                or packet["page_count"] != preparation["page_count"]
-                or packet["source_metadata"] != {k: preparation[k] for k in ("source_url", "date_accessed")}
-                or packet["source_message"] != {"role": "user", "content": _format_plan_source(preparation, pages)}):
+        expected_packet = {
+            "plan_id": record["plan_id"], "source_path": record["source_path"],
+            "source_fingerprint": record["source_fingerprint"],
+            "configuration": record["settings"]["configuration"], "profiles": record["settings"]["profiles"],
+            "page_count": preparation["page_count"],
+            "source_metadata": {k: preparation[k] for k in ("source_url", "date_accessed")},
+            "source_message": {"role": "user", "content": _format_plan_source(preparation, pages)},
+        }
+        # Reconstruct the trusted input and compare JSON identities. Missing keys
+        # become readable validation errors; bool/int substitutions cannot pass.
+        expected = {"packet": expected_packet, "preparation": preparation, "pages": pages}
+        if canonical_json_bytes(saved) != canonical_json_bytes(expected):
             raise ValueError("Saved C input differs from its source or settings.")
         validate_collaboration_response({k: record[k] for k in ("plan_data", "plan_issues")},
                                         page_count=packet["page_count"], source_metadata=packet["source_metadata"])
-        manifest = _json_object(_evidence_file(root, path, folder + "/artifacts/code_fingerprints.json").read_bytes())
-        for name, digest in manifest["sha256"].items():
-            raw = _evidence_file(root, path, folder + "/artifacts/code/" + name).read_bytes()
-            if hashlib.sha256(raw).hexdigest() != digest:
-                raise ValueError("Preserved C code differs from its startup fingerprint.")
+        storage._check_archived_code(root, path)
         report = _json_object(_evidence_file(root, path, folder + "/validation_report.json").read_bytes())
         if validate_validation_report(report) or not report["valid"]:
             raise ValueError("Successful C output requires a valid final-response report.")
         for key in ("raw_response_path", "repaired_response_path"):
             if report[key] is not None:
                 _evidence_file(root, path, report[key])
-        candidate_path = report["repaired_response_path"] or report["raw_response_path"]
-        candidate = _json_object(_evidence_file(root, path, candidate_path).read_bytes())
-        if candidate != {k: record[k] for k in ("plan_data", "plan_issues")}:
-            raise ValueError("Accepted C answer differs from the preserved final candidate.")
+        storage._check_accepted_candidate(root, path, record, report)
         phases = {(call["actor"], call["phase"]) for call in record["model_calls"]}
         if not {("coordinator", "final"), ("worker_1", "worker_result"), ("worker_2", "worker_result")} <= phases:
             raise ValueError("Successful C output requires both worker results and coordinator final generation.")
@@ -148,8 +169,10 @@ def load_collaboration_record(root, path):
 
 def create_collaboration_record(root, record):
     validate_record(record)
+    require_run_purpose(record["purpose"])
     if record["status"] != "running":
         raise ValueError("A new C attempt must start running.")
+    _check_retry(root, record)
     _source(root, record)
     path = record_path(record)
     directory = storage._run_record_file(root, path).parent

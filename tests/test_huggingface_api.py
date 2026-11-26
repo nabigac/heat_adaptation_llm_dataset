@@ -516,7 +516,7 @@ def test_saved_hosted_run_reuses_tools_validation_and_preserves_evidence(project
         assert req.headers["Authorization"] == "Bearer " + TOKEN
         return httpx.Response(200, json=responses.pop(0))
     saved = asyncio.run(agents.run_extractor(project, loop.PLAN_ID, source_path=loop.SOURCE,
-        profile_name=loop.PROFILE, purpose="development", _transport=httpx.MockTransport(handler)))
+        profile_name=loop.PROFILE, purpose="comparison", _transport=httpx.MockTransport(handler)))
     assert saved.record["status"] == "succeeded" and saved.persistence_error is None
     assert storage.load_run_record(project, saved.record_path) == saved.record
     assert client.calls == [("get_page_text", {"page_number": 1})] and client.closed
@@ -549,7 +549,7 @@ def test_hosted_modes_do_not_accept_valid_json_with_missing_required_fields(proj
         sent.append(json.loads(req.content))
         return httpx.Response(200, json=responses.pop(0))
     saved = asyncio.run(agents.run_extractor(project, loop.PLAN_ID, source_path=loop.SOURCE,
-        profile_name=loop.PROFILE, purpose="development", _transport=httpx.MockTransport(handler)))
+        profile_name=loop.PROFILE, purpose="comparison", _transport=httpx.MockTransport(handler)))
     assert saved.record["status"] == "failed" and saved.persistence_error is None
     assert saved.record["plan_data"] is None and saved.record["plan_issues"] is None
     assert len(sent) == 2 and not responses
@@ -561,14 +561,24 @@ def test_hosted_modes_do_not_accept_valid_json_with_missing_required_fields(proj
     assert storage.load_run_record(project, saved.record_path) == saved.record
 
 
-@pytest.mark.parametrize("reason", ["missing-token", "comparison"])
+@pytest.mark.parametrize("reason", ["missing-token", "outside-study"])
 def test_hosted_pilot_setup_rejections_create_no_run(project, settings, monkeypatch, reason):
     hosted_project(project)
     if reason == "missing-token":
         monkeypatch.delenv("HF_TOKEN")
+    else:
+        registry = storage.load_registry(project)
+        registry["plans"][0]["study_set"] = "expansion"
+        storage.save_registry(project, registry)
+    sent = []
+    def unexpected_request(request):
+        sent.append(request)
+        raise AssertionError("Rejected setup must not start an HTTP request.")
     with pytest.raises(ValueError):
         asyncio.run(agents.run_extractor(project, loop.PLAN_ID, source_path=loop.SOURCE,
-            profile_name=loop.PROFILE, purpose="comparison" if reason == "comparison" else "development"))
+            profile_name=loop.PROFILE, purpose="comparison" if reason == "outside-study" else "comparison",
+            _transport=httpx.MockTransport(unexpected_request)))
+    assert not sent
     assert not list((project/'runs').glob('**/output.json'))
 
 
@@ -591,7 +601,7 @@ def test_saved_deepinfra_run_rejects_python_only_rules(project, settings, monkey
     replies = [envelope(agents.FINAL_READY_SIGNAL), envelope(raw_answer)]
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json=replies.pop(0)))
     saved = asyncio.run(agents.run_extractor(project, loop.PLAN_ID, source_path=loop.SOURCE,
-        profile_name=loop.PROFILE, purpose="development", _transport=transport))
+        profile_name=loop.PROFILE, purpose="comparison", _transport=transport))
     assert saved.record["status"] == "failed" and not replies
     assert saved.record["plan_data"] is None and saved.record["plan_issues"] is None
     folder = (project / saved.record_path).parent

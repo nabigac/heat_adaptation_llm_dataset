@@ -30,11 +30,11 @@ def valid_registry() -> dict:
             {
                 "plan_id": "plan_0001",
                 "plan_title": 'Heat, "Adaptation" — Example City',
-                "pdf_path": "data/raw/plan_0001.pdf",
+                "pdf_path": "data/source_pdfs/plan_0001.pdf",
                 "document_sha256": "a" * 64,
                 "source_url": "https://example.org/heat-plan.pdf",
                 "date_accessed": "2026-11-01",
-                "study_set": "development",
+                "study_set": "comparison",
                 "prepared_source_path": None,
             }
         ],

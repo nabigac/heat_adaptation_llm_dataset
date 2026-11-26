@@ -193,7 +193,7 @@ def test_unknown_or_invalid_baseline_duration_cannot_create_a_timed_budget(
 ):
     set_limit(project, 100, profile=verifier.PROFILE)
     packet = agents.build_verifier_input(project, loop.PLAN_ID,
-        profile_name=verifier.PROFILE, purpose="development")
+        profile_name=verifier.PROFILE, purpose="comparison")
     packet.input_run["elapsed_seconds"] = duration
     with pytest.raises(ValueError, match="recorded elapsed duration"):
         agents._configuration_time_budget(packet)
@@ -334,7 +334,7 @@ def test_e_at_the_prefinal_boundary_leaves_only_the_v_final_request(
 def test_v_investigation_deducts_e_from_the_common_prefinal_allowance(project, baseline, scripted):
     known_extractor_duration(project, baseline, 20)
     protect_final(project, profile=verifier.PROFILE)
-    packet = agents.build_verifier_input(project, loop.PLAN_ID, profile_name=verifier.PROFILE, purpose="development")
+    packet = agents.build_verifier_input(project, loop.PLAN_ID, profile_name=verifier.PROFILE, purpose="comparison")
     budget = agents._configuration_time_budget(packet)
     assert budget["stage_allowance_seconds"] == 80
     assert budget["investigation_allowance_seconds"] == 50

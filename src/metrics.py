@@ -142,10 +142,6 @@ def summarize_assessment(report: assessment_validation.AssessmentValidation) -> 
             "C_minus_E+V": _contrast(configurations, "E+V", "C"),
         },
         "verifier_resolutions": resolutions,
-        "failure_reporting": {
-            "status": "unavailable", "included_attempts": None, "counts": {"E": None, "V": None, "C": None},
-            "reason": "Failure-reporting scope has not been selected; selected successful runs do not establish zero failures.",
-        },
     }
 
 
@@ -162,9 +158,6 @@ def metric_rows(result):
         for name, measure in data["metrics"].items():
             yield "paired_change", comparison, name, measure
     yield "verifier_resolution", "E+V", "expert_confirmed_verifier_resolutions", result["verifier_resolutions"]
-    for configuration in ("E", "V", "C"):
-        yield "failure_reporting", configuration, "failed_executions", _measure(
-            None, "executions", status="unavailable", reason=result["failure_reporting"]["reason"])
 
 
 def _summary_bytes(result):
@@ -221,13 +214,13 @@ def calculate_metrics(project_root: Path | str, plan_id: str, assessment_id: str
     if require_complete and not report.complete:
         raise ValueError("--require-complete requires all manual judgments and output coverage to be settled.")
     data = report.data
-    folder = f"data/assessments/{plan_id}/{assessment_id}"
+    folder = f"data/comparison/assessments/{plan_id}/{assessment_id}"
     review_files = _assessment_snapshot(root, folder, data.fingerprints)
     code = _code_snapshot()
     identifier, destination = _calculation_directory(root, folder)
     result = {
         "schema_version": 1, "method_version": 1, "calculation_id": identifier,
-        "plan_id": plan_id, "assessment_id": assessment_id, "purpose": "development",
+        "plan_id": plan_id, "assessment_id": assessment_id, "purpose": "comparison",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "assessment": {"path": folder, "files": data.fingerprints, "metadata": data.metadata},
         "code_files": {name: assessments._fingerprint(raw) for name, raw in code.items()},

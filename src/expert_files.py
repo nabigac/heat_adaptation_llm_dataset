@@ -19,9 +19,7 @@ import validation
 from expert_templates import REFERENCE_INSTRUCTIONS, blank_action, blank_issue
 
 
-def create_expert_reference(
-    project_root: Path | str, plan_id: str, *, prepared_by: list[str]
-) -> str:
+def create_expert_reference(project_root: Path | str, plan_id: str) -> str:
     """Save a guided starter form once and return its project-relative path.
 
     Registration is required, but preparation and model runs are not. Reuse the
@@ -32,7 +30,6 @@ def create_expert_reference(
     reference = {
         "schema_version": 1,
         "plan_id": entry["plan_id"],
-        "prepared_by": prepared_by,
         "id_counters": {"action": 1, "issue": 1},
         "instructions": list(REFERENCE_INSTRUCTIONS),
         "plan_data": {
@@ -78,12 +75,10 @@ def validate_expert_reference(project_root: Path | str, plan_id: str) -> dict:
     )
 
 
-def freeze_expert_reference(
-    project_root: Path | str, plan_id: str, *, frozen_by: list[str],
-) -> str:
+def freeze_expert_reference(project_root: Path | str, plan_id: str) -> str:
     """Confirm a completed reference is ready and retain its assessment identity.
 
-    The named reviewer confirms scientific readiness. Software checks fields,
+    Invoking this command confirms scientific readiness. Software checks fields,
     source links, and page bounds; it cannot establish completeness or independence.
     No model output is read and no additional reference version is created.
     """
@@ -98,13 +93,13 @@ def freeze_expert_reference(
         raise storage.ExpertReferenceValidationError(problems)
     freeze = {
         "schema_version": 1, "plan_id": plan_id,
-        "reference_path": f"data/expert_references/{plan_id}/expert_reference.json",
+        "reference_path": f"data/comparison/expert_references/{plan_id}/expert_reference.json",
         "reference_sha256": hashlib.sha256(original_bytes).hexdigest(),
         "document_sha256": entry["document_sha256"].lower(),
         "source_url": entry["source_url"], "date_accessed": entry["date_accessed"],
         "page_count": page_count,
         "frozen_at": datetime.now(timezone.utc).isoformat(),
-        "frozen_by": frozen_by, "confirmed_complete": True,
+        "confirmed_complete": True,
     }
     return storage.save_new_expert_reference_freeze(
         project_root, plan_id, freeze, expected_bytes=original_bytes,

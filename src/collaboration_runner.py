@@ -22,6 +22,8 @@ from huggingface_api import request_huggingface_chat, require_huggingface_token
 from models import ModelRequestCancelled, prepare_document_tools
 from quotation_diagnostics import QUOTATION_PAGE_REPORT_PATH, correct_quotation_pages
 import storage
+from validation import require_run_purpose
+from legacy_records import canonical_data_path, effective_run_purpose
 
 
 @dataclass
@@ -181,24 +183,24 @@ def _finish_answer(recorder, packet, outcome, pages, tools):
 
 async def run_collaboration(
     project_root: Path | str, plan_id: str, *, source_path: str,
-    profile_name: str = DEFAULT_COLLABORATION_PROFILE, purpose: str = "development", retry_of_run_id: str | None = None,
+    profile_name: str = DEFAULT_COLLABORATION_PROFILE, purpose: str = "comparison", retry_of_run_id: str | None = None,
     config_path: str = "configs/collaboration.json", model_config_path: str = "configs/profiles.json",
     _transport=None,
 ) -> SavedCollaborationRun:
-    """Run one new development attempt; never import E/V or expert answers."""
+    """Run one new study attempt; never import E/V or expert answers."""
     started, started_at = time.monotonic(), agents._utc_now()
     root = Path(project_root).resolve()
-    if purpose != "development":
-        raise ValueError("Saved C pilots currently allow development purpose only.")
-    packet = build_collaboration_input(root, plan_id, source_path=source_path, profile_name=profile_name,
+    require_run_purpose(purpose)
+    packet = build_collaboration_input(root, plan_id, source_path=source_path, purpose=purpose, profile_name=profile_name,
                                        config_path=config_path, model_config_path=model_config_path)
     require_huggingface_token()  # Authenticate before allocating any run files.
     preparation, pages = _check_source(root, packet)
     if retry_of_run_id is not None:
         storage._require_run_identifier(retry_of_run_id)
         previous = saved_storage.load_collaboration_record(root, f"runs/{plan_id}/{retry_of_run_id}/output.json")
-        if (previous["status"] != "failed" or previous["source_path"] != source_path
-                or previous["purpose"] != purpose):
+        if (previous["status"] != "failed"
+                or canonical_data_path(previous["source_path"]) != canonical_data_path(source_path)
+                or effective_run_purpose(previous["purpose"]) != purpose):
             raise ValueError("Retry links require a failed C attempt for the same source and purpose.")
     bridge = SimpleNamespace(plan_id=plan_id, source_path=source_path,
                              source_fingerprint=packet.source_fingerprint, settings=packet.profiles["coordinator"])

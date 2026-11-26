@@ -1,8 +1,8 @@
 # Design Doc: Heat Adaptation LLM Dataset
 
-**Research design · updated 2026-11-24**
+**Research design · updated 2026-11-25**
 
-[Sample](#study-sample) · [Workflow](#workflow-and-comparison) · [Evaluation](#4-evaluation) · [Coding rules](#f-action-coding-rules) · [Calculations](#g-evaluation-measures-and-calculations)
+[Sample](#study-sample) · [Workflow](#workflow-and-comparison) · [Evaluation](#4-evaluation) · [Dataset building](#5-post-study-dataset-building) · [Coding rules](#f-action-coding-rules) · [Calculations](#g-evaluation-measures-and-calculations)
 
 ## 1. Context and problem
 
@@ -20,12 +20,12 @@ The study compares three configurations:
 
 ## 2. Research aim and objectives
 
-Develop and evaluate an expert–LLM extraction workflow and produce a curated pilot instruction dataset.
+Develop and evaluate an expert–LLM extraction workflow, then build a heat adaptation action dataset using the selected configuration.
 
-1. **Understand how experts and LLMs build the workflow.** Document problems, revisions, and practical lessons from development.
+1. **Understand how experts and LLMs build the workflow.** Document problems, revisions, and practical lessons from refinement.
 2. **Evaluate verification and collaboration.** Compare E, E+V, and C for action accuracy/completeness, evidence, unresolved issues, and successful-run resource use.
 
-The workflow is agentic: models can request document tools while completing their tasks. A future instruction example will pair task instructions and source input with an expert-curated answer. Fine-tuning and wider dataset expansion are deferred.
+The workflow is agentic: models can request document tools while completing their tasks. Dataset building follows the comparison study; instruction export and fine-tuning are deferred.
 
 ## 3. Methods
 
@@ -41,17 +41,19 @@ Experts screen eligibility and select varied lengths, layouts, and plan types, e
 
 ### Study sample
 
+All ten plans belong to one comparison sample. Use two first to build and test the workflow, then extend execution to the other eight. Study runs use `purpose: comparison`; manually recorded versions and run IDs identify the final study results.
+
 | Stage | Plans | Use |
 | --- | --- | --- |
-| Initial development | 2 | Build the workflow, refine prompts/tools, and check execution. |
-| Additional sample | 8 | Extend the study after initial development; document further refinements. |
+| Initial refinement | 2 | Build the workflow, refine prompts/tools, and check execution. |
+| Additional sample | 8 | Extend execution after initial refinement; document further revisions. |
 | Final comparison | All 10 | Run and assess E, E+V, and C under the final settings. |
 
-The original two plans are rerun and remain in the main comparison. Record selection reasons, document characteristics, and which plans informed refinements.
+Record selection reasons, document characteristics, and which plans informed refinements. Preserve earlier outputs; rerun all ten under the [final selection rules](#final-versions-and-output-selection).
 
 ### Extracted dataset and action records
 
-Each output contains three components:
+Each model output contains three components:
 
 | Component | Contents |
 | --- | --- |
@@ -67,7 +69,7 @@ The [appendix](#appendix-dataset-coding-rules-and-evaluation) defines all fields
 
 Evidence uses exact continuous quotations and every physical PDF page containing the quoted words, counted from 1. Separate passages have separate evidence entries. Quotations preserve wording, punctuation, and line breaks. When optical character recognition (OCR) is unreliable, use locatable excerpts and record unresolved gaps.
 
-Group concerns about one action into one issue. Source problems and possible omissions may have no action link. V retains E issue IDs/origins and records its claimed fixes. C maintains independent action/issue identities. Experts record later corrections in separate curated copies.
+In model outputs, group concerns about one action into one issue. Source problems and possible omissions may have no action link. V retains E issue IDs/origins and records its claimed fixes. C maintains independent action/issue identities. Expert corrections follow the comparison in separate dataset-building review drafts.
 
 ### Workflow and comparison
 
@@ -79,16 +81,16 @@ Group concerns about one action into one issue. Source problems and possible omi
 
 All inference uses Hugging Face with DeepInfra as the fixed host. PDF preparation, EasyOCR, and source tools run locally through MCP, the interface connecting models to document tools. C may run independent assignments in parallel, exchange relevant findings, revise a shared draft, and assemble one answer. Both workers contribute; roles remain fixed while tasks vary.
 
-During development, experts review outputs against the PDFs and refine prompts, coding guidance, tools, and review procedures. Preserve examples showing the problem, revision, and observed outcome. Current development results and implementation limits are described in [IMPLEMENTATION.MD](IMPLEMENTATION.MD#current-development-checkpoint).
+During refinement, experts review outputs against the PDFs and revise prompts, coding guidance, tools, and review procedures. Preserve examples showing the problem, revision, and observed outcome. Current results and implementation limits are described in [IMPLEMENTATION.MD](IMPLEMENTATION.MD#current-checkpoint).
 
 #### Final versions and output selection
 
 Version and run selection are tracked manually:
 
 1. Record the final code version, model/host identities, prompts, generation controls, tools, budgets, timeouts, validation/repair policies, and each plan's source/preparation version. Fix coding and scoring rules.
-2. Run all ten plans. For each, record the first validated successful E, its first successful linked V, and the first successful independent C. V retries retain that E.
+2. Run all ten plans under the final settings with `purpose: comparison`. For each, record the first validated successful E, its first successful linked V, and the first successful independent C. V retries retain that E. The purpose label alone does not identify final selections.
 3. Retry execution failures with unchanged settings. **Any workflow change requires rerunning all three configurations across all ten plans**, including earlier successes.
-4. Check the manual log and saved evidence before assessment/reporting: all **30 selected outputs** must use the final versions. Keep earlier outputs as development history.
+4. Check the manual log and saved evidence before assessment/reporting: all **30 selected outputs** must use the final versions. Keep earlier outputs as history.
 
 Each configuration uses its own fixed definition across plans. C's task sequence may adapt within that definition. No software command to create or freeze a study round is required.
 
@@ -100,13 +102,15 @@ A submitted tool timeout fails the execution, preserves available evidence/late 
 
 All outputs receive the same quotation-location checks. A single-page citation is corrected only when its readable cited page does not match and the full quotation matches exactly one other available physical page. Matching tolerates whitespace differences while preserving wording/punctuation. Ambiguous and unmatched quotations remain flagged. Raw replies, candidates, repairs, settings, tool activity, and available usage are preserved. V receives processed E; assessment uses processed outputs before curation.
 
+Successful-run finalization and loading check accepted answers against preserved final candidates and archived code against startup checksums. Saved C inputs must match their source/settings; chronology uses parsed UTC times. These checks establish record consistency, while experts judge accuracy.
+
 ## 4. Evaluation
 
 ### Expert reference and scoring
 
-Experts code one reference per plan from the original PDF using the same activity rules. Complete it before viewing outputs where no prior exposure has occurred; record exposure from initial development or later refinement. Review, validate, and freeze the completed form before scoring all three outputs against it.
+Experts code one reference per plan from the original PDF using the same activity rules. Complete it before viewing outputs where no prior exposure has occurred; record exposure from initial testing or later refinement. Review, validate, and freeze the completed form before scoring all three outputs against it.
 
-Reference freezing records exact reference/PDF fingerprints and reviewer confirmation. Software checks structure and links; experts establish completeness and source meaning. Reference IDs remain stable and deleted IDs are not reused. Guided placeholders must be completed or removed. Reference issues use expert identities and remain separate from model issues.
+Reference freezing records exact reference/PDF fingerprints, time, and readiness confirmation. Reference, assessment, and review records do not capture names or study IDs. Software checks structure and links; experts establish completeness and source meaning. Reference IDs remain stable and deleted IDs are not reused. Guided placeholders must be completed or removed. Reference issues use the expert role and remain separate from model issues.
 
 Match activities by meaning. Combine split/duplicate output records, retain all substantive claims, and assess each activity in a bundled record separately. Each reference activity receives one score:
 
@@ -130,13 +134,13 @@ Required details include description, type, status, places, recipients, costs/be
 
 Check activities absent from the reference against the PDF before judging them unsupported. Confirm a V resolution only when every grouped concern is addressed. Describe C issue handling and agent disagreements in notes, without matching its issue IDs to E's.
 
-Experts fill prepopulated assessment CSVs; generated metadata identifies inputs, reviewers, and fingerprints. Software validates records and calculates measures without supplying judgments. Curated answers are prepared separately after assessment. See [calculation rules](#g-evaluation-measures-and-calculations) and the [worked scoring example](IMPLEMENTATION.MD#worked-scoring-example).
+Experts fill prepopulated assessment CSVs; generated metadata identifies inputs and fingerprints. Use explicit run IDs from the manual log for final assessments; latest-run defaults support earlier review. Assessments accept only comparison-purpose outputs, including when selecting defaults. Software validates records and calculates measures without supplying judgments or certifying the final settings/sample. See [calculation rules](#g-evaluation-measures-and-calculations) and the [worked scoring example](IMPLEMENTATION.MD#worked-scoring-example).
 
 ### Analysis and limitations
 
 Compare E+V minus E and C minus E+V within each plan. Report all ten plans, counts/denominators, and equal-weight means of valid per-plan percentages. Each paired summary uses plans with both measures available. Identify contributing/excluded plans for every measure.
 
-Pending judgments and missing observations remain `null`; zero denominators are not applicable. Runtime/token totals cover selected successful runs, excluding retries, superseded work, preparation, and human review. Failures remain development history, outside quantitative outcomes.
+Pending judgments and missing observations remain `null`; zero denominators are not applicable. Runtime/token totals cover selected successful runs, excluding retries, superseded work, preparation, and human review. Failures remain execution history, outside quantitative outcomes.
 
 Interpretation will account for:
 
@@ -145,6 +149,24 @@ Interpretation will account for:
 - PDF layout/OCR errors and undisclosed hosted model/serving details.
 - Expert grouping/scoring variability and possible omissions or errors in the reference.
 - Coarse scores, unequal detail within grouped activities, and issue counts that depend on what models notice.
+
+## 5. Post-study dataset building
+
+Choose one configuration and rerun it with `purpose: dataset_building`, including the original ten plans. Those plans retain `study_set: comparison`; additional plans use `study_set: expansion`. V requires an E with the same purpose, and retries retain their purpose. Purpose controls eligibility and bookkeeping without changing extraction rules. Comparison assessments accept only comparison-purpose runs.
+
+Experts review **remaining open issues only**. Retain every original issue; open concerns and newly raised expert concerns require expert resolutions before finalization. Preserve model-resolved statuses/resolutions. After action merges/removals, update links while retaining the original concerns. Record `review_scope: open_issues_only`; completeness, omissions, and model-resolved concerns remain outside this review scope.
+
+| Stage | Saved product |
+| --- | --- |
+| Review draft | Editable plan data/issues and an exact selected successful dataset-building run. |
+| Completed reviewed plan | Clean `metadata`/`actions`, a separate `review_record.json`, and exact draft/run copies. |
+| Combined dataset | `heat_action_dataset.json` with one entry per plan; `dataset_contents.json` and preserved review copies identify its inputs and workflow. |
+
+`finalize_reviewed_plan` checks issues before removing them from the data product. `build_heat_action_dataset` requires explicit completed review versions, rejects duplicate plan IDs/original PDFs, and enforces one recorded workflow. Compare model/provider settings, prompts, tools, budgets, software-version information, and archived code; E+V includes both linked stages and C includes its workers. Matching recorded information cannot verify undisclosed hosted revisions.
+
+Completed and combined data contain **no issue objects**; separate review evidence retains the decisions and source limitations. Further edits start a new draft, and each combined build preserves a new version. Read-only `validate_reviewed_plan` and `validate_heat_action_dataset` recheck saved outputs and evidence without changing them or supplying expert judgments.
+
+Comparison work uses `data/comparison/`; drafts, reviewed plans, and combined versions use `data/dataset_building/`. PDFs, preparations, and model runs are shared across stages. The core software path is implemented; real-plan pilots and study execution remain. Instruction export and fine-tuning are deferred. See the [command workflow](README.md#7-run-the-chosen-configuration-for-dataset-building).
 
 ## Appendix: dataset, coding rules, and evaluation
 
@@ -200,7 +222,7 @@ Within `plan_data`:
 | `action_recipient` | string or null | All stated intended populations or affected groups, retaining relevant local or phase-specific distinctions. |
 | `action_cost` | string or null | Amounts, currency/units, periods, cost character, and qualifications, with each amount linked in the description to its activity, location, or phase. Shared amounts are identified. |
 | `action_benefit` | string or null | Outcomes, quantities, affected groups, comparisons, timing, and qualifications, including local or phase-specific differences and whether expected, modelled, or observed. |
-| `evidence` | list of evidence objects | Quotations supporting the action and its details. An empty list is accompanied by a review issue. Acceptance as an unqualified curated record requires supporting evidence. |
+| `evidence` | list of evidence objects | Quotations supporting the action and its details. An empty list requires a linked issue; any remaining source limitation is retained in the completed review record. |
 
 Each evidence object:
 
@@ -221,16 +243,16 @@ Each issue object:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `issue_id` | string | Stable issue ID retained through revisions and curation within its workflow. C IDs are independent of E/E+V. |
+| `issue_id` | string | Stable issue ID retained through revisions and review within its workflow. C IDs are independent of E/E+V. |
 | `related_action_id` | string or null | Affected action ID. Null for an omission, a problem affecting the plan or its source, or a removed action. |
 | `issue_description` | string | Grouped concerns, including relevant pages and any affected actions not linked directly. |
 | `issue_type` | enum or null; optional | Classification of the concern, using the values in [appendix E](#issue-types). |
-| `issue_origin` | enum | Agent that first raised the issue: `extractor` or `verifier` in E/E+V; `worker_1` (Inkling), `worker_2` (DeepSeek), or `coordinator` (GLM) in C. Retained through later review and curation. |
+| `issue_origin` | enum | Agent that first raised the issue: `extractor` or `verifier` in E/E+V; `worker_1` (Inkling), `worker_2` (DeepSeek), or `coordinator` (GLM) in C. New expert-added review issues use `expert`; original origins remain unchanged. |
 | `issue_status` | enum | `open` when concerns still require attention, or `resolved` when a resolution has been recorded. Model resolutions remain claims for expert assessment. |
-| `resolved_by` | enum or null | Agent that resolved the issue, using the same workflow-specific identities as `issue_origin`, or `expert` in a curated copy after assessment. Null while open. |
+| `resolved_by` | enum or null | Agent that resolved the issue, using the same workflow-specific identities as `issue_origin`, or `expert` for a resolution in a dataset-building review draft. Null while open. |
 | `resolution` | string or null | Explanation addressing every concern when resolved; null while open. |
 
-An open issue has null `resolved_by` and `resolution`. A resolved issue identifies who resolved it and explains how all grouped concerns were addressed. Reopening retains its ID and origin. Expert assessment of V's claimed resolutions is recorded in manual review notes. A subsequent expert fix is recorded in a curated copy of the dataset. Independent expert-reference issues are defined in the [reference form](IMPLEMENTATION.MD#expert-reference-form).
+An open issue has null `resolved_by` and `resolution`. A resolved issue records the resolving role and explains how all grouped concerns were addressed. Model verification may reopen an issue while retaining its ID/origin; plan review preserves model-resolved statuses and resolutions. Expert assessment of V's claimed resolutions is recorded in the assessment. Later expert fixes belong in review drafts from separate dataset-building runs. Independent expert-reference issues are defined in the [reference form](IMPLEMENTATION.MD#expert-reference-form).
 
 ### E. Category definitions
 
@@ -307,7 +329,7 @@ The final comparison uses the manually recorded E, linked E+V, and independent C
 | Successful processing runtime | Measured processing duration, in seconds. | E uses extractor duration; E+V adds verifier duration. C uses its complete elapsed duration, without summing overlapping worker durations. |
 | Tokens used | Sum of provider-reported input and output tokens across generation calls, with the two components retained. | E uses extractor calls; E+V adds verifier calls. C includes every coordinator and worker call once. |
 
-Runtime covers setup/loading, model and tool requests, saving, validation, permitted repairs, and cleanup. C duration runs from its own start to completion, including coordination and parallel work. These measures cover the selected successful runs in the final round. Failed attempts, retries, and superseded rounds remain in execution records and development notes and are outside the reported runtime/token totals. Preparation, human review, and gaps between attempts also fall outside processing runtime.
+Runtime covers setup/loading, requests, tools, saving, validation, permitted repairs, and cleanup. C uses its own elapsed duration, counting overlapping work once. Totals cover selected successful runs; failed/superseded attempts remain history. Failure counts, preparation, human review, and gaps between attempts are outside the reported measures.
 
 #### After expert assessment
 
@@ -324,15 +346,19 @@ For example, six scores of 1, two of 0.5, and two omissions among ten reference 
 
 An activity can receive full content credit while its supplied evidence is inadequate, for example when its description is correct but its page citation is wrong. Experts check all supplied evidence, recording one adequacy judgment and explanation per output activity. The explanation identifies important quotation, citation, or coverage failures.
 
-For issue assessment, only initially open E issues that V marks resolved require a resolution judgment. A claimed resolution is confirmed when source review shows that every grouped concern was addressed. Comparisons use the saved processed outputs before expert curation, while expert fixes are recorded in curated copies. Python citation repairs are logged separately and do not create a model-claimed issue resolution. More open issues can reflect improved detection, so counts are interpreted alongside quality scores and examples.
+For issue assessment, only initially open E issues that V marks resolved require a resolution judgment. A claimed resolution is confirmed when source review shows that every grouped concern was addressed. Comparisons use the saved processed outputs before expert curation, while later expert fixes are recorded in dataset-building review drafts. Python citation repairs are logged separately and do not create a model-claimed issue resolution. More open issues can reflect improved detection, so counts are interpreted alongside quality scores and examples.
 
 #### Paired comparisons and reporting conventions
 
-Paired changes are calculated within plans as E+V minus E and C minus E+V, with percentage differences expressed in percentage points. Results are reported for each plan with counts and denominators. The final summary will include all ten plans using the same documented workflow settings. A descriptive overall summary uses the mean of valid per-plan percentages, giving each plan equal weight. Paired summaries average within-plan changes over plans with both required measures. Counts and successful-run resource use are reported as totals by configuration; confirmed/claimed V resolutions use the same contributing plans for both counts. Each summary selects one exact saved calculation per plan and identifies contributing and excluded plans for every measure. Manually check that all 30 outputs are complete and use the final settings. Unavailable judgments and zero denominators remain explicit.
+| Report | Rule |
+| --- | --- |
+| Per-plan results | Retain counts/denominators and one exact saved calculation per plan. Manually check all 30 selected outputs against final settings. |
+| Percentages | Equal-weight mean of valid per-plan percentages across the ten-plan sample. |
+| Paired changes | E+V minus E and C minus E+V within plans, then mean over eligible pairs; percentage changes use percentage points. |
+| Counts/resources | Labelled configuration totals; confirmed/claimed V resolutions use the same contributing plans. |
+| Missing values | `null` for pending/unavailable observations; missing required usage/duration makes its total unavailable. Zero-denominator percentages are not applicable. |
 
-The value `null` indicates pending judgments or unavailable measurements. Missing required usage or duration makes the corresponding total unavailable. Zero denominators are not applicable. An output activity absent from the reference is checked against the PDF for source support; absence alone does not make it unsupported. Reference coverage gaps are recorded in manual review notes. Any activity whose support is still undetermined keeps the relevant quality measures pending.
-
-The study reports three quality measures across all configurations, open issue counts across all configurations, and expert-confirmed verifier resolutions for E+V only. Review notes describe quotation, citation, addition, and issue examples, including C's collaboration process. Manually recorded judgments provide the inputs to the agreed measures.
+Identify contributing/excluded plans for every measure. Undetermined support keeps affected quality measures pending. Check activities absent from the reference against the PDF and record reference gaps; absence alone does not establish unsupported content. Review notes retain quotation, citation, addition, issue, and C collaboration examples.
 
 <details>
 <summary>Fictional JSON example</summary>

@@ -31,7 +31,7 @@ def no_model_requests(monkeypatch):
 
 @pytest.fixture
 def save_extractor(project, run_record):
-    def publish(run_id, *, status="succeeded", purpose="development"):
+    def publish(run_id, *, status="succeeded", purpose="comparison"):
         record = copy.deepcopy(run_record)
         record.update(run_id=run_id, purpose=purpose)
         active = saved.running(record, run_id)
@@ -67,12 +67,33 @@ def save_verifier(project, input_path, *, status="failed"):
     return path
 
 
-def select(project, *, plan_id=PLAN_ID, purpose="development", **kwargs):
+def select(project, *, plan_id=PLAN_ID, purpose="comparison", **kwargs):
     before = saved.snapshot(project)
     try:
         return agents.select_verifier_input_run(project, plan_id, purpose=purpose, **kwargs)
     finally:
         assert saved.snapshot(project) == before
+
+
+@pytest.mark.parametrize("purpose", ["comparison", "dataset_building"])
+def test_default_filters_newer_extractors_by_verifier_purpose(project, save_extractor, purpose):
+    save_extractor("run_extract_0001", purpose=purpose)
+    other = "dataset_building" if purpose == "comparison" else "comparison"
+    save_extractor("run_extract_0002", purpose=other)
+    assert select(project, purpose=purpose)["run_id"] == "run_extract_0001"
+    with pytest.raises(agents.VerifierInputError, match="purpose"):
+        select(project, purpose=purpose, input_run_id="run_extract_0002")
+
+
+@pytest.mark.parametrize("purpose", ["comparison", "dataset_building"])
+def test_other_purpose_never_supplies_a_default_or_retry(project, save_extractor, purpose):
+    other = "dataset_building" if purpose == "comparison" else "comparison"
+    path = save_extractor("run_extract_0001", purpose=other)
+    save_verifier(project, path)
+    with pytest.raises(agents.VerifierInputError, match="No validated, successful"):
+        select(project, purpose=purpose)
+    with pytest.raises(agents.VerifierInputError, match="purpose"):
+        select(project, purpose=purpose, retry_of_run_id="run_verify_0001")
 
 
 def set_study_set(project, study_set):
@@ -167,40 +188,30 @@ def test_unknown_or_unsafe_plan_id_is_rejected(project, save_extractor, plan_id)
 
 @pytest.mark.parametrize("purpose", ["analysis", "", None])
 def test_unknown_purpose_is_rejected(project, purpose):
-    with pytest.raises(agents.VerifierInputError, match="Select development"):
+    with pytest.raises(agents.VerifierInputError, match="purpose"):
         select(project, purpose=purpose)
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-@pytest.mark.parametrize("study_set,purpose,extractor_purpose,allowed", [
-    ("development", "development", "development", True),
-    ("development", "development", "exploratory", True),
-    ("comparison", "comparison", "comparison", True),
-    ("comparison", "comparison", "exploratory", False),
-    ("comparison", "exploratory", "comparison", True),
-    ("expansion", "exploratory", "exploratory", True),
-    ("development", "comparison", "development", False),
-    ("comparison", "development", "comparison", False),
-    ("expansion", "development", "exploratory", False),
-])
-def test_default_and_explicit_selection_share_purpose_rules(
-    project, save_extractor, explicit, study_set, purpose, extractor_purpose, allowed,
+@pytest.mark.parametrize("study_set,allowed", [("comparison", True), ("expansion", False)])
+def test_default_and_explicit_selection_check_the_comparison_sample(
+    project, save_extractor, explicit, study_set, allowed,
 ):
+    save_extractor("run_extract_0001")
     set_study_set(project, study_set)
-    save_extractor("run_extract_0001", purpose=extractor_purpose)
     kwargs = {"input_run_id": "run_extract_0001"} if explicit else {}
     if allowed:
-        assert select(project, purpose=purpose, **kwargs)["run_id"] == "run_extract_0001"
+        assert select(project, **kwargs)["run_id"] == "run_extract_0001"
     else:
         with pytest.raises(agents.VerifierInputError):
-            select(project, purpose=purpose, **kwargs)
+            select(project, **kwargs)
 
 
-def test_comparison_skips_newer_exploratory_extraction(project, save_extractor):
+def test_comparison_default_selects_the_latest_eligible_extraction(project, save_extractor):
     set_study_set(project, "comparison")
     save_extractor("run_extract_0001", purpose="comparison")
-    save_extractor("run_extract_0002", purpose="exploratory")
-    assert select(project, purpose="comparison")["run_id"] == "run_extract_0001"
+    save_extractor("run_extract_0002", purpose="comparison")
+    assert select(project)["run_id"] == "run_extract_0002"
 
 
 def test_selected_snapshot_keeps_saved_source_and_settings(project, save_extractor):
@@ -214,7 +225,7 @@ def test_selected_snapshot_keeps_saved_source_and_settings(project, save_extract
     storage.save_registry(project, registry)
     assert chosen == expected
     assert select(project, input_run_id=chosen["run_id"]) == expected
-    assert chosen["source_path"] == "data/processed/plan_0099/preparation_02/preparation.json"
+    assert chosen["source_path"] == "data/prepared_plans/plan_0099/preparation_02/preparation.json"
     chosen["settings"]["generation"]["max_output_tokens"] = 1
     assert storage.load_run_record(project, original) == expected
 

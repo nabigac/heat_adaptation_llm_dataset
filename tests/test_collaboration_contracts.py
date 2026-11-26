@@ -40,7 +40,7 @@ def configured(project):
 
 def test_source_builder_ignores_baseline_and_expert_files_and_writes_nothing(configured):
     for name in (f"runs/{PLAN_ID}/run_extract_0001/output.json",
-                 f"data/expert_references/{PLAN_ID}/expert_reference.json"):
+                 f"data/comparison/expert_references/{PLAN_ID}/expert_reference.json"):
         path = configured / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('not valid JSON; must never be read')
@@ -76,17 +76,17 @@ def test_invalid_binding_and_limits_fail_before_source_assembly(configured, dama
         load_collaboration_configuration(configured)
 
 
-def test_comparison_input_remains_disabled(configured):
+def test_comparison_sample_supplies_c_input(configured):
     path = configured / 'data/registry/plans.json'
     registry = json.loads(path.read_text())
     registry['plans'][0]['study_set'] = 'comparison'
     path.write_text(json.dumps(registry))
-    with pytest.raises(CollaborationContractError, match="development"):
-        build_collaboration_input(configured, PLAN_ID, source_path=SOURCE)
+    packet = build_collaboration_input(configured, PLAN_ID, source_path=SOURCE)
+    assert packet.plan_id == PLAN_ID and packet.source_path == SOURCE
 
 
 def test_changed_original_pdf_is_rejected_by_the_shared_source_checks(configured):
-    with (configured / f"data/raw/{PLAN_ID}.pdf").open("ab") as source:
+    with (configured / f"data/source_pdfs/{PLAN_ID}.pdf").open("ab") as source:
         source.write(b"changed after preparation")
     with pytest.raises(PreparationValidationError):
         build_collaboration_input(configured, PLAN_ID, source_path=SOURCE)

@@ -77,8 +77,8 @@ def test_parses_each_run_state_and_role_without_changing_values(run_record: dict
     assert run_record == before
 
 
-@pytest.mark.parametrize("purpose", ["development", "comparison", "exploratory"])
-def test_accepts_each_defined_purpose(run_record: dict, purpose: str) -> None:
+@pytest.mark.parametrize("purpose", ["comparison", "dataset_building"])
+def test_accepts_current_run_purposes(run_record: dict, purpose: str) -> None:
     run_record["purpose"] = purpose
     assert validation.validate_run_record(run_record, page_count=5) == []
 
@@ -323,9 +323,9 @@ def test_run_identifiers_must_be_safe_path_components(run_record: dict, field: s
 
 
 @pytest.mark.parametrize("path", [
-    "data/processed/plan_0001/preparation_02/preparation.json",
-    "data/processed/plan_0099/preparation_00/preparation.json",
-    "data/processed/plan_0099/preparation_02/pages.json",
+    "data/prepared_plans/plan_0001/preparation_02/preparation.json",
+    "data/prepared_plans/plan_0099/preparation_00/preparation.json",
+    "data/prepared_plans/plan_0099/preparation_02/pages.json",
     "../preparation.json", "/tmp/preparation.json", "C:/preparation.json",
 ])
 def test_source_path_must_identify_this_plans_preserved_preparation(run_record: dict, path: str) -> None:

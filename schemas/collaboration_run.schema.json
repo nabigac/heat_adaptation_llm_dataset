@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:heat-adaptation:collaboration-run",
-  "title": "Saved development collaboration attempt",
+  "title": "Saved collaboration attempt",
   "description": "Separate from E/V run records. Python checks bindings, source integrity, evidence paths, and lifecycle transitions.",
   "type": "object",
   "required": [
@@ -43,7 +43,8 @@
       "const": "collaboration"
     },
     "purpose": {
-      "const": "development"
+      "type": "string",
+      "enum": ["comparison", "dataset_building"]
     },
     "retry_of_run_id": {
       "type": [

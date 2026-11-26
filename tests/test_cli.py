@@ -41,7 +41,7 @@ def add_arguments(project: Path, tmp_path: Path) -> list[str]:
         "--date-accessed",
         "2026-11-02",
         "--study-set",
-        "development",
+        "comparison",
     ]
 
 
@@ -72,7 +72,7 @@ def test_add_calls_registration_and_reports_saved_paths(
 
     assert result == 0
     assert "Registered plan_0001." in output.out
-    assert "Original PDF: data/raw/plan_0001.pdf" in output.out
+    assert "Original PDF: data/source_pdfs/plan_0001.pdf" in output.out
     assert "Registry: data/registry/plans.json" in output.out
     assert "Preparation: not_prepared" in output.out
     assert output.err == ""
@@ -113,7 +113,7 @@ def test_list_shows_registered_metadata(
 
     assert "PLAN_ID" in output.out
     assert "plan_0001" in output.out
-    assert "development" in output.out
+    assert "comparison" in output.out
     assert "not_prepared" in output.out
     assert "Example Heat Plan — 2026" in output.out
     assert output.err == ""
@@ -128,7 +128,7 @@ def test_default_project_is_current_directory(
     assert capsys.readouterr().out == "No registered documents.\n"
 
 
-@pytest.mark.parametrize("missing_flag", ["--title", "--source-url", "--date-accessed", "--study-set"])
+@pytest.mark.parametrize("missing_flag", ["--title", "--source-url", "--date-accessed"])
 def test_add_requires_collection_details(
     project: Path,
     add_arguments: list[str],
@@ -145,6 +145,13 @@ def test_add_requires_collection_details(
     assert error.value.code == 2
     assert missing_flag in capsys.readouterr().err
     assert list(project.iterdir()) == []
+
+
+def test_add_defaults_to_the_single_comparison_sample(project, add_arguments):
+    index = add_arguments.index("--study-set")
+    del add_arguments[index:index + 2]
+    assert cli.main(add_arguments) == 0
+    assert storage.load_registry(project)["plans"][0]["study_set"] == "comparison"
 
 
 def test_add_rejects_unknown_study_set(
@@ -204,7 +211,7 @@ def test_list_rejects_damaged_registry(project: Path, capsys: pytest.CaptureFixt
 def test_list_reports_missing_registry_with_existing_raw_file(
     project: Path, capsys: pytest.CaptureFixture
 ) -> None:
-    path = project / "data/raw/plan_0001.pdf"
+    path = project / "data/source_pdfs/plan_0001.pdf"
     path.parent.mkdir(parents=True)
     path.write_bytes(b"previously saved bytes")
 
@@ -220,7 +227,7 @@ def test_list_reports_a_changed_original(
 ) -> None:
     assert cli.main(add_arguments) == 0
     capsys.readouterr()
-    (project / "data/raw/plan_0001.pdf").write_bytes(b"changed saved original")
+    (project / "data/source_pdfs/plan_0001.pdf").write_bytes(b"changed saved original")
 
     assert cli.main(["list_plans", "--project-root", str(project)]) == 1
 
@@ -242,9 +249,9 @@ def test_save_failure_displays_original_recovery_note(
     output = capsys.readouterr()
 
     assert "Simulated registry-save failure" in output.err
-    assert "completed PDF copy is retained at data/raw/plan_0001.pdf" in output.err
+    assert "completed PDF copy is retained at data/source_pdfs/plan_0001.pdf" in output.err
     assert output.out == ""
-    assert (project / "data/raw/plan_0001.pdf").exists()
+    assert (project / "data/source_pdfs/plan_0001.pdf").exists()
 
 
 def test_cli_help_lists_available_commands(capsys: pytest.CaptureFixture) -> None:
@@ -281,8 +288,8 @@ def test_prepare_reports_ready_and_saved_paths(
     assert "Preparation for plan_0001." in output.out
     assert "Status: ready" in output.out
     assert "Page count: 1" in output.out
-    assert "Preparation record: data/processed/plan_0001/preparation_01/preparation.json" in output.out
-    assert "Page data: data/processed/plan_0001/preparation_01/pages.json" in output.out
+    assert "Preparation record: data/prepared_plans/plan_0001/preparation_01/preparation.json" in output.out
+    assert "Page data: data/prepared_plans/plan_0001/preparation_01/pages.json" in output.out
     assert "Registry: data/registry/plans.json" in output.out
     assert output.err == ""
     record_path = storage.load_registry(project)["plans"][0]["prepared_source_path"]
@@ -380,7 +387,7 @@ def test_prepare_rejects_unknown_plan_without_creating_an_attempt(
     assert "Traceback" not in output.err
     assert output.out == ""
     assert (project / "data/registry/plans.json").read_bytes() == before
-    assert not (project / "data/processed").exists()
+    assert not (project / "data/prepared_plans").exists()
 
 
 def test_prepare_defaults_to_current_project_directory(
@@ -409,7 +416,7 @@ def test_each_prepare_command_creates_a_new_attempt(
 
     assert "preparation_02/preparation.json" in output.out
     assert (project / first_path).read_bytes() == first_bytes
-    assert len(list((project / "data/processed/plan_0001").iterdir())) == 2
+    assert len(list((project / "data/prepared_plans/plan_0001").iterdir())) == 2
 
 
 def test_prepare_displays_structured_errors_for_damaged_saved_preparation(
@@ -430,7 +437,7 @@ def test_prepare_displays_structured_errors_for_damaged_saved_preparation(
     assert "Traceback" not in output.err
     assert output.out == ""
     assert storage.load_registry(project)["plans"][0]["prepared_source_path"] == record_path
-    assert not (project / "data/processed/plan_0001/preparation_02").exists()
+    assert not (project / "data/prepared_plans/plan_0001/preparation_02").exists()
 
 
 def test_prepare_displays_recovery_note_when_registry_link_save_fails(
@@ -453,7 +460,7 @@ def test_prepare_displays_recovery_note_when_registry_link_save_fails(
     assert "Traceback" not in output.err
     assert output.out == ""
     assert storage.load_registry(project)["plans"][0]["prepared_source_path"] is None
-    assert (project / "data/processed/plan_0001/preparation_01/preparation.json").is_file()
+    assert (project / "data/prepared_plans/plan_0001/preparation_01/preparation.json").is_file()
 
 
 def test_cli_reports_ready_with_gaps_without_marking_it_failed(
@@ -470,10 +477,10 @@ def test_cli_reports_ready_with_gaps_without_marking_it_failed(
                 "plan_id": plan_id,
                 "status": "ready_with_gaps",
                 "page_count": 3,
-                "pages_path": "data/processed/plan_0001/preparation_01/pages.json",
+                "pages_path": "data/prepared_plans/plan_0001/preparation_01/pages.json",
                 "problem": "A page needs the tested alternate reading route.",
             },
-            "data/processed/plan_0001/preparation_01/preparation.json",
+            "data/prepared_plans/plan_0001/preparation_01/preparation.json",
         )
 
     monkeypatch.setattr(cli.documents, "prepare_document", future_preparation)
@@ -499,10 +506,10 @@ def test_failed_preparation_retry_command_quotes_project_path_with_spaces(
                 "plan_id": plan_id,
                 "status": "failed",
                 "page_count": None,
-                "pages_path": "data/processed/plan_0001/preparation_01/pages.json",
+                "pages_path": "data/prepared_plans/plan_0001/preparation_01/pages.json",
                 "problem": "Simulated source-reading failure.",
             },
-            "data/processed/plan_0001/preparation_01/preparation.json",
+            "data/prepared_plans/plan_0001/preparation_01/preparation.json",
         )
 
     monkeypatch.setattr(cli.documents, "prepare_document", failed_preparation)

@@ -10,7 +10,7 @@ from test_expert_reference_validation import _read_reference, _reference_path, p
 
 
 def legacy_folder(root):
-    source = root / "data/expert_references"
+    source = root / "data/comparison/expert_references"
     destination = root / "expert_references"
     source.rename(destination)
     return destination
@@ -19,7 +19,7 @@ def legacy_folder(root):
 @pytest.mark.parametrize("frozen", [False, True])
 def test_migration_preserves_all_bytes_and_readable_frozen_history(project, frozen):
     if frozen:
-        expert_files.freeze_expert_reference(project, "plan_0001", frozen_by=["reviewer"])
+        expert_files.freeze_expert_reference(project, "plan_0001")
         path = _reference_path(project).with_name("reference_freeze.json")
         metadata = json.loads(path.read_text())
         metadata["reference_path"] = "expert_references/plan_0001/expert_reference.json"
@@ -32,9 +32,9 @@ def test_migration_preserves_all_bytes_and_readable_frozen_history(project, froz
     moved = storage.migrate_expert_references(project)
 
     assert not source.exists()
-    destination = project / "data/expert_references"
+    destination = project / "data/comparison/expert_references"
     assert before == {p.relative_to(destination).as_posix(): p.read_bytes() for p in destination.rglob("*") if p.is_file()}
-    assert set(moved) == {f"data/expert_references/{name}" for name in before}
+    assert set(moved) == {f"data/comparison/expert_references/{name}" for name in before}
     assert expert_files.validate_expert_reference(project, "plan_0001") == reference
     assert storage.migrate_expert_references(project) == []
     if frozen:
@@ -46,15 +46,15 @@ def test_old_reference_cannot_be_reset_by_creation_at_the_new_path(project):
     source = legacy_folder(project)
     before = (source / "plan_0001/expert_reference.json").read_bytes()
     with pytest.raises(ValueError, match="old location"):
-        expert_files.create_expert_reference(project, "plan_0001", prepared_by=["another"])
+        expert_files.create_expert_reference(project, "plan_0001")
     assert (source / "plan_0001/expert_reference.json").read_bytes() == before
-    assert not (project / "data/expert_references").exists()
+    assert not (project / "data/comparison/expert_references").exists()
 
 
 @pytest.mark.parametrize("occupied", ["directory", "file", "symlink"])
 def test_migration_never_merges_or_overwrites_a_destination(project, occupied):
     source = legacy_folder(project)
-    destination = project / "data/expert_references"
+    destination = project / "data/comparison/expert_references"
     if occupied == "directory":
         destination.mkdir()
     elif occupied == "file":

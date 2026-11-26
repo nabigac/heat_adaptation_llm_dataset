@@ -40,7 +40,7 @@ def metadata() -> dict:
         "plan_title": "Example Heat Plan — 2026",
         "source_url": "https://example.org/official-plan.pdf",
         "date_accessed": "2026-11-01",
-        "study_set": "development",
+        "study_set": "comparison",
     }
 
 
@@ -57,7 +57,7 @@ def test_registers_one_document_and_preserves_source_bytes(
     assert entry == {
         "plan_id": "plan_0001",
         **metadata,
-        "pdf_path": "data/raw/plan_0001.pdf",
+        "pdf_path": "data/source_pdfs/plan_0001.pdf",
         "document_sha256": hashlib.sha256(original_bytes).hexdigest(),
         "prepared_source_path": None,
     }
@@ -85,7 +85,7 @@ def test_renamed_copy_reuses_existing_record_without_editing_metadata(
     assert entry == original_entry
     assert created is False
     assert registry_path.read_bytes() == registry_bytes
-    assert len(list((project / "data/raw").glob("*.pdf"))) == 1
+    assert len(list((project / "data/source_pdfs").glob("*.pdf"))) == 1
 
 
 def test_revised_bytes_receive_a_new_id_without_replacing_original(
@@ -104,13 +104,13 @@ def test_revised_bytes_receive_a_new_id_without_replacing_original(
     assert len(storage.load_registry(project)["plans"]) == 2
 
 
-def test_duplicate_import_cannot_move_a_document_into_comparison(
+def test_duplicate_import_cannot_change_sample_membership(
     project: Path, incoming_pdf: Path, metadata: dict
 ) -> None:
     documents.register_document(project, incoming_pdf, **metadata)
     registry_path = project / "data/registry/plans.json"
     before = registry_path.read_bytes()
-    metadata["study_set"] = "comparison"
+    metadata["study_set"] = "expansion"
 
     with pytest.raises(ValueError, match="cannot change its study set"):
         documents.register_document(project, incoming_pdf, **metadata)
@@ -142,7 +142,7 @@ def test_invalid_collection_details_do_not_create_research_files(
     assert list(project.iterdir()) == []
 
 
-@pytest.mark.parametrize("directory", ["data/raw", "data/processed", "runs"])
+@pytest.mark.parametrize("directory", ["data/source_pdfs", "data/prepared_plans", "runs"])
 def test_missing_registry_with_saved_files_requires_explicit_recovery(
     project: Path, incoming_pdf: Path, metadata: dict, directory: str
 ) -> None:
@@ -170,7 +170,7 @@ def test_saved_inputs_must_be_restored_before_further_imports(
         (project / entry["pdf_path"]).write_bytes(b"damaged saved original")
     else:
         registry = storage.load_registry(project)
-        registry["plans"][0]["prepared_source_path"] = "data/processed/missing/preparation.json"
+        registry["plans"][0]["prepared_source_path"] = "data/prepared_plans/missing/preparation.json"
         storage.save_registry(project, registry)
     before = registry_path.read_bytes()
 
@@ -250,7 +250,7 @@ def test_copy_detects_source_changes_after_initial_fingerprinting(
         documents.register_document(project, incoming_pdf, **metadata)
 
     assert not (project / "data/registry/plans.json").exists()
-    assert list((project / "data/raw").iterdir()) == []
+    assert list((project / "data/source_pdfs").iterdir()) == []
 
 
 @pytest.mark.parametrize("committed_before_error", [False, True], ids=["before-save", "after-save"])
@@ -273,8 +273,8 @@ def test_registry_save_failure_preserves_completed_pdf_and_reports_its_path(
     with pytest.raises(OSError, match="Simulated registry-save failure") as error:
         documents.register_document(project, incoming_pdf, **metadata)
 
-    assert (project / "data/raw/plan_0001.pdf").read_bytes() == incoming_pdf.read_bytes()
-    assert "data/raw/plan_0001.pdf" in error.value.__notes__[0]
+    assert (project / "data/source_pdfs/plan_0001.pdf").read_bytes() == incoming_pdf.read_bytes()
+    assert "data/source_pdfs/plan_0001.pdf" in error.value.__notes__[0]
     if committed_before_error:
         assert len(storage.load_registry(project)["plans"]) == 1
         # A retry recognizes the committed document and does not attempt another save.

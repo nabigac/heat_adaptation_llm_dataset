@@ -27,12 +27,12 @@ def project(tmp_path):
         source_url="https://example.org/plan.pdf", date_accessed="2026-11-21",
         study_set="comparison",
     )
-    expert_files.create_expert_reference(root, "plan_0001", prepared_by=["reviewer"])
+    expert_files.create_expert_reference(root, "plan_0001")
     return root
 
 
 def reference_path(root):
-    return root / "data/expert_references/plan_0001/expert_reference.json"
+    return root / "data/comparison/expert_references/plan_0001/expert_reference.json"
 
 
 def read(root):
@@ -68,7 +68,7 @@ def test_add_appends_next_id_preserving_existing_reference_and_other_files(proje
 
     path, record_id = edit(project, f"add_{kind}")
 
-    assert path == "data/expert_references/plan_0001/expert_reference.json"
+    assert path == "data/comparison/expert_references/plan_0001/expert_reference.json"
     assert record_id == f"{kind}_0002"
     after = read(project)
     added = records(after, kind).pop()
@@ -222,7 +222,7 @@ def test_invalid_existing_drafts_are_not_repaired_or_overwritten(project, damage
 def test_intervening_expert_edits_are_not_overwritten(project, monkeypatch):
     save = storage.save_expert_reference_edit
     intervening = read(project)
-    intervening["prepared_by"].append("another_reviewer")
+    intervening["instructions"].append("Concurrent expert guidance.")
 
     def save_after_another_editor(root, plan_id, reference, *, expected_bytes):
         write(root, intervening)
@@ -325,7 +325,7 @@ def test_edit_cli_selects_reference_and_operation(project, capsys, flag, record_
     args.extend(["--project-root", str(project)])
     assert cli.main(args) == 0
     output = capsys.readouterr()
-    assert "Expert reference: data/expert_references/plan_0001/expert_reference.json" in output.out
+    assert "Expert reference: data/comparison/expert_references/plan_0001/expert_reference.json" in output.out
     expected_verb = "Added blank" if flag.startswith("--add") else "Removed"
     assert expected_verb in output.out
     assert output.err == ""

@@ -51,14 +51,14 @@ def _package_folder(value):
         raise ValueError("Select project-relative saved metrics folders using --result.")
     folder = value.rstrip("/").removesuffix("/results.json")
     parts = PurePosixPath(folder).parts
-    if len(parts) != 5 or parts[:2] != ("data", "assessments") or "/".join(parts) != folder:
-        raise ValueError("Select data/assessments/<plan_id>/assessment_NNNN/metrics_NNNN (or its results.json).")
-    storage._require_run_identifier(parts[2])
-    for label, identifier in (("assessment", parts[3]), ("metrics", parts[4])):
+    if len(parts) != 6 or parts[:3] != ("data", "comparison", "assessments") or "/".join(parts) != folder:
+        raise ValueError("Select data/comparison/assessments/<plan_id>/assessment_NNNN/metrics_NNNN (or its results.json).")
+    storage._require_run_identifier(parts[3])
+    for label, identifier in (("assessment", parts[4]), ("metrics", parts[5])):
         match = re.fullmatch(rf"{label}_([0-9]+)", identifier)
         if match is None or not match[1].strip("0"):
             raise ValueError(f"Select a numbered {label}_NNNN ID.")
-    return folder, parts[2:]
+    return folder, parts[3:]
 
 
 def _package_file(root, folder, name):
@@ -87,7 +87,7 @@ def load_metric_snapshot(project_root: Path | str, result_path: str) -> MetricSn
     if tuple(result[key] for key in ("plan_id", "assessment_id", "calculation_id")) != identifiers:
         raise ValueError("Saved metric identities must match the selected folder.")
     plan_id, assessment_id, _ = identifiers
-    if result["assessment"]["path"] != f"data/assessments/{plan_id}/{assessment_id}":
+    if result["assessment"]["path"] != f"data/comparison/assessments/{plan_id}/{assessment_id}":
         raise ValueError("Saved metrics must identify their canonical assessment path.")
     if not ESSENTIAL_CODE <= result["code_files"].keys():
         raise ValueError("The metric package lacks required calculation-code fingerprints.")
@@ -178,8 +178,9 @@ def aggregate_results(results: list[dict]) -> list[dict]:
         raise ValueError("Select at least one saved metric result.")
     if len({result["plan_id"] for result in results}) != len(results):
         raise ValueError("Select exactly one calculation per plan; duplicate plans would count twice.")
-    if len({(result["purpose"], result["method_version"]) for result in results}) != 1:
-        raise ValueError("Selected results must use the same study purpose and calculation method.")
+    if (any(result["purpose"] != "comparison" for result in results)
+            or len({result["method_version"] for result in results}) != 1):
+        raise ValueError("Select supported comparison results using the same calculation method.")
     groups = defaultdict(list)
     for result in sorted(results, key=lambda item: item["plan_id"]):
         for scope, configuration, name, measure in metrics.metric_rows(result):
@@ -202,7 +203,7 @@ def _summary_bytes(report, results):
 
 
 def _report_directory(root):
-    parent = storage.resolve_project_path(root, "data/reports")
+    parent = storage.resolve_project_path(root, "data/comparison/reports")
     if parent.resolve() != parent:
         raise ValueError("Report paths must not use symbolic links.")
     numbers = []
@@ -229,7 +230,7 @@ def summarize_metrics(project_root: Path | str, result_paths: list[str]) -> str:
     identifier, destination = _report_directory(root)
     code = metrics._code_snapshot()
     report = {
-        "schema_version": 1, "summary_id": identifier, "purpose": results[0]["purpose"],
+        "schema_version": 1, "summary_id": identifier, "purpose": "comparison",
         "method_version": results[0]["method_version"], "created_at": datetime.now(timezone.utc).isoformat(),
         "selections": [{"plan_id": snapshot.result["plan_id"], "assessment_id": snapshot.result["assessment_id"],
                         "calculation_id": snapshot.result["calculation_id"], "result_path": f"{snapshot.folder}/results.json",

@@ -22,8 +22,8 @@ from test_expert_reference_validation import (
 PLAN_ID = "plan_0001"
 
 
-def freeze(root, **options):
-    return expert_files.freeze_expert_reference(root, PLAN_ID, frozen_by=options.get("frozen_by", ["reviewer_01"]))
+def freeze(root):
+    return expert_files.freeze_expert_reference(root, PLAN_ID)
 
 
 def freeze_path(root):
@@ -38,29 +38,28 @@ def test_freeze_preserves_exact_reference_and_source_without_reading_model_outpu
     before = _snapshot(project)
     reference = _reference_path(project).read_bytes()
 
-    path = freeze(project, frozen_by=["reviewer_01", "Reviewer Two"])
+    path = freeze(project)
 
     after = _snapshot(project)
     metadata = json.loads(after.pop(path))
     assert after == before
-    assert metadata["reference_path"] == f"data/expert_references/{PLAN_ID}/expert_reference.json"
+    assert metadata["reference_path"] == f"data/comparison/expert_references/{PLAN_ID}/expert_reference.json"
     assert metadata["reference_sha256"] == hashlib.sha256(reference).hexdigest()
-    assert metadata["document_sha256"] == hashlib.sha256((project / "data/raw/plan_0001.pdf").read_bytes()).hexdigest()
+    assert metadata["document_sha256"] == hashlib.sha256((project / "data/source_pdfs/plan_0001.pdf").read_bytes()).hexdigest()
     assert metadata["page_count"] == 3
     assert metadata["source_url"] == "https://example.org/plan.pdf"
     assert metadata["date_accessed"] == "2026-11-21"
-    assert metadata["frozen_by"] == ["reviewer_01", "Reviewer Two"]
+    assert "frozen_by" not in metadata
     assert metadata["confirmed_complete"] is True
     assert datetime.fromisoformat(metadata["frozen_at"]).utcoffset().total_seconds() == 0
     assert expert_files.validate_expert_reference(project, PLAN_ID) == _read_reference(project)
     assert _snapshot(project) == before | {path: freeze_path(project).read_bytes()}
 
 
-@pytest.mark.parametrize("reviewers", [[], [""], [" \n"], [None], "reviewer", None])
-def test_invalid_confirmation_never_freezes_or_changes_a_reference(project, reviewers):
+def test_removed_confirmation_identity_argument_writes_nothing(project):
     before = _snapshot(project)
-    with pytest.raises(storage.ExpertReferenceValidationError):
-        freeze(project, frozen_by=reviewers)
+    with pytest.raises(TypeError, match="frozen_by"):
+        expert_files.freeze_expert_reference(project, PLAN_ID, frozen_by=["obsolete"])
     assert _snapshot(project) == before
 
 
@@ -99,7 +98,7 @@ def test_freeze_cannot_be_overwritten_or_bypassed_by_direct_storage_edit(project
     freeze(project)
     before = _snapshot(project)
     with pytest.raises(ValueError, match="frozen for assessment"):
-        freeze(project, frozen_by=["another_reviewer"])
+        freeze(project)
     with pytest.raises(ValueError, match="frozen for assessment"):
         storage.save_expert_reference_edit(project, PLAN_ID, _read_reference(project),
                                           expected_bytes=_reference_path(project).read_bytes())
@@ -111,11 +110,11 @@ def test_missing_frozen_reference_cannot_be_reset_by_creation(project):
     _reference_path(project).unlink()
     before = _snapshot(project)
     with pytest.raises(ValueError, match="frozen for assessment"):
-        expert_files.create_expert_reference(project, PLAN_ID, prepared_by=["reviewer"])
+        expert_files.create_expert_reference(project, PLAN_ID)
     assert _snapshot(project) == before
 
 
-@pytest.mark.parametrize("change", ["whitespace", "action", "prepared_by", "id_counters"])
+@pytest.mark.parametrize("change", ["whitespace", "action", "instructions", "id_counters"])
 def test_any_direct_change_to_frozen_reference_is_detected(project, change):
     freeze(project)
     reference = _read_reference(project)
@@ -124,8 +123,8 @@ def test_any_direct_change_to_frozen_reference_is_detected(project, change):
     else:
         if change == "action":
             reference["plan_data"]["actions"][0]["action"] = "Changed activity."
-        elif change == "prepared_by":
-            reference["prepared_by"] = ["another_person"]
+        elif change == "instructions":
+            reference["instructions"].append("Changed guidance.")
         else:
             reference["id_counters"]["action"] += 1
         _write_reference(project, reference)
@@ -201,9 +200,8 @@ def test_publication_failure_does_not_leave_partial_freeze_or_change_reference(p
     assert _snapshot(project) == before
 
 
-def test_cli_freezes_with_named_reviewers_and_validation_verifies_identity(project, capsys):
-    assert cli.main(["freeze_expert_reference", PLAN_ID, "--frozen-by", "reviewer_01",
-                     "--frozen-by", "Reviewer Two", "--project-root", str(project)]) == 0
+def test_cli_freezes_without_names_and_validation_verifies_fingerprint(project, capsys):
+    assert cli.main(["freeze_expert_reference", PLAN_ID, "--project-root", str(project)]) == 0
     output = capsys.readouterr()
     assert "Reference frozen for assessment" in output.out and output.err == ""
     assert storage.load_expert_reference_freeze(project, PLAN_ID)["reference_sha256"] in output.out
@@ -216,8 +214,8 @@ def test_cli_freezes_with_named_reviewers_and_validation_verifies_identity(proje
     assert "frozen for assessment" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("args", [[], [PLAN_ID], ["--frozen-by", "reviewer"]])
-def test_cli_requires_plan_and_reviewer(args):
+@pytest.mark.parametrize("args", [[], [PLAN_ID, "--frozen-by", "obsolete"]])
+def test_cli_requires_plan_and_rejects_removed_identity_flag(args):
     with pytest.raises(SystemExit) as error:
         cli.main(["freeze_expert_reference", *args])
     assert error.value.code == 2

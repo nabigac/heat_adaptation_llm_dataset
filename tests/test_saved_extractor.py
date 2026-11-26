@@ -42,7 +42,7 @@ def facts(monkeypatch, run_record):
 
 def execute(root, scripted, **options):
     return asyncio.run(agents.run_extractor(root, loop.PLAN_ID, source_path=loop.SOURCE,
-        profile_name=loop.PROFILE, purpose="development", _transport=scripted.transport, **options))
+        profile_name=loop.PROFILE, purpose="comparison", _transport=scripted.transport, **options))
 
 
 def folder(root, saved):
@@ -292,7 +292,7 @@ def test_cancelled_partial_response_is_saved_and_cancellation_propagates(project
                 await asyncio.sleep(60)
         transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=Body()))
         task = asyncio.create_task(agents.run_extractor(project, loop.PLAN_ID, source_path=loop.SOURCE,
-            profile_name=loop.PROFILE, purpose="development", _transport=transport))
+            profile_name=loop.PROFILE, purpose="comparison", _transport=transport))
         await received.wait()
         task.cancel()
         with pytest.raises(agents.SavedExtractorCancelled) as stopped:
@@ -317,13 +317,15 @@ def test_source_loss_still_allows_failed_record_and_raw_evidence_to_be_saved(pro
     assert (project / saved.record["model_calls"][0]["response_path"]).is_file()
 
 
-@pytest.mark.parametrize("dirty", [False, True])
-def test_formal_comparison_stays_blocked_until_workflow_is_ready(project, scripted, facts, dirty):
-    facts["code_dirty"] = dirty
-    with pytest.raises(ValueError, match="not yet enabled"):
-        asyncio.run(agents.run_extractor(project, loop.PLAN_ID, source_path=loop.SOURCE,
-            profile_name=loop.PROFILE, purpose="comparison", _transport=scripted.transport))
-    assert not (project / "runs").exists() and not scripted.requests
+def test_comparison_execution_preserves_its_purpose(project, scripted, facts, run_record):
+    registry = storage.load_registry(project)
+    registry["plans"][0]["study_set"] = "comparison"
+    storage.save_registry(project, registry)
+    scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message(loop.answer(run_record))]
+    saved = asyncio.run(agents.run_extractor(project, loop.PLAN_ID, source_path=loop.SOURCE,
+        profile_name=loop.PROFILE, purpose="comparison", _transport=scripted.transport))
+    assert saved.record["status"] == "succeeded" and saved.record["purpose"] == "comparison"
+    assert storage.load_run_record(project, saved.record_path) == saved.record
 
 
 def test_credentials_are_rejected_before_settings_are_saved(project, scripted, facts):
@@ -470,7 +472,7 @@ class Body(httpx.AsyncByteStream):
   yield b'{"message":{"role":"assistant","content":"partial'
   await asyncio.sleep(60)
 transport=httpx.MockTransport(lambda request:httpx.Response(200,stream=Body()))
-asyncio.run(agents.run_extractor(root,"plan_0099",source_path="data/processed/plan_0099/preparation_02/preparation.json",profile_name="fictional_extractor",purpose="development",_transport=transport))
+asyncio.run(agents.run_extractor(root,"plan_0099",source_path="data/prepared_plans/plan_0099/preparation_02/preparation.json",profile_name="fictional_extractor",purpose="comparison",_transport=transport))
 '''
     child = subprocess.Popen([sys.executable, "-c", program, str(project), str(environment)],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)

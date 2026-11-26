@@ -81,7 +81,7 @@ def test_new_assessment_is_valid_pending_and_read_only(assessment, monkeypatch):
     before = snapshot(root)
     report = check(root, path)
     assert report.valid and not report.complete and report.problems == []
-    assert report.pending and report.data.metadata["included_attempts"] is None
+    assert report.pending and "included_attempts" not in report.data.metadata
     first = report.data.tables["action_scores.csv"][0]
     assert first["score"] is None and first["matched_output_action_ids"] is None
     assert report.data.tables["output_review.csv"][0]["activity_supported"] is None
@@ -94,7 +94,7 @@ def test_new_assessment_is_valid_pending_and_read_only(assessment, monkeypatch):
     assert snapshot(root) == before
 
 
-def test_complete_review_retains_zero_and_omission_and_failure_scope_pending(assessment):
+def test_complete_review_retains_zero_and_omission(assessment):
     root, path = assessment
     finish(root, path)
     before = snapshot(root)
@@ -104,7 +104,7 @@ def test_complete_review_retains_zero_and_omission_and_failure_scope_pending(ass
     scores = report.data.tables["action_scores.csv"]
     assert scores[1]["score"] == 0 and scores[1]["matched_output_action_ids"] == []
     assert scores[0]["score"] == 1 and scores[0]["matched_output_action_ids"] == ["action_0001"]
-    assert report.data.metadata["included_attempts"] is None
+    assert "included_attempts" not in report.data.metadata
     assert snapshot(root) == before
 
 
@@ -350,13 +350,13 @@ def test_v_only_selection_provenance_is_accepted(study):
     assert check(study, path).valid
 
 
-def test_comparison_plan_cannot_be_validated_as_a_development_assessment(assessment):
+def test_sample_membership_does_not_change_a_comparison_assessment(assessment):
     root, path = assessment
     registry = storage.load_registry(root)
     registry["plans"][0]["study_set"] = "comparison"
     (root / "data/registry/plans.json").write_text(json.dumps(registry))
     before = snapshot(root)
-    assert_invalid(check(root, path), "development plans only")
+    assert check(root, path).valid
     assert snapshot(root) == before
 
 
@@ -409,7 +409,7 @@ def test_metadata_is_strict_json_with_readable_failures(assessment, damage):
     root, path = assessment
     file = root / path / "metadata.json"
     raw = file.read_bytes()
-    if damage == "duplicate_key": file.write_bytes(raw.replace(b'"schema_version": 1', b'"schema_version": 1, "schema_version": 1'))
+    if damage == "duplicate_key": file.write_bytes(raw.replace(b'"schema_version": 2', b'"schema_version": 2, "schema_version": 2'))
     elif damage == "utf8": file.write_bytes(b"\xff")
     elif damage == "nested": file.write_bytes(b"[" * 1100 + b"]" * 1100)
     elif damage == "nan": file.write_bytes(raw.replace(b'"notes": null', b'"notes": NaN'))
@@ -424,7 +424,10 @@ def test_missing_assessment_files_are_invalid(assessment, name):
     assert not check(root, path).valid
 
 
-@pytest.mark.parametrize("damage", ["run", "reference", "freeze", "pages", "original", "supporting_evidence"])
+@pytest.mark.parametrize("damage", [
+    "run", "reference", "freeze", "pages", "original", "supporting_evidence",
+    "E_candidate", "E+V_candidate", "E_code", "E+V_code",
+])
 def test_changed_saved_inputs_and_evidence_are_invalid(assessment, damage):
     root, path = assessment
     data = metadata(root, path)
@@ -433,6 +436,20 @@ def test_changed_saved_inputs_and_evidence_are_invalid(assessment, damage):
     elif damage == "freeze": file = root / data["reference"]["freeze_path"]
     elif damage == "supporting_evidence":
         file = next((root / f"runs/{PLAN_ID}/run_collaboration_0001/artifacts").glob("collaboration_input.json"))
+    elif damage.endswith(("_candidate", "_code")):
+        configuration, kind = damage.rsplit("_", 1)
+        folder = (root / data["runs"][configuration]["record_path"]).parent
+        if kind == "candidate":
+            report = json.loads((folder / "validation_report.json").read_text())
+            file = root / (report["repaired_response_path"] or report["raw_response_path"])
+            candidate = json.loads(file.read_text())
+            candidate["plan_data"]["actions"][0]["action"] = "Changed preserved answer."
+            file.write_text(json.dumps(candidate))
+        else:
+            manifest = json.loads((folder / "artifacts/code_fingerprints.json").read_text())
+            (folder / "artifacts/code" / next(iter(manifest["sha256"]))).write_bytes(b"changed archive")
+        assert not check(root, path).valid
+        return
     else:
         _, prep, _ = storage.load_plan_preparation(root, PLAN_ID, SOURCE)
         file = root / prep["pages_path"] if damage == "pages" else root / prep["pdf_path"]
@@ -512,7 +529,10 @@ def test_cli_pending_complete_strict_and_invalid_exit_statuses(assessment, capsy
     root, path = assessment
     command = ["validate_assessment", PLAN_ID, "--assessment-id", "assessment_0001", "--project-root", str(root)]
     assert cli.main(command) == 0
-    assert "Manual review: pending" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Manual review: pending" in output
+    assert "Validation does not establish scientific correctness." in output
+    assert "Failure-reporting" not in output
     assert cli.main([*command, "--require-complete"]) == 1
     assert "requires all manual judgments" in capsys.readouterr().err
     finish(root, path)

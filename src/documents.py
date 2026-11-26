@@ -29,7 +29,8 @@ from document_tools import (
     crop_page_image,
     ocr_page_image,
 )
-from validation import validate_registry_structure
+from validation import is_study_sample, validate_registry_structure
+from legacy_records import canonical_data_path, comparison_membership
 
 
 # This module coordinates the workflow. storage.py owns file operations,
@@ -62,7 +63,7 @@ def list_documents(project_root: Path | str) -> list[dict]:
         preparation = _load_registered_preparation(root, entry)
         status = preparation["status"] if preparation is not None else "not_prepared"
         # A new dictionary keeps the extra display field out of registry data.
-        entries.append(dict(entry, preparation_status=status))
+        entries.append(dict(entry, study_set=comparison_membership(entry["study_set"]), preparation_status=status))
     return entries
 
 
@@ -73,7 +74,7 @@ def register_document(
     plan_title: str,
     source_url: str,
     date_accessed: str,
-    study_set: str,
+    study_set: str = "comparison",
 ) -> tuple[dict, bool]:
     """Return (plan_entry, created), reusing a matching registered document.
 
@@ -82,6 +83,8 @@ def register_document(
     request the same study set. Use one registration operation at a time.
     """
     root = Path(project_root).resolve()
+    if comparison_membership(study_set) != study_set:
+        raise ValueError("Register study plans with comparison membership.")
     if not root.is_dir():
         raise NotADirectoryError(f"Project root is not an existing directory: {root}")
     source = Path(pdf_path).expanduser().resolve(strict=True)
@@ -103,7 +106,7 @@ def register_document(
     entry = {
         "plan_id": plan_id,
         "plan_title": plan_title,
-        "pdf_path": existing["pdf_path"] if existing else f"data/raw/{plan_id}.pdf",
+        "pdf_path": existing["pdf_path"] if existing else f"data/source_pdfs/{plan_id}.pdf",
         "document_sha256": checksum,
         "source_url": source_url,
         "date_accessed": date_accessed,
@@ -118,7 +121,7 @@ def register_document(
     _check_collection_details(entry)
 
     if existing is not None:
-        if existing["study_set"] != study_set:
+        if comparison_membership(existing["study_set"]) != study_set:
             raise ValueError(
                 f"This PDF is already registered as {plan_id} in study set "
                 f"{existing['study_set']!r}; duplicate import cannot change its study set."
@@ -170,6 +173,8 @@ def update_document_metadata(
             "study_set": study_set,
         }.items() if value is not None
     }
+    if study_set is not None and comparison_membership(study_set) != study_set:
+        raise ValueError("Study plans use comparison membership.")
     # A dictionary comprehension above collects only explicitly supplied edits.
     # None means "leave this field alone"; an empty string is still an edit and
     # must be rejected if it violates that field's rules.
@@ -195,12 +200,13 @@ def update_document_metadata(
         raise storage.RegistryValidationError(problems)
     _check_collection_details(updated)
     if updated["study_set"] != selected["study_set"]:
-        # Keep development exposure from being hidden by relabeling through the
-        # expansion set. No extra history file is needed for this fixed assignment.
-        if selected["study_set"] == "development":
-            raise ValueError("Development plans must remain in the development study set.")
+        # Joining archived entries to the study sample changes only
+        # registry membership. Earlier run purposes and all saved evidence stay
+        # intact; exposure and final selections are recorded in the manual log.
+        joining_sample = (selected["study_set"] != "comparison" and is_study_sample(selected["study_set"])
+                          and updated["study_set"] == "comparison")
         run_directory = storage.resolve_project_path(root, f"runs/{plan_id}")
-        if run_directory.exists() and (
+        if not joining_sample and run_directory.exists() and (
             not run_directory.is_dir() or any(run_directory.iterdir())
         ):
             raise ValueError("Cannot change the study set after model work has been saved for this plan.")
@@ -232,7 +238,7 @@ def _load_registered_preparation(project_root: Path, entry: dict) -> dict | None
     # identity fields must still agree; never borrow another plan's readiness.
     if (
         preparation["plan_id"] != entry["plan_id"]
-        or preparation["pdf_path"] != entry["pdf_path"]
+        or canonical_data_path(preparation["pdf_path"]) != canonical_data_path(entry["pdf_path"])
         or preparation["document_sha256"].lower() != entry["document_sha256"].lower()
     ):
         raise ValueError("The saved preparation does not match the registered PDF identity.")
@@ -538,7 +544,7 @@ class _PdfWarningHandler(logging.Handler):
 def _read_pdf_pages(pdf_bytes: bytes) -> tuple[int | None, list[dict], str | None]:
     """Read every identified page, returning (page_count, pages, document_problem)."""
     # These are expected library/input failures. Unexpected programming errors
-    # still raise so development does not disguise a bug as a source-text gap.
+    # still raise so debugging does not disguise a bug as a source-text gap.
     read_errors = (PyPdfError, DependencyError, OSError, ValueError, NotImplementedError)
     handler = _PdfWarningHandler()
     logger = logging.getLogger("pypdf")
@@ -632,7 +638,7 @@ def _load_or_start_registry(project_root: Path) -> dict:
     if registry_path.exists():
         return storage.load_registry(project_root)
 
-    for relative_path in ("data/raw", "data/processed", "runs"):
+    for relative_path in ("data/source_pdfs", "data/prepared_plans", "data/raw", "data/processed", "runs"):
         # Missing metadata beside existing research files is a recovery problem,
         # not evidence of an empty project. Reinitializing here could lose links
         # to documents or earlier model work.

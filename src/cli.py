@@ -6,11 +6,9 @@ Document identity, validation, and file-preservation rules stay in those modules
 
 import argparse
 import asyncio
-import logging
 import json
 import shlex
 import sys
-from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 import agents
@@ -23,83 +21,173 @@ from collaboration_contracts import (
     DEFAULT_COLLABORATION_PROFILE, load_collaboration_configuration, load_collaboration_profiles,
 )
 import documents
+import dataset_assembly
 import expert_files
+import plan_reviews
 import storage
+from legacy_records import comparison_membership
 from quotation_diagnostics import QUOTATION_PAGE_REPORT_PATH
+from validation import RUN_PURPOSES
 
 
 # Start reading at main(): arguments choose an operation, workflow modules perform
 # the work, and the small helpers below print its result. Model commands delegate
 # lifecycle and saving to agents.py (E/V) or collaboration_runner.py (C).
 def main(argv: list[str] | None = None) -> int:
-    """Run a command and return 0 on success or 1 when the requested operation fails.
+    """Parse a command, run its handler, and report expected file/data errors.
 
-    Tests can supply an argument list directly. With None, argparse reads the
-    actual terminal arguments. Invalid command syntax is handled by argparse (2).
+    Argument errors use argparse's exit code 2. Handlers return an operation
+    status when completion can still mean failure, such as a failed model run.
     """
     parser = _build_parser()
-    # argparse returns a Namespace: named attributes such as args.command and
-    # args.plan_id hold the values supplied in the terminal or a test's list.
     args = parser.parse_args(argv)
     if args.command == "update_plan_data" and all(
         getattr(args, field) is None for field in ("title", "source_url", "date_accessed", "study_set")
     ):
         parser.error("update_plan_data requires --title, --source-url, --date-accessed, or --study-set.")
     try:
-        # expanduser handles a leading ~; resolve makes later paths independent
-        # of relative spelling. The document functions check the project itself.
         root = args.project_root.expanduser().resolve()
-        if args.command == "add_plan":
-            _add_plan(root, args)
-        elif args.command == "update_plan_data":
-            _update_plan_data(root, args)
-        elif args.command == "prepare_plan":
-            # A failed attempt can be saved successfully. Return its operation
-            # status instead of treating every completed function call as success.
-            return _prepare_plan(root, args.plan_id, ocr_enabled=args.ocr_enabled)
-        elif args.command in {"run_extract_mode", "run_verify_mode"}:
-            return _run_model_mode(root, args)
-        elif args.command == "run_collaboration_mode":
-            return _run_collaboration_mode(root, args)
-        elif args.command == "list_plans":
-            _list_plans(root)
-        elif args.command == "list_profiles":
-            _list_profiles(root, args)
-        elif args.command == "create_expert_reference":
-            _create_expert_reference(root, args)
-        elif args.command == "validate_expert_reference":
-            _validate_expert_reference(root, args.plan_id)
-        elif args.command == "edit_expert_reference":
-            _edit_expert_reference(root, args)
-        elif args.command == "freeze_expert_reference":
-            _freeze_expert_reference(root, args)
-        elif args.command == "create_assessment":
-            _create_assessment(root, args)
-        elif args.command == "validate_assessment":
-            return _validate_assessment(root, args)
-        elif args.command == "calculate_metrics":
-            _calculate_metrics(root, args)
-        elif args.command == "summarize_metrics":
-            _summarize_metrics(root, args)
+        result = _command_handlers()[args.command](root, args)
+        return 0 if result is None else result
     except (OSError, ValueError) as error:
-        # Expected file and data failures become readable terminal messages.
-        # Unexpected programming errors still raise, making them visible in development.
+        # Expected validation/storage failures are readable terminal errors.
+        # Programming errors still surface so they can be fixed, not concealed.
         _display_error(error)
+        return 1
+
+
+def _command_handlers() -> dict:
+    """Keep command dispatch visible separately from argument declarations."""
+    return {
+        "migrate_data_layout": _migrate_data_layout,
+        "add_plan": _add_plan, "update_plan_data": _update_plan_data,
+        "prepare_plan": _prepare_registered_plan,
+        "run_extract_mode": _run_model_mode, "run_verify_mode": _run_model_mode,
+        "run_collaboration_mode": _run_collaboration_mode,
+        "list_plans": _list_registered_plans, "list_profiles": _list_profiles,
+        "create_expert_reference": _create_expert_reference,
+        "validate_expert_reference": _validate_reference_command,
+        "edit_expert_reference": _edit_expert_reference,
+        "freeze_expert_reference": _freeze_expert_reference,
+        "create_assessment": _create_assessment, "validate_assessment": _validate_assessment,
+        "calculate_metrics": _calculate_metrics, "summarize_metrics": _summarize_metrics,
+        "create_review_draft": _create_review_draft,
+        "validate_review_draft": _validate_review_draft,
+        "validate_reviewed_plan": _validate_reviewed_plan,
+        "finalize_reviewed_plan": _finalize_reviewed_plan,
+        "build_heat_action_dataset": _build_heat_action_dataset,
+        "validate_heat_action_dataset": _validate_heat_action_dataset,
+    }
+
+
+def _migrate_data_layout(root: Path, args: argparse.Namespace) -> None:
+    """Display a read-only preview or the completed storage migration."""
+    result = storage.migrate_data_layout(root, dry_run=args.dry_run)
+    print("Migration preview:" if args.dry_run else "Data layout migrated:")
+    for move in result["moves"]:
+        print(f"{move['source']} -> {move['destination']} ({move['file_count']} files)")
+    print(f"Registry paths {'would be updated' if args.dry_run else 'updated'}: {result['registry_updated']}")
+    print(f"Historical runs validated: {result['validated_runs']}")
+
+
+def _prepare_registered_plan(root: Path, args: argparse.Namespace) -> int:
+    """Preserve preparation's status; saving a failed attempt is not success."""
+    return _prepare_plan(root, args.plan_id, ocr_enabled=args.ocr_enabled)
+
+
+def _list_registered_plans(root: Path, args: argparse.Namespace) -> None:
+    """Adapt argument-free listing to the shared command-handler interface."""
+    _list_plans(root)
+
+
+def _validate_reference_command(root: Path, args: argparse.Namespace) -> None:
+    """Validate the selected independent reference without changing it."""
+    _validate_expert_reference(root, args.plan_id)
+
+
+def _create_review_draft(root: Path, args: argparse.Namespace) -> None:
+    """Create an editable answer from an exact eligible model run."""
+    path = plan_reviews.create_review_draft(root, args.plan_id, configuration=args.configuration, run_id=args.run_id)
+    print(f"Review draft: {path}/review_draft.json")
+    print("Edit plan_data and remaining open issues, then validate and finalize the review.")
+
+
+def _validate_review_draft(root: Path, args: argparse.Namespace) -> int:
+    """Distinguish invalid drafts from valid drafts with pending review work."""
+    report = plan_reviews.validate_review_draft(root, args.plan_id, args.review_id)
+    if not report.valid:
+        for problem in report.problems:
+            print(problem.message, file=sys.stderr)
+        return 1
+    print("Review draft validation passed.")
+    print(f"Open issues: {len(report.pending_issue_ids)}")
+    if report.pending_issue_ids:
+        print("Pending: " + ", ".join(report.pending_issue_ids))
+    if args.require_complete and not report.complete:
+        print("--require-complete requires every open issue to be addressed.", file=sys.stderr)
         return 1
     return 0
 
 
+def _finalize_reviewed_plan(root: Path, args: argparse.Namespace) -> None:
+    """Publish reviewed data only after its complete issue checks pass."""
+    path = plan_reviews.finalize_reviewed_plan(root, args.plan_id, args.review_id)
+    print(f"Reviewed plan: {path}/reviewed_plan.json")
+    print(f"Review record: {path}/review_record.json")
+    print("Finalized with review_scope open_issues_only; this does not establish a full expert audit.")
+
+
+def _validate_reviewed_plan(root: Path, args: argparse.Namespace) -> None:
+    """Recheck completed snapshots without depending on an editable live draft."""
+    data, record = plan_reviews.load_reviewed_plan(root, args.plan_id, args.review_id)
+    print(f"Reviewed plan validation passed for {args.plan_id} / {args.review_id}.")
+    print(f"Configuration: {record['configuration']}; actions: {len(data['actions'])}")
+    print(f"Review scope: {record['review_scope']}")
+
+
+def _build_heat_action_dataset(root: Path, args: argparse.Namespace) -> None:
+    """Combine explicitly selected completed reviews into a new version."""
+    path = dataset_assembly.build_heat_action_dataset(root, args.review)
+    contents = json.loads(storage.resolve_project_path(root, path + "/dataset_contents.json").read_text(encoding="utf-8"))
+    print(f"Heat adaptation action dataset: {path}/heat_action_dataset.json")
+    print(f"Dataset contents: {path}/dataset_contents.json")
+    print(f"Configuration: {contents['configuration']}")
+    print(f"Plans: {contents['dataset']['plan_count']}; actions: {contents['dataset']['action_count']}")
+
+
+def _validate_heat_action_dataset(root: Path, args: argparse.Namespace) -> None:
+    """Validate an existing version rather than publishing a replacement."""
+    path = f"{dataset_assembly.ROOT}/{args.dataset_id}"
+    _, contents = dataset_assembly.load_heat_action_dataset(root, path)
+    print(f"Heat adaptation action dataset validation passed for {contents['dataset_id']}.")
+    print(f"Configuration: {contents['configuration']}; plans: {contents['dataset']['plan_count']}; actions: {contents['dataset']['action_count']}")
+    print(f"Review scope: {contents['review_scope']}")
+
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    """Describe commands and arguments; argparse generates their help messages."""
+    """Assemble workflow command groups using explicit, unambiguous flags."""
     parser = argparse.ArgumentParser(
         prog="heat-adaptation-llm-dataset",
-        description="Register and prepare PDFs, run extraction, verification or collaboration, and manage expert forms.",
+        description="Register and prepare PDFs, run models, assess outputs, and build reviewed datasets.",
         allow_abbrev=False,
     )
-    # Explicit option names prevent a shortened flag from acquiring a different
-    # meaning as more commands/options are added to the project.
-    # Subcommands select an operation; a required subcommand avoids an ambiguous run.
     commands = parser.add_subparsers(dest="command", required=True)
+    _add_documents_commands(commands)
+    _add_model_execution_commands(commands)
+    _add_listings_commands(commands)
+    _add_references_commands(commands)
+    _add_comparison_commands(commands)
+    _add_reviews_commands(commands)
+    _add_datasets_commands(commands)
+    return parser
+
+
+def _add_documents_commands(commands) -> None:
+    """Register documents arguments as one workflow group."""
+    migration_parser = commands.add_parser("migrate_data_layout", help="Move saved inputs to the current data layout.", allow_abbrev=False)
+    migration_parser.add_argument("--dry-run", action="store_true", help="Check moves and saved runs without writing files.")
+    _add_project_argument(migration_parser)
     add_plan_parser = commands.add_parser(
         "add_plan", help="Register a prescreened local PDF.", allow_abbrev=False
     )
@@ -108,7 +196,8 @@ def _build_parser() -> argparse.ArgumentParser:
     add_plan_parser.add_argument("--source-url", required=True, help="Official source URL.")
     add_plan_parser.add_argument("--date-accessed", required=True, help="Access date as YYYY-MM-DD.")
     add_plan_parser.add_argument(
-        "--study-set", required=True, choices=["development", "comparison", "expansion"]
+        "--study-set", default="comparison", choices=["comparison", "expansion"],
+        help="Sample membership (default: comparison).",
     )
     _add_project_argument(add_plan_parser)
 
@@ -121,8 +210,8 @@ def _build_parser() -> argparse.ArgumentParser:
     update_plan_data_parser.add_argument("--source-url", help="Corrected official source URL.")
     update_plan_data_parser.add_argument("--date-accessed", help="Corrected access date as YYYY-MM-DD.")
     update_plan_data_parser.add_argument(
-        "--study-set", choices=["development", "comparison", "expansion"],
-        help="Study set; development assignments and sets with saved model work are fixed.",
+        "--study-set", choices=["comparison", "expansion"],
+        help="Sample membership; archived entries may join comparison without changing saved runs.",
     )
     _add_project_argument(update_plan_data_parser)
 
@@ -138,6 +227,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_project_argument(prepare_plan_parser)
 
+
+def _add_model_execution_commands(commands) -> None:
+    """Register model execution arguments as one workflow group."""
     run_extract_mode_parser = commands.add_parser(
         "run_extract_mode",
         help="Run and save one hosted extractor attempt with local MCP document tools.",
@@ -156,26 +248,30 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run_verify_mode_parser.add_argument(
         "--input-run-id",
-        help="Exact successful extractor run ID; default: latest validated, successful eligible E run. Retries retain their original E input.",
+        help="Exact successful extractor run ID with the same purpose; default: latest eligible E of that purpose. Retries retain their original E input.",
     )
     _add_model_run_arguments(run_verify_mode_parser, stage="verifier")
 
     collaboration_parser = commands.add_parser(
-        "run_collaboration_mode", help="Coordinate three hosted models from a prepared development plan.",
+        "run_collaboration_mode", help="Coordinate three hosted models from a prepared study plan.",
         allow_abbrev=False,
     )
-    collaboration_parser.add_argument("plan_id", help="Registered development plan ID.")
+    collaboration_parser.add_argument("plan_id", help="Registered study plan ID.")
     collaboration_parser.add_argument("--source-path", required=True, help="Exact project-relative preparation.json.")
     collaboration_parser.add_argument(
         "--profile", default=DEFAULT_COLLABORATION_PROFILE,
         help=f"Named C binding (default: {DEFAULT_COLLABORATION_PROFILE}).",
     )
-    collaboration_parser.add_argument("--purpose", required=True, choices=["development"])
-    collaboration_parser.add_argument("--retry-of-run-id", help="Failed C attempt for the same preparation; starts a new attempt.")
+    collaboration_parser.add_argument("--purpose", choices=RUN_PURPOSES, default="comparison",
+                                      help="Run purpose (default: comparison; dataset_building also accepts expansion plans).")
+    collaboration_parser.add_argument("--retry-of-run-id", help="Failed C attempt for the same preparation and purpose; starts a new attempt.")
     collaboration_parser.add_argument("--config-path", default="configs/collaboration.json", help="Project-relative C bindings.")
     collaboration_parser.add_argument("--model-config-path", default="configs/profiles.json", help="Project-relative model profiles.")
     _add_project_argument(collaboration_parser)
 
+
+def _add_listings_commands(commands) -> None:
+    """Register listings arguments as one workflow group."""
     list_plans_parser = commands.add_parser(
         "list_plans", help="List registered documents, saved preparation status, and links.", allow_abbrev=False
     )
@@ -194,16 +290,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_project_argument(list_profiles_parser)
 
+
+def _add_references_commands(commands) -> None:
+    """Register references arguments as one workflow group."""
     reference_parser = commands.add_parser(
         "create_expert_reference",
         help="Create a guided expert reference with a blank action and issue.",
         allow_abbrev=False,
     )
     reference_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
-    reference_parser.add_argument(
-        "--prepared-by", action="append", required=True,
-        help="Expert name or study ID; repeat for multiple experts.",
-    )
     _add_project_argument(reference_parser)
 
     validate_reference_parser = commands.add_parser(
@@ -237,18 +332,16 @@ def _build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
     )
     freeze_reference_parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
-    freeze_reference_parser.add_argument(
-        "--frozen-by", action="append", required=True,
-        help="Reviewer confirming readiness for assessment; repeat for multiple reviewers.",
-    )
     _add_project_argument(freeze_reference_parser)
+
+
+def _add_comparison_commands(commands) -> None:
+    """Register comparison arguments as one workflow group."""
     assessment_parser = commands.add_parser(
-        "create_assessment", help="Create development review CSVs from selected saved runs and a frozen reference.",
+        "create_assessment", help="Create review CSVs from selected saved runs and a frozen reference.",
         allow_abbrev=False,
     )
-    assessment_parser.add_argument("plan_id", help="Registered development plan ID.")
-    assessment_parser.add_argument("--reviewer", action="append", required=True,
-                                   help="Reviewer name or study ID; repeat for multiple reviewers.")
+    assessment_parser.add_argument("plan_id", help="Registered study plan ID.")
     assessment_parser.add_argument("--extractor-run-id", help="Exact E run; default latest validated successful E.")
     assessment_parser.add_argument("--verifier-run-id", help="Exact V run; default latest successful V linked to E. Alone, selects V's E.")
     assessment_parser.add_argument("--collaboration-run-id", help="Exact C run; default latest successful C using the selected preparation.")
@@ -258,7 +351,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "validate_assessment", help="Check assessment provenance, CSVs, and pending judgments without writing files.",
         allow_abbrev=False,
     )
-    assessment_validation_parser.add_argument("plan_id", help="Registered development plan ID.")
+    assessment_validation_parser.add_argument("plan_id", help="Registered study plan ID.")
     assessment_validation_parser.add_argument("--assessment-id", required=True, help="Exact assessment_NNNN folder to check.")
     assessment_validation_parser.add_argument("--require-complete", action="store_true",
         help="Return failure when valid manual judgments are still pending or undetermined.")
@@ -267,7 +360,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "calculate_metrics", help="Validate an assessment and save per-plan measures plus paired changes.",
         allow_abbrev=False,
     )
-    metrics_parser.add_argument("plan_id", help="Registered development plan ID.")
+    metrics_parser.add_argument("plan_id", help="Registered study plan ID.")
     metrics_parser.add_argument("--assessment-id", required=True, help="Exact assessment_NNNN folder to calculate.")
     metrics_parser.add_argument("--require-complete", action="store_true",
         help="Require finished manual review before writing results.")
@@ -279,7 +372,42 @@ def _build_parser() -> argparse.ArgumentParser:
     summary_parser.add_argument("--result", action="append", required=True,
         help="Project-relative metrics_NNNN folder or results.json; repeat once per selected plan.")
     _add_project_argument(summary_parser)
-    return parser
+
+
+def _add_reviews_commands(commands) -> None:
+    """Register reviews arguments as one workflow group."""
+    draft_parser = commands.add_parser("create_review_draft",
+        help="Copy a dataset-building answer for open-issue review.", allow_abbrev=False)
+    draft_parser.add_argument("plan_id", help="Registered comparison or expansion plan ID.")
+    draft_parser.add_argument("--configuration", choices=tuple(plan_reviews.STAGES), required=True,
+        help="Chosen extraction configuration: E, E+V, or C.")
+    draft_parser.add_argument("--run-id", help="Exact successful dataset-building run; default: latest eligible run of this configuration.")
+    _add_project_argument(draft_parser)
+    for command, description in (
+        ("validate_review_draft", "Check a review draft without changing files."),
+        ("validate_reviewed_plan", "Recheck a completed reviewed plan and its preserved evidence."),
+        ("finalize_reviewed_plan", "Confirm all issues addressed and publish clean plan data with separate review history."),
+    ):
+        review_parser = commands.add_parser(command, help=description, allow_abbrev=False)
+        review_parser.add_argument("plan_id", help="Registered plan ID.")
+        review_parser.add_argument("--review-id", required=True, help="Exact review_NNNN draft ID.")
+        if command == "validate_review_draft":
+            review_parser.add_argument("--require-complete", action="store_true", help="Fail if any issues remain open.")
+        _add_project_argument(review_parser)
+
+
+def _add_datasets_commands(commands) -> None:
+    """Register datasets arguments as one workflow group."""
+    dataset_parser = commands.add_parser("build_heat_action_dataset",
+        help="Combine exact completed plan reviews into a new preserved dataset version.", allow_abbrev=False)
+    dataset_parser.add_argument("--review", action="append", required=True,
+        help="Project-relative completed review folder or reviewed_plan.json; repeat once per plan. No latest-review default.")
+    _add_project_argument(dataset_parser)
+    validation_parser = commands.add_parser("validate_heat_action_dataset",
+        help="Recheck a preserved combined dataset without creating another version.", allow_abbrev=False)
+    validation_parser.add_argument("dataset_id", help="Saved dataset ID, such as dataset_0001.")
+    _add_project_argument(validation_parser)
+
 
 
 def _add_model_run_arguments(parser: argparse.ArgumentParser, *, stage: str) -> None:
@@ -287,12 +415,12 @@ def _add_model_run_arguments(parser: argparse.ArgumentParser, *, stage: str) -> 
     parser.add_argument("plan_id", help="Registered document ID, such as plan_0001.")
     parser.add_argument("--profile", required=True, help=f"Exact {stage} profile name in the configuration.")
     parser.add_argument(
-        "--purpose", required=True, choices=["development", "comparison", "exploratory"],
-        help="Reason for this attempt; development/comparison must match the registered study set.",
+        "--purpose", choices=RUN_PURPOSES, default="comparison",
+        help="Run purpose (default: comparison; dataset_building also accepts expansion plans).",
     )
     parser.add_argument(
         "--retry-of-run-id",
-        help=f"Failed {stage} run being manually retried; never resumes or overwrites it.",
+        help=f"Failed {stage} run with the same purpose; never resumes or overwrites it.",
     )
     parser.add_argument(
         "--config-path", default="configs/profiles.json",
@@ -311,52 +439,20 @@ def _add_project_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-@contextmanager
-def _comparison_logging(blind: bool):
-    """Keep protocol/client logs from bypassing comparison feedback restrictions.
-
-    This affects only this terminal invocation and is restored afterward. The
-    saved runner preserves raw model responses, operational errors and MCP
-    subprocess stderr separately; those files remain for authorized inspection.
-    """
-    saved = []
-    if blind:
-        for name in ("mcp", "httpx", "httpcore", "asyncio"):
-            logger = logging.getLogger(name)
-            saved.append((logger, logger.handlers[:], logger.propagate))
-            logger.handlers = [logging.NullHandler()]
-            logger.propagate = False
-    try:
-        yield
-    finally:
-        for logger, handlers, propagate in saved:
-            logger.handlers, logger.propagate = handlers, propagate
-
-
-def _error_categories(error: Exception) -> list[str]:
-    """Use validated category labels, never quote exception text in blind output."""
-    allowed = {"syntax", "structure", "reference", "other"}
-    categories = {getattr(problem, "category", "other") for problem in getattr(error, "problems", [])}
-    return sorted(categories & allowed) or ["other"]
-
-
 def _run_model_mode(root: Path, args: argparse.Namespace) -> int:
     """Bridge the synchronous terminal to one asynchronous saved run.
 
-    Comparison plans stay blind even for exploratory repeats. The future expert
-    workflow must establish a validated initial reference before feedback can be
-    unlocked; a file merely named reference_initial.json is not sufficient.
+    All attempts expose the same operational feedback. Experts track prior
+    exposure and final selections manually; a label certifies neither.
     """
     verifying = args.command == "run_verify_mode"
     stage = "verifier" if verifying else "extractor"
     operation = "Verification" if verifying else "Extraction"
-    blind = True  # Fail closed until registry identity/study set can be checked.
     try:
         registry = storage.load_registry(root)
         entry = next((p for p in registry["plans"] if p["plan_id"] == args.plan_id), None)
         if entry is None:
             raise ValueError("Select an existing registered plan ID.")
-        blind = entry["study_set"] == "comparison" or args.purpose == "comparison"
         print(f"Starting {stage} for {_display_text(args.plan_id)}.", flush=True)
         async def execute():
             try:
@@ -371,20 +467,12 @@ def _run_model_mode(root: Path, args: argparse.Namespace) -> int:
                 # Catch inside asyncio.run: its SIGINT handler can otherwise
                 # convert cancellation to KeyboardInterrupt and lose this result.
                 return cancelled.result, True
-        with _comparison_logging(blind):
-            saved, cancelled = asyncio.run(execute())
+        saved, cancelled = asyncio.run(execute())
     except KeyboardInterrupt:
         print(f"{operation} interrupted; final saved status is unknown. Inspect existing run records before retrying.", file=sys.stderr)
         return 130
-    except Exception as error:
-        if blind:
-            print(f"{operation} setup failed.", file=sys.stderr)
-            print("Error categories: " + ", ".join(_error_categories(error)), file=sys.stderr)
-            print("Comparison details withheld until the reference workflow can validate an initial reference.", file=sys.stderr)
-        elif isinstance(error, (OSError, ValueError)):
-            _display_error(error)
-        else:
-            raise  # Unexpected programming errors remain visible in development.
+    except (OSError, ValueError) as error:
+        _display_error(error)
         return 1
 
     record = saved.record  # Last published status, even when completion could not be saved.
@@ -406,35 +494,27 @@ def _run_model_mode(root: Path, args: argparse.Namespace) -> int:
             print(f"Quotation/page diagnostic: {diagnostic_path}")
         else:
             print("Quotation/page diagnostic: not saved.")
-    if blind:
-        categories = {e["category"] for e in report["remaining_errors"]} if report else set()
-        if (record["error"] and not categories) or saved.persistence_error or cancelled:
-            categories.add("other")
-        if categories:
-            print("Error categories: " + ", ".join(sorted(categories)), file=sys.stderr)
-        print("Comparison details withheld until the reference workflow can validate an initial reference.")
-    else:
-        print(f"Model requests: {len(record['model_calls'])}")
-        if diagnostic is not None:
-            summary = diagnostic["summary"]
-            if summary.get("corrected", 0):
-                print(f"Quotation/page corrections: {summary['corrected']}")
-            print(f"Quotation/page flags: {summary['possible_page_mismatch']} possible page mismatches; "
-                  f"{summary['unmatched_quote']} unmatched quotations; "
-                  f"{summary['unconfirmed_page_span']} unconfirmed spans.")
-        if record["tool_log_path"] is not None:
-            print(f"Tool log: {record['tool_log_path']}")
-        if report is not None:
-            for repair in report["repairs"]:
-                print(f"Repair [{repair['rule']}] {_display_text(repair['location'])}: {repair['before']!r} -> {repair['after']!r}")
-            for problem in report["remaining_errors"]:
-                print(f"  [{problem['category']}] {problem['location'] or '$'}: {problem['message']}", file=sys.stderr)
-        if record["error"]:
-            print(f"Error: {record['error']}", file=sys.stderr)
-        if saved.persistence_error:
-            print(f"Saving error: {saved.persistence_error}", file=sys.stderr)
-        if cancelled:
-            print(f"{operation} cancelled; available evidence was retained where saving succeeded.", file=sys.stderr)
+    print(f"Model requests: {len(record['model_calls'])}")
+    if diagnostic is not None:
+        summary = diagnostic["summary"]
+        if summary.get("corrected", 0):
+            print(f"Quotation/page corrections: {summary['corrected']}")
+        print(f"Quotation/page flags: {summary['possible_page_mismatch']} possible page mismatches; "
+              f"{summary['unmatched_quote']} unmatched quotations; "
+              f"{summary['unconfirmed_page_span']} unconfirmed spans.")
+    if record["tool_log_path"] is not None:
+        print(f"Tool log: {record['tool_log_path']}")
+    if report is not None:
+        for repair in report["repairs"]:
+            print(f"Repair [{repair['rule']}] {_display_text(repair['location'])}: {repair['before']!r} -> {repair['after']!r}")
+        for problem in report["remaining_errors"]:
+            print(f"  [{problem['category']}] {problem['location'] or '$'}: {problem['message']}", file=sys.stderr)
+    if record["error"]:
+        print(f"Error: {record['error']}", file=sys.stderr)
+    if saved.persistence_error:
+        print(f"Saving error: {saved.persistence_error}", file=sys.stderr)
+    if cancelled:
+        print(f"{operation} cancelled; available evidence was retained where saving succeeded.", file=sys.stderr)
     # A valid answer in memory is not a saved success. Running/failed records,
     # persistence failures and cancellation always produce a nonzero exit code.
     return 130 if cancelled else (0 if record["status"] == "succeeded" and not saved.persistence_error else 1)
@@ -497,7 +577,7 @@ def _add_plan(root: Path, args: argparse.Namespace) -> None:
     else:
         print(f"Already registered as {entry['plan_id']}. Existing metadata retained.")
     print(f"Title: {_display_text(entry['plan_title'])}")
-    print(f"Study set: {entry['study_set']}")
+    print(f"Study set: {comparison_membership(entry['study_set'])}")
     print(f"Original PDF: {entry['pdf_path']}")
     print("Registry: data/registry/plans.json")
     print(f"Preparation: {entry['prepared_source_path'] or 'not_prepared'}")
@@ -550,7 +630,7 @@ def _update_plan_data(root: Path, args: argparse.Namespace) -> None:
     print(f"Title: {_display_text(entry['plan_title'])}")
     print(f"Source URL: {entry['source_url']}")
     print(f"Access date: {entry['date_accessed']}")
-    print(f"Study set: {entry['study_set']}")
+    print(f"Study set: {comparison_membership(entry['study_set'])}")
     print(f"Original PDF: {entry['pdf_path']}")
     print(f"Preparation: {entry['prepared_source_path'] or 'not_prepared'}")
     print("Registry: data/registry/plans.json")
@@ -559,12 +639,12 @@ def _update_plan_data(root: Path, args: argparse.Namespace) -> None:
 def _create_expert_reference(root: Path, args: argparse.Namespace) -> None:
     """Create a form without model calls, then show where the expert can edit it."""
     path = expert_files.create_expert_reference(
-        root, args.plan_id, prepared_by=args.prepared_by
+        root, args.plan_id
     )
     print(f"Expert reference: {path}")
     print("Added guided blank action action_0001 and expert issue issue_0001.")
     print("Replace TODO: guidance and remove unused blanks before validation; use the original PDF.")
-    print("For comparison plans, complete it before viewing model outputs.")
+    print("Complete it before viewing model outputs where possible; record any prior exposure.")
 
 
 def _validate_expert_reference(root: Path, plan_id: str) -> None:
@@ -599,19 +679,19 @@ def _edit_expert_reference(root: Path, args: argparse.Namespace) -> None:
 
 
 def _freeze_expert_reference(root: Path, args: argparse.Namespace) -> None:
-    """Record the named reviewer's confirmation without starting model work."""
-    path = expert_files.freeze_expert_reference(root, args.plan_id, frozen_by=args.frozen_by)
+    """Record confirmation without capturing a name or starting model work."""
+    path = expert_files.freeze_expert_reference(root, args.plan_id)
     freeze = storage.load_expert_reference_freeze(root, args.plan_id)
     print(f"Expert reference freeze: {path}")
     print(f"Reference SHA-256: {freeze['reference_sha256']}")
     print("Reference frozen for assessment; editor changes are blocked.")
-    print("Use this reference fingerprint when recording judgments. Freezing does not enable comparison runs.")
+    print("Use this reference fingerprint when recording judgments; final version and run selection checks are manual.")
 
 
 def _create_assessment(root: Path, args: argparse.Namespace) -> None:
     """Publish copied context and blank judgments without starting model work."""
     path = assessments.create_assessment(
-        root, args.plan_id, reviewers=args.reviewer, extractor_run_id=args.extractor_run_id,
+        root, args.plan_id, extractor_run_id=args.extractor_run_id,
         verifier_run_id=args.verifier_run_id, collaboration_run_id=args.collaboration_run_id, notes=args.notes,
     )
     print(f"Assessment: {path}")
@@ -620,7 +700,7 @@ def _create_assessment(root: Path, args: argparse.Namespace) -> None:
         print(f"{configuration}: {run['run_id']}")
     print("Created metadata.json, action_scores.csv, output_review.csv, and verifier_resolutions.csv.")
     print("Judgment fields are pending. Read metadata instructions and confirm activity grouping before assessment.")
-    print("Development assessment creation makes no model calls and calculates no metrics.")
+    print("Creation makes no model calls and calculates no metrics.")
 
 
 def _validate_assessment(root: Path, args: argparse.Namespace) -> int:
@@ -645,7 +725,7 @@ def _validate_assessment(root: Path, args: argparse.Namespace) -> int:
         print(f"[pending{context}] {item.location}: {item.message}")
     if len(report.pending) > 20:
         print(f"{len(report.pending) - 20} further pending fields/coverage gaps.")
-    print("Failure-reporting scope remains unselected. Validation does not establish scientific correctness.")
+    print("Validation does not establish scientific correctness.")
     if args.require_complete and not report.complete:
         print("--require-complete requires all manual judgments to be settled.", file=sys.stderr)
         return 1
@@ -666,8 +746,7 @@ def _calculate_metrics(root: Path, args: argparse.Namespace) -> None:
             values.append(f"{name}: {value}")
         print(configuration + " — " + "; ".join(values))
     print("Saved results.json, summary.csv, exact assessment inputs, and calculation code.")
-    print("Failure counts remain unavailable until their reporting scope is selected.")
-    print("Per-plan development results; expert judgments establish source correctness.")
+    print(f"Per-plan {result['purpose']} results; expert judgments establish source correctness.")
 
 
 def _summarize_metrics(root: Path, args: argparse.Namespace) -> None:
@@ -682,8 +761,8 @@ def _summarize_metrics(root: Path, args: argparse.Namespace) -> None:
             print(f"{measure['scope']} / {measure['configuration']}: {value} {measure['unit']}; "
                   f"{measure['contributing_plan_count']} contributing plans; {len(measure['excluded_plans'])} excluded.")
     print("Saved summary.json, summary.csv, selected result copies, and calculation code.")
-    print("Each measure records its contributing/excluded plans. Failure counts remain unavailable.")
-    print("Development summaries depend on expert judgments; formal comparison remains disabled.")
+    print("Each measure records its contributing/excluded plans.")
+    print(f"Summary purpose: {report['purpose']}. Expert judgments establish source correctness.")
 
 
 def _list_plans(root: Path) -> None:
@@ -740,7 +819,7 @@ def _list_profiles(root: Path, args: argparse.Namespace) -> None:
             print(f"  Protected final window: {_elapsed_ceiling(profile['final_generation_seconds'])}; "
                   "E+V reserves this for the final V answer")
     for binding, actors in collaborations:
-        print(f"C: {_display_text(binding['name'])} (run_collaboration_mode; development only)")
+        print(f"C: {_display_text(binding['name'])} (run_collaboration_mode; comparison or dataset_building)")
         for actor, profile in actors.items():
             _print_profile_model(actor, profile)
         limits = binding["limits"]

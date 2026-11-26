@@ -35,7 +35,7 @@ COMMAND = REPOSITORY / ".venv/bin/heat-adaptation-llm-dataset"
 
 
 def arguments(root, **changes):
-    values = {"source-path": loop.SOURCE, "profile": loop.PROFILE, "purpose": "development", **changes}
+    values = {"source-path": loop.SOURCE, "profile": loop.PROFILE, "purpose": "comparison", **changes}
     return ["run_extract_mode", loop.PLAN_ID, "--project-root", str(root),
             *(value for key, item in values.items() for value in ("--" + key, str(item)))]
 
@@ -74,10 +74,10 @@ def test_extract_runs_real_saved_workflow_and_reports_actual_files(project, scri
     assert "Quotation/page flags: 0 possible page mismatches; 0 unmatched quotations; 0 unconfirmed spans." in output.out
     assert output.err == ""
     assert connected_cli[0][1] == {"source_path": loop.SOURCE, "profile_name": loop.PROFILE,
-        "purpose": "development", "retry_of_run_id": None, "config_path": "configs/profiles.json"}
+        "purpose": "comparison", "retry_of_run_id": None, "config_path": "configs/profiles.json"}
 
 
-def test_development_feedback_shows_permitted_repairs(project, scripted, facts, connected_cli, run_record, capsys):
+def test_comparison_feedback_shows_permitted_repairs(project, scripted, facts, connected_cli, run_record, capsys):
     ready(scripted, run_record, fenced=True)
     assert cli.main(arguments(project)) == 0
     output = capsys.readouterr()
@@ -136,7 +136,7 @@ def test_report_path_is_not_claimed_when_publication_failed(project, scripted, f
     assert not output_record(project).with_name("validation_report.json").exists()
 
 
-@pytest.mark.parametrize("missing", ["--source-path", "--profile", "--purpose"])
+@pytest.mark.parametrize("missing", ["--source-path", "--profile"])
 def test_selection_flags_are_required_before_work(project, scripted, connected_cli, capsys, missing):
     args = arguments(project)
     index = args.index(missing)
@@ -147,7 +147,7 @@ def test_selection_flags_are_required_before_work(project, scripted, connected_c
     assert not connected_cli and not scripted.requests and not (project / "runs").exists()
 
 
-@pytest.mark.parametrize("flags", [["--purp", "development"], ["--purpose", "pilot"], ["--resume"]])
+@pytest.mark.parametrize("flags", [["--purp", "comparison"], ["--purpose", "pilot"], ["--resume"]])
 def test_invalid_or_abbreviated_flags_never_start_work(project, scripted, connected_cli, flags):
     with pytest.raises(SystemExit) as error:
         cli.main(arguments(project) + flags)
@@ -155,7 +155,7 @@ def test_invalid_or_abbreviated_flags_never_start_work(project, scripted, connec
 
 
 @pytest.mark.parametrize("selection", [{"profile": "missing-profile"}, {"source-path": loop.SOURCE.replace("02", "99")},
-    {"source-path": f"runs/{loop.PLAN_ID}/reference_initial.json"}, {"purpose": "comparison"}])
+    {"source-path": f"runs/{loop.PLAN_ID}/reference_initial.json"}])
 def test_bad_selection_returns_nonzero_before_model_requests(project, scripted, facts, connected_cli, capsys, selection):
     assert cli.main(arguments(project, **selection)) == 1
     output = capsys.readouterr()
@@ -182,7 +182,7 @@ def test_manual_retry_gets_new_id_and_preserves_failed_attempt(project, scripted
     assert output_record(project).read_bytes() == old
 
 
-def test_comparison_plan_exploration_hides_claims_issues_repairs_and_client_logs(project, scripted, facts, connected_cli, run_record, capsys):
+def test_comparison_run_reports_repairs_and_preserves_full_evidence(project, scripted, facts, connected_cli, run_record, capsys):
     registry = storage.load_registry(project)
     registry["plans"][0]["study_set"] = "comparison"
     storage.save_registry(project, registry)
@@ -196,30 +196,29 @@ def test_comparison_plan_exploration_hides_claims_issues_repairs_and_client_logs
     fake_reference = project / f"runs/{loop.PLAN_ID}/reference_initial.json"
     fake_reference.parent.mkdir(parents=True)
     fake_reference.write_text('{"not_a_validated_reference":true}')
-    assert cli.main(arguments(project, purpose="exploratory")) == 0
+    assert cli.main(arguments(project, purpose="comparison")) == 0
     output = capsys.readouterr()
     assert "Status: succeeded" in output.out and "Validation report:" in output.out
-    assert hidden not in output.out + output.err and "Repair [" not in output.out
-    assert "withheld" in output.out and "Model requests:" not in output.out
+    assert "Repair [" in output.out and "Model requests: 2" in output.out
+    assert "withheld" not in output.out
     record = json.loads(output_record(project).read_text())
     assert record["plan_data"]["actions"][0]["action"] == hidden
 
 
-def test_comparison_failure_hides_validation_values_and_exception_notes(project, scripted, facts, connected_cli, capsys):
+def test_comparison_run_failure_keeps_validation_details_in_saved_evidence(project, scripted, facts, connected_cli, capsys):
     registry = storage.load_registry(project)
     registry["plans"][0]["study_set"] = "comparison"
     storage.save_registry(project, registry)
     facts["code_dirty"] = False
     hidden = "UNSEEN_MODEL_RESPONSE_FRAGMENT"
     scripted.replies = [loop.message(agents.FINAL_READY_SIGNAL), loop.message('{"' + hidden + '":1}')]
-    assert cli.main(arguments(project, purpose="exploratory")) == 1
+    assert cli.main(arguments(project, purpose="comparison")) == 1
     output = capsys.readouterr()
-    assert hidden not in output.out + output.err
-    assert "Error categories:" in output.err and "structure" in output.err
+    assert hidden in output.err and "structure" in output.err
     assert "Status: failed" in output.out
 
 
-def test_blind_setup_errors_hide_arbitrary_values_and_recovery_notes(project, connected_cli, monkeypatch, capsys):
+def test_setup_errors_display_the_problem_and_recovery_notes(project, connected_cli, monkeypatch, capsys):
     hidden = "MODEL_TEXT_IN_EXCEPTION"
     async def fail(*args, **options):
         error = ValueError(hidden)
@@ -228,7 +227,7 @@ def test_blind_setup_errors_hide_arbitrary_values_and_recovery_notes(project, co
     monkeypatch.setattr(agents, "run_extractor", fail)
     assert cli.main(arguments(project, purpose="comparison")) == 1
     output = capsys.readouterr()
-    assert hidden not in output.out + output.err and "Error categories: other" in output.err
+    assert hidden in output.err and "withheld" not in output.out + output.err
 
 
 def test_logger_configuration_is_restored_after_extraction(project, scripted, facts, connected_cli, run_record):
@@ -238,7 +237,7 @@ def test_logger_configuration_is_restored_after_extraction(project, scripted, fa
     logger = logging.getLogger("mcp")
     before = (logger.handlers[:], logger.propagate)
     ready(scripted, run_record)
-    assert cli.main(arguments(project, purpose="exploratory")) == 0
+    assert cli.main(arguments(project, purpose="comparison")) == 0
     assert (logger.handlers, logger.propagate) == before
 
 
@@ -258,7 +257,7 @@ def test_comparison_subprocess_stderr_is_saved_without_terminal_disclosure(proje
     monkeypatch.setattr(mcp.client.stdio, "stdio_client", with_diagnostic)
     monkeypatch.setattr(agents, "_document_client", loop.REAL_DOCUMENT_CLIENT)
     ready(scripted, run_record)
-    assert cli.main(arguments(project, purpose="exploratory")) == 0
+    assert cli.main(arguments(project, purpose="comparison")) == 0
     output = capfd.readouterr()
     assert sentinel not in output.out + output.err
     log = output_record(project).parent / "artifacts/mcp_stderr.log"

@@ -2,7 +2,7 @@
 
 Dated decisions, changes, failures, and findings from development. Entries describe the setup and evidence at the time. Current study methods and commands are in [DESIGN.md](DESIGN.md), [README.md](README.md), and [IMPLEMENTATION.MD](IMPLEMENTATION.MD).
 
-[2026-11-18](#2026-11-18) · [2026-11-19](#2026-11-19) · [2026-11-20](#2026-11-20) · [2026-11-21](#2026-11-21) · [2026-11-22](#2026-11-22) · [2026-11-23](#2026-11-23) · [2026-11-24](#2026-11-24)
+[2026-11-18](#2026-11-18) · [2026-11-19](#2026-11-19) · [2026-11-20](#2026-11-20) · [2026-11-21](#2026-11-21) · [2026-11-22](#2026-11-22) · [2026-11-23](#2026-11-23) · [2026-11-24](#2026-11-24) · [2026-11-25](#2026-11-25)
 
 <details>
 <summary>Categories and entry template</summary>
@@ -35,11 +35,11 @@ Add dated entries to the matching date group. Record observed results separately
 
 ## Entries
 
-Open a date group to read its entries. The latest date is expanded.
+Related changes on the same date are grouped below. Historical labels, settings, counts, and pending work describe the state at that time; use the guides for the current workflow.
 
 <a id="2026-11-18"></a>
 <details>
-<summary><strong>2026-11-18</strong> — extraction and hosted-model selection (6 entries)</summary>
+<summary><strong>2026-11-18</strong> — extraction and hosted-model selection (5 entries)</summary>
 
 ### 2026-11-18 — Build the workflow through the first extraction
 
@@ -59,23 +59,14 @@ Open a date group to read its entries. The latest date is expanded.
 - **Observed result:** 90 affected tests passed; revised prompts loaded with unchanged source text, and all 78 original-run files were preserved. No extraction was launched at this step; the quality effect was **Not yet tested**.
 - **Remaining questions:** Assess grouping, status, and quotation fidelity on subsequent development outputs.
 
-### 2026-11-18 — Review revised extraction and pilot Hugging Face
+### 2026-11-18 — Review extraction and diagnose hosted Qwen failures
 
 - **Category:** Model
-- **Problem:** Local Qwen3.5 27B run `0002` separated the competition and ambassador training, but quotation and status problems remained after prompt refinement.
-- **Decision/change:** Added a Hugging Face adapter to pilot the larger open-weight `Qwen/Qwen3.5-397B-A17B`, pinned to Novita, using the same prepared plan, prompts, local tools, and Python validation. After run `0003` failed, selected JSON-object mode with the target schema in the instructions for the next attempt.
-- **Reason:** Test whether a larger model could improve extraction without local hardware constraints.
-- **Observed result:** Run `0002` succeeded in about 18 minutes with 13 action records and two open issues. Run `0003` completed two investigation requests and ten quotation lookups, then failed with HTTP 400: Novita rejected `json_schema` and reported support for `json_object`. No final dataset was accepted.
-- **Remaining questions:** Hosted extraction quality was **Not yet tested**; JSON-object mode still needed checks for output validity and token-limit behavior.
-
-### 2026-11-18 — Hosted JSON output fails budget and schema checks
-
-- **Category:** Model
-- **Problem:** Hosted Qwen3.5-397B-A17B/Novita run `0004` exceeded its requested output limit.
-- **Decision/change:** Inspected the preserved response offline, without changing settings or launching another extraction.
-- **Reason:** Check whether token usage was the only obstacle.
-- **Observed result:** Normal completion reported 18,052 output tokens against a 16,384 limit. The JSON also contained two unexpected fields; relaxing the token guard would still leave an invalid answer. Reported cost across three requests was about $0.12.
-- **Remaining questions:** Provider limit enforcement and strict-schema compatibility; the following entry records the hosting/model change.
+- **Problem:** Revised local extraction retained quotation/status errors; hosted Qwen attempts failed API, output-limit, and schema checks.
+- **Decision/change:** Piloted `Qwen/Qwen3.5-397B-A17B` through Hugging Face/Novita with the same prepared plan, prompts, tools, and Python checks. After `0003` failed, used JSON-object mode with schema instructions for `0004`. Inspected its preserved response offline without another run or relaxed acceptance rules.
+- **Reason:** Test a larger model and distinguish provider constraints from output quality. Relaxing the token guard alone would still leave invalid JSON fields.
+- **Observed result:** Local `0002` succeeded in about 18 minutes with 13 actions and two open issues, separating competition and ambassador training. Hosted `0003` made two investigation requests and ten quotation lookups, then received HTTP 400 rejecting `json_schema` and reporting `json_object` support. Run `0004` completed normally but reported 18,052 output tokens against 16,384 and included two unexpected fields; cost across three requests was about $0.12. Neither hosted answer was accepted.
+- **Remaining questions:** Accepted hosted extraction quality is **Not yet tested**. Provider limit enforcement and schema compatibility remained unresolved; the next entry records the model/host change.
 
 ### 2026-11-18 — Select Inkling 2 Small through Hugging Face
 
@@ -99,7 +90,7 @@ Open a date group to read its entries. The latest date is expanded.
 
 <a id="2026-11-19"></a>
 <details>
-<summary><strong>2026-11-19</strong> — Paris, verification, and quotation checks (6 entries)</summary>
+<summary><strong>2026-11-19</strong> — Paris, verification, and quotation checks (5 entries)</summary>
 
 ### 2026-11-19 — Add Paris and increase the extraction output allowance
 
@@ -128,23 +119,14 @@ Open a date group to read its entries. The latest date is expanded.
 - **Observed result:** All five live compatibility checks passed: strict JSON, project schema, short output-limit probe, tool call, and result replay. API-reported cost was about $0.00083, with about 11 seconds across model requests. The focused adapter/diagnostic suite passed 123 tests. The initial alias-mismatch failure was preserved.
 - **Remaining questions:** Whole-plan capacity, acceptance of a 131,072-token output allowance, and verifier quality are **Not yet tested**. Implement the verifier and pilot it on both development plans.
 
-### 2026-11-19 — Build verification and pilot Freetown
+### 2026-11-19 — Build verification and refine source inspection
 
 - **Category:** Code / Model
-- **Problem:** E+V needed an implemented verifier operating on an exact saved extraction.
-- **Decision/change:** Added the DeepSeek profile and prompt, validated E selection, shared API/tool execution, `run_verify_mode`, issue-continuity checks, and separate V records with preserved E/source snapshots. Selection defaults to the latest eligible successful E; retries retain their original input.
-- **Reason:** Check the whole answer, including unflagged content and possible omissions, while preserving the baseline for comparison.
-- **Observed result:** Freetown `run_verify_0001`, using `run_extract_0008`, succeeded without Python repairs in 3m 55s: 14 actions, 70 quotations, four open issues, and two claimed resolutions. Ten tool calls executed; two excess requests were denied. Preliminary review found quotation/page improvements and a new wrong-page campaign citation.
-- **Remaining questions:** Resolution claims need expert assessment; formal verifier quality and Paris verification remain pending.
-
-### 2026-11-19 — Increase tool calls and repeat Freetown verification
-
-- **Category:** Model / Code
-- **Problem:** The first verifier exhausted its tool allowance and still introduced a citation error.
-- **Decision/change:** Increased both E and V ceilings from 10 to 20 document-tool calls, refreshed remaining-budget instructions each turn, and strengthened final source-page checks. The output allowance stayed at 131,072 tokens per request.
-- **Reason:** Allow more source inspection and make remaining calls and citation requirements clear.
-- **Observed result:** `run_verify_0002` independently checked the same `run_extract_0008` and succeeded without Python repairs in 5m 40s: 14 actions, 89 quotations, five open issues, and two new claimed resolutions. All 20 calls executed with none denied. Review found useful detail/evidence corrections but three wrong-page quotations; source gaps remained.
-- **Remaining questions:** More tool calls did not eliminate citation errors. Prompt and budget changes were tested together, so their separate effects are unknown; formal quality assessment remains pending.
+- **Problem:** E+V needed exact saved-E verification; its first pilot exhausted tool capacity and introduced a citation error.
+- **Decision/change:** Added the DeepSeek profile/prompt, validated E selection, shared API/tools, `run_verify_mode`, issue continuity, and separate V records with E/source snapshots. Defaults select the latest eligible E; retries retain input. After the first pilot, raised E/V document tools from 10 to 20, refreshed remaining-budget instructions, and strengthened final page checks. Output allowance stayed at 131,072 tokens.
+- **Reason:** Check inherited content and omissions while preserving E for comparison; allow more source inspection.
+- **Observed result:** Both Freetown pilots independently used `run_extract_0008` and succeeded without repairs. V `0001`: 3m55s, 14 actions, 70 quotations, four open issues, two claimed resolutions, ten tools executed/two denied. V `0002`: 5m40s, 14 actions, 89 quotations, five open issues, two new claimed resolutions, all 20 tools executed. Review found useful evidence/detail corrections but one wrong-page campaign citation in the first and three wrong-page quotations in the second. Source gaps persisted.
+- **Remaining questions:** More tools did not eliminate citation errors. Prompt/budget changes were combined, so their separate effects are unknown. Expert resolution assessment, formal quality scoring, and Paris verification remained pending.
 
 ### 2026-11-19 — Add Python quotation checks and citation correction
 
@@ -159,7 +141,7 @@ Open a date group to read its entries. The latest date is expanded.
 
 <a id="2026-11-20"></a>
 <details>
-<summary><strong>2026-11-20</strong> — handoff, prompts, and repeated verification (4 entries)</summary>
+<summary><strong>2026-11-20</strong> — handoff, prompts, and repeated verification (3 entries)</summary>
 
 ### 2026-11-20 — Handle early JSON drafts before final generation
 
@@ -179,23 +161,14 @@ Open a date group to read its entries. The latest date is expanded.
 - **Observed result:** 174 focused tests and offline input checks passed; model settings and saved runs were preserved. Quality effects are **Not yet tested**.
 - **Remaining questions:** Whether subsequent outputs improve grouping, completeness, and source fidelity.
 
-### 2026-11-20 — Retry Paris verification after a connection failure
+### 2026-11-20 — Preserve Paris connection failure and review repeated verification
 
-- **Category:** Process / Code
-- **Problem:** Paris `run_verify_0003` failed with `peer closed connection without sending complete message body (incomplete chunked read)`.
-- **Decision/change:** Preserved the failure and started manual retry `run_verify_0004` using the same `run_extract_0002` and settings.
-- **Reason:** An upstream hosting/router timeout, service interruption, or network interruption could explain the closure; the cause is unconfirmed.
-- **Observed result:** Run `0003` stopped after 5m 13s on its first request, below the configured 30-minute timeout. HTTP 200 was received, but the body contained only whitespace; no tools ran or usable answer or token usage arrived.
-- **Remaining questions:** Retry `0004` was still running at this entry. Whether the connection failure recurs and where it originates remain unresolved.
-
-### 2026-11-20 — Refine quotation guidance and review repeated Paris verification
-
-- **Category:** Model / Research
-- **Problem:** Paris retry `0004` succeeded but split 137 draft excerpts into 361 fragments. Later review found persistent omissions and a premature issue resolution.
-- **Decision/change:** Clarified quotation continuity, context, search snippets, and preservation of checked draft excerpts in shared guidance and final instructions. Added section-by-section verifier omission review and source-supported discrepancy resolution. Agreed to keep the current prompts stable.
-- **Reason:** Address observed errors and consolidate findings before further prompt tuning.
-- **Observed result:** Paris `0004`–`0006` independently used `run_extract_0002` and unchanged model settings; all succeeded without Python repairs. After the quotation revision, `0005` kept 122 excerpts without tiny fragments. After the coverage/resolution revision, `0006` kept 130, left the courtyard discrepancy open, and added runoff-water cooling. Whitespace-normalized matches rose from 66/122 to 100/130; these are diagnostics, not evidence-adequacy scores. Runtime rose from 8m to 14m 5s and API-reported cost from about $0.066 to $0.129. Offline checks passed 174 then 126 tests, plus both-plan input checks.
-- **Remaining questions:** Omissions, bundling, quotation errors, and unstable statuses persist; `0006` described planned bathing sites as already opened. Individual repeats and differing tool activity do not isolate prompt effects. Expert reference scoring and confirmation of claimed resolutions remain pending.
+- **Category:** Model / Code / Research
+- **Problem:** Paris V `0003` lost its connection; retry `0004` fragmented quotations, and subsequent review found omissions and a premature issue resolution.
+- **Decision/change:** Preserved `0003` and manually retried unchanged settings/E input as `0004`. Then clarified quotation continuity, context/search snippets, checked draft excerpts, section-by-section omission review, and source-supported discrepancy resolution. Agreed to keep the resulting prompts stable.
+- **Reason:** Retain failure evidence and address observed errors before further tuning. The connection failure's upstream host/router/network cause remains unconfirmed.
+- **Observed result:** Run `0003` stopped after 5m13s on its first request, below its 30-minute timeout: HTTP 200, whitespace-only incomplete body, no tools, usable answer, or token usage. Runs `0004`–`0006` independently used `run_extract_0002` with unchanged model settings and succeeded without repairs. Run `0004` expanded 137 draft excerpts to 361 fragments. After quotation guidance, `0005` retained 122 excerpts without tiny fragments; after coverage/resolution guidance, `0006` retained 130, left the courtyard discrepancy open, and added runoff-water cooling. Whitespace-normalized matches rose from 66/122 to 100/130, runtime from 8m to 14m5s, and reported cost from about $0.066 to $0.129. Offline checks passed 174 then 126 tests plus both-plan input checks. Matches are diagnostics, not evidence-adequacy scores.
+- **Remaining questions:** Connection recurrence/origin, omissions, bundling, quotation errors, and unstable statuses remain unresolved; `0006` called planned bathing sites already opened. Repeats with differing tool activity do not isolate prompt effects. Expert scoring and confirmation of resolutions remain pending.
 
 </details>
 
@@ -308,43 +281,103 @@ Open a date group to read its entries. The latest date is expanded.
 </details>
 
 <a id="2026-11-24"></a>
+<details>
+<summary><strong>2026-11-24</strong> — assessments, metrics, summaries, and study execution (3 entries)</summary>
+
+### 2026-11-24 — Create and validate assessment review files
+
+- **Category:** Code / Data / Research
+- **Problem:** Manual assessment lacked generated inputs, organized storage, and validation before calculation.
+- **Decision/change:** Added `create_assessment` with compatible latest E/linked V/same-preparation C defaults, explicit overrides, fingerprints, generated JSON metadata, and three CSVs with blank judgments. Initially captured reviewer identities. Moved references to `data/expert_references/` and assessments to `data/assessments/`, preserving historical freeze bytes/paths and excluding both from Git. Added read-only `validate_assessment`: exact source/reference/run checks, strict CSV/JSON, links, copied context, activity coverage, eligible V resolutions, and consistent judgments. Blank/undetermined fields stay pending; `--require-complete` requires settled review. Return parsed judgments and file hashes for calculation. Updated guides/diagram.
+- **Reason:** Prepare reproducible expert judgments against a shared independent reference and distinguish unfinished review from invalid data.
+- **Observed result:** Creation passed 2,529 tests (36 creation/7 migration); validation then passed 2,639 (110 new validation cases), both with 11 OCR/PyTorch warnings. Cases covered pending/completed review, regrouping, empty outputs, damaged/changed inputs, and CLI codes. All 25 historical runs loaded; compatible defaults resolved for both initial plans. Reference migration preserved bytes and the unfrozen starter. Link/CLI/schema checks passed. No real assessments or paid requests were created.
+- **Remaining questions:** Calculation, reporting/failure scope, manual review, comparison controls, and instruction export remained pending. Assessment against completed real references is **Not yet tested**.
+
+### 2026-11-24 — Calculate per-plan metrics and summarize selected plans
+
+- **Category:** Code / Data / Research
+- **Problem:** Validated judgments lacked per-plan calculations and reproducible cross-plan reports.
+- **Decision/change:** Added `calculate_metrics` for action scores, unsupported activities/evidence, issues/V resolutions, successful runtime/tokens, and E+V minus E / C minus E+V. Preserve counts, denominators, units/reasons, and pending/unavailable/not-applicable states. Each numbered package saves JSON/CSV, exact review inputs, and code/schema/dependencies; recheck inputs/code and optionally require completed review. Added `summarize_metrics` with explicit one-result-per-plan selections, method checks, archived-judgment recalculation, and fingerprints. Percentages/paired changes use equal-plan means; counts/resources use labelled totals with contributing/excluded plans. Preserve numbered reports, JSON/CSV, result copies, and code under the then-current `data/reports/`. Reuse shared assessment checks and metric rows. Updated guides/diagram.
+- **Reason:** Reproduce agreed arithmetic and selections without replacing judgments, obscuring missingness, or overwriting earlier results.
+- **Observed result:** Calculation passed 323 related tests (40 new); summaries passed 369 (46 summary cases). Checks covered the 70% example, grouping denominators, paired units, E+V costs, C parallel timing/tokens, missing/zero/pending values, unequal plan sizes, contributing sets, two fictional PDF packages, changed inputs, archived recalculation, duplicates, preserved versions, and interrupted saves. Link/CLI checks passed. Freetown's reference stayed unchanged/unfrozen; no real assessments/reports or paid requests were created.
+- **Remaining questions:** Failure-reporting scope, real expert assessment, comparison controls, and instruction export remained pending. Scientific per-plan and cross-plan results are **Not yet tested**.
+
+### 2026-11-24 — Use one comparison sample with manually tracked selections
+
+- **Category:** Code / Data / Research
+- **Problem:** Separate plan categories excluded the initial two plans; execution/reporting labels complicated one ten-plan study with manual final selections.
+- **Decision/change:** Moved both registry entries into one comparison sample, refining on two first. Initially separated development/comparison run purposes, then simplified active commands/schemas to comparison throughout that day. Restored latest eligible assessment defaults with explicit overrides; record final first-successful selections/versions manually and rerun all three configurations across all ten after workflow changes. Preserve earlier runs and their original labels/bytes through a separate read-only compatibility view; reject unknown labels. Standardized operational feedback and updated guides.
+- **Reason:** Use one workflow for refinement/final execution while preserving reproducibility through recorded settings, IDs, and fingerprints.
+- **Observed result:** Initial sample support passed 2,748 tests (19 new cases); simplification passed 2,738 (23 archive-compatibility cases). Both included a ten-plan report with distinct fictional PDFs. All 25 historical runs loaded unchanged; preservation checks covered 9,697 then 9,698 research files, with only the authorized initial registry-membership changes. Documentation/installed-CLI checks passed after an offline editable-install refresh. No paid requests or real assessments were created.
+- **Remaining questions:** E/V evidence checks, unused failure fields, real assessment, current live settings, the final run set, and curation/export remained pending. Scientific outcomes are **Not yet tested**.
+
+</details>
+
+<a id="2026-11-25"></a>
 <details open>
-<summary><strong>2026-11-24</strong> — assessments, metrics, and summaries (4 entries)</summary>
+<summary><strong>2026-11-25</strong> — data storage, dataset building, and validation (7 entries)</summary>
 
-### 2026-11-24 — Create assessment review files and move references under data
-
-- **Category:** Code / Data / Research
-- **Problem:** Manual assessment lacked generated review inputs, and expert references lived outside the data directory.
-- **Decision/change:** Agreed CSV judgments with generated JSON metadata and future JSON results/CSV summaries. Added `create_assessment` with latest validated successful E, linked V, and same-preparation C defaults, explicit run overrides, reviewer identities, input fingerprints, and three prefilled CSVs with blank judgments. Moved reference commands and existing files to `data/expert_references/`; assessments use `data/assessments/`. Preserved historical freeze bytes/path provenance and excluded both directories from Git. Updated README, IMPLEMENTATION, and DESIGN.
-- **Reason:** Prepare reproducible manual review inputs while keeping research files together and preserving independent references and assessed outputs.
-- **Observed result:** Full regression passed 2,529 tests with 11 existing OCR/PyTorch warnings, including 36 assessment-creation and 7 migration tests. Freetown's guided reference moved byte-for-byte and remains unfrozen. All 25 historical records loaded, and read-only defaults resolved compatible runs for both development plans. Documentation checks passed for 94 local links/anchors, 13 CLI examples, and format tables against their schemas. No paid requests were made.
-- **Remaining questions:** CSV validation, metric calculation, failure-reporting scope, manual review, formal comparison controls, and instruction export remain pending. Assessment with a completed real expert reference is **Not yet tested**.
-
-### 2026-11-24 — Validate assessment records and review completion
+### 2026-11-25 — Simplify assessment interfaces and reporting formats
 
 - **Category:** Code / Data / Research
-- **Problem:** Saved manual review CSVs lacked checks before metric calculation.
-- **Decision/change:** Added read-only `validate_assessment` with exact input/source checks, strict CSV/JSON parsing, configuration-specific links, reference-row and output-group coverage, eligible V-resolution checks, and consistent judgments. Blank or undetermined judgments remain pending; `--require-complete` requires settled review. Parsed judgments and assessment-file fingerprints are available in memory for later calculations. Updated README, IMPLEMENTATION, DESIGN, and the workflow diagram.
-- **Reason:** Preserve selected evidence and scoring denominators while distinguishing unfinished review from invalid records.
-- **Observed result:** Full regression passed 2,639 tests with 11 existing OCR/PyTorch warnings, including 110 new assessment-validation tests covering pending/completed reviews, regrouping, empty outputs, damaged files, changed inputs, and CLI exit codes. Checks passed for 95 local links/anchors and 16 README CLI examples; all 25 historical run records loaded. Freetown's reference remains unchanged and unfrozen, and no real assessments or paid requests were created.
-- **Remaining questions:** Metric calculation, failure-reporting scope, real-plan manual review, formal comparison controls, and instruction export remain pending. Scientific assessment with completed real references is **Not yet tested**.
+- **Problem:** Assessment purpose duplicated its fixed role; unused failure fields and legacy-format adapters conflicted with the agreed study.
+- **Decision/change:** Removed the assessment purpose flag/API parameters, then the metadata field (version 2). A temporary version-1 reader was added and then removed before any real assessments existed. Removed `included_attempts`, `failure_reporting`, failure-count CSV/aggregate rows, stale CLI messages, and assessment/result/report adapters; retained registry/model-run compatibility. Per-plan exports contain 44 measure rows. No further version bump/migration layer was needed. Model-run purpose flags remain. Updated schemas, tests, help, and guides.
+- **Reason:** Simplify unused formats before first use while preserving selected-successful-output measures and historical run evidence.
+- **Observed result:** Interface removal passed 60 related checks; metadata removal passed 271. Format cleanup passed 622 (344 registry/run and 278 assessment/metric/report checks), plus three updated CLI rechecks. Tests included ten-plan reporting, archived snapshots, current metadata, and strict validation. All 25 historical runs loaded and all 9,697 research files stayed unchanged. Link/CLI/schema checks passed; no real assessments/reports or live model requests were created.
+- **Remaining questions:** None for this cleanup; real expert assessment remains pending.
 
-### 2026-11-24 — Calculate and preserve per-plan assessment metrics
+### 2026-11-25 — Align E/V saved-evidence checks with C
+
+- **Category:** Code / Research
+- **Problem:** E/V storage lacked C's final-candidate and archived-code consistency checks.
+- **Decision/change:** Shared both checks across E/V/C during successful finalization and loading. Accepted answers must match the report-selected raw/repaired candidate, and archived code must match its startup SHA-256 manifest. Reject missing/malformed successful-run evidence while preserving incomplete failed attempts. Updated README, IMPLEMENTATION, DESIGN, and tests.
+- **Reason:** Ensure assessments use answers and code consistent with the preserved run evidence.
+- **Observed result:** All 630 related checks passed across targeted and regression runs, including 74 new cases for answer/code changes, strict parsing, saved E/V finalization, and downstream assessment/report rejection. All 25 historical runs loaded, and all 9,697 research files remained unchanged. Documentation checks passed for 103 local links/anchors, 15 README commands, and metadata fields. No live model requests were made.
+- **Remaining questions:** None for these two checks; source correctness remains expert assessment.
+
+### 2026-11-25 — Clarify data storage and preserve historical paths
+
+- **Category:** Code / Data
+- **Problem:** Folder names obscured workflow stages; moving source files risked breaking recorded paths and fingerprints.
+- **Decision/change:** Added `migrate_data_layout` with read-only preview, collision/symlink checks, byte verification, interrupted-move recovery, and registry-path updates. PDFs now use `data/source_pdfs/`, preparations `data/prepared_plans/`, and study artifacts `data/comparison/`. Reserved `data/dataset_building/` directories for drafts, reviewed plans, and combined action datasets. Historical source/reference paths resolve to moved files without rewriting saved JSON. Selection, links, and retries recognize equivalent source paths. Updated current writers, tests, ignore rules, README, IMPLEMENTATION, and DESIGN. Recorded `finalize_reviewed_plan` and `dataset_contents.json` as planned names.
+- **Reason:** Separate shared inputs, comparison work, and later dataset building while preserving reproducibility.
+- **Observed result:** Moved 149 files: two PDFs, 146 preparation/image files, and one reference. All 9,697 research files matched their original hashes at mapped locations; all 25 run objects loaded exactly unchanged. Only registry path fields changed; the starter reference remains unfrozen. All 2,829 current test cases were covered across the regression run and targeted rechecks, including 355 final path-identity checks and 15 migration cases. Two folder-depth fixture setups were corrected and passed rechecks. The main run retained 11 existing OCR/PyTorch warnings. Checks passed for 103 local links/anchors, 17 README commands, metadata fields, installed CLI listing, and an idempotent migration preview. All 36 earlier log entries were preserved. No live model requests were made.
+- **Remaining questions:** Dataset-building execution, review commands, reviewed/combined-data contracts, and collection assembly remain planned. Instruction export is deferred.
+
+### 2026-11-25 — Add dataset-building execution and protect study selections
 
 - **Category:** Code / Data / Research
-- **Problem:** Validated judgments had no calculation or export workflow.
-- **Decision/change:** Added development `calculate_metrics` with reference scores, reviewed activity counts/evidence percentages, open issues, confirmed/claimed V resolutions, runtime/tokens, and E+V minus E / C minus E+V changes. Results preserve pending, unavailable, and not-applicable states with counts, denominators, units, and reasons. Each numbered export retains JSON results, a CSV summary, exact review-file copies, and calculation code/schema/dependency snapshots. Added optional strict manual-completion checks, result-schema validation, and input/code rechecks before publication. Updated README, IMPLEMENTATION, DESIGN, and the workflow diagram.
-- **Reason:** Make agreed per-plan calculations reproducible without replacing expert judgments or overwriting earlier results.
-- **Observed result:** All 323 related assessment, CLI, reference-freeze, and migration regression tests passed, including 40 new metric tests. Checks covered the design's 70% example, grouping denominators, paired directions/units, shared E+V costs, C parallel timing and token totals, missing observations, pending judgments, zero denominators, preserved recalculations, and interrupted publication. Documentation checks passed for 97 local links/anchors and 17 CLI examples. Freetown's reference remains unchanged and unfrozen; no real assessments or paid model requests were created.
-- **Remaining questions:** Failure-reporting scope/counts, cross-plan aggregation, the real-plan manual assessment pilot, formal comparison controls, and instruction export remain pending. Scientific results from completed real references are **Not yet tested**.
+- **Problem:** Post-study execution needed a separate purpose without changing plan membership or mixing its outputs into comparison assessments.
+- **Decision/change:** Enabled `--purpose dataset_building` for E/V/C on comparison or expansion plans; kept comparison as the default, requiring comparison membership. V selects only same-purpose E inputs. Retries retain purpose, and saved-run loading checks linked purposes. Assessments skip dataset-building defaults and reject explicit selections; the same gate protects validation, metrics, and reports. Updated README, IMPLEMENTATION, DESIGN, schemas, help, and tests.
+- **Reason:** Support fresh runs of the chosen configuration for the original ten plans and later expansion while preserving study selections and historical evidence.
+- **Observed result:** All 837 related tests passed, including 29 new cases, saved E/V/C execution, selection/retry boundaries, assessment rejection, and ten-plan reporting. All 25 historical run objects loaded unchanged; the registry and all 9,697 research files matched the pre-change contents. Checks passed for installed E/V/C help, 103 local links/anchors, 19 README commands, and all 10 assessment metadata fields. All 37 earlier entries were preserved. No live inference was performed.
+- **Remaining questions:** Fresh live dataset-building execution and output quality are **Not yet tested**. Chosen-configuration tracking, review drafts, reviewed-plan finalization, and combined dataset assembly remain planned. Instruction export is deferred.
 
-### 2026-11-24 — Summarize selected plan metrics
+### 2026-11-25 — Add plan review lifecycle and remove name capture
+
+- **Category:** Code / Data / Process
+- **Problem:** Dataset-building outputs lacked editable review drafts and a completed clean-plan product. Reference, freezing, and assessment interfaces required unnecessary names or study IDs.
+- **Decision/change:** Added `create_review_draft`, `validate_review_draft`, and `finalize_reviewed_plan` with separate draft, completion-record, and reviewed-plan schemas. Select only successful dataset-building E/E+V/C runs; preserve original issue identities and model-resolved decisions, require expert resolutions for open concerns, and retain newly raised expert issues. Check issues before writing clean metadata/actions without issue objects. Save exact draft/run copies and separate issue history, fingerprints, time, and review scope; check completed snapshots on loading and resume only matching interrupted writes. Removed `prepared_by`, `frozen_by`, and `reviewers` from current APIs/schemas and their CLI flags. Removed only `prepared_by` from Plan 0001's unfrozen reference. Updated review guidance, README, IMPLEMENTATION, and DESIGN.
+- **Reason:** Separate editable work, completed review evidence, and clean data while preserving traceability without personal identifiers. Review covers remaining open issues, without claiming a full audit of the output or omissions.
+- **Observed result:** All 673 related cases passed, including 65 new review cases, reference/curation checks, name-free assessments, metrics, ten-plan reports, migration, and CLI behavior. A final guidance update passed 34 focused rechecks, including saved metric/report loading. All 25 historical run objects and the registry remained unchanged; the only research-file change was the requested reference-field removal, with all other reference content preserved. Checks passed for installed command help, 107 local links/anchors, 22 README commands, and three metadata tables. All 38 earlier log entries were preserved. No live inference was performed.
+- **Remaining questions:** Real-plan use is **Not yet tested**. Collection-wide configuration/version checks and `build_heat_action_dataset` remain planned; instruction export is deferred.
+
+### 2026-11-25 — Build combined heat action datasets
 
 - **Category:** Code / Data / Research
-- **Problem:** Saved per-plan results lacked a combined study report.
-- **Decision/change:** Added `summarize_metrics` with explicit saved-result selections, one calculation per plan, compatible-method checks, package fingerprints, and recalculation from archived judgments. Percentages and paired changes use equal-plan means; counts/resources use labelled totals. Each measure records contributing/excluded plans and preserves pending/unavailable values. Reports retain JSON/CSV, selected result copies, and calculation code under numbered `data/reports/` folders, excluded from Git. Shared assessment validation now supports archived inputs, and metric rows are reused across exports. Updated README, IMPLEMENTATION, DESIGN, and the workflow diagram.
-- **Reason:** Make study summaries reproducible while keeping plan weighting, paired eligibility, and missing observations explicit.
-- **Observed result:** All 369 related summary, metric, assessment, CLI, reference-freeze, and migration regression tests passed, including 46 summary tests. Checks covered unequal plan sizes, different contributing sets, paired changes, zero/missing values, archived recalculation, changed files, duplicate selections, two distinct fictional source packages, and preserved/interrupted reports. Documentation checks passed for 99 local links/anchors and 18 CLI examples. Freetown's reference remains unchanged and unfrozen; no real assessments/reports or paid model requests were created.
-- **Remaining questions:** Failure-reporting scope/counts, the real-plan assessment pilot, formal comparison controls, and instruction export remain pending. Scientific cross-plan results from completed real assessments are **Not yet tested**.
+- **Problem:** Completed reviewed plans could not be assembled into a preserved dataset with configuration consistency and duplicate prevention.
+- **Decision/change:** Added `build_heat_action_dataset --review <path>` for explicit completed review versions. Require one common recorded E/E+V/C workflow: model/provider settings, ordered prompts, tools, budgets, software-version information, and archived code. Include both linked E/V stages and all C profiles/limits. Reject duplicate plans or original PDFs. Write issue-free combined metadata/actions, `dataset_contents.json`, exact review copies, and assembly-code snapshots into a new `dataset_NNNN/`. Publish contents last, reserve interrupted versions, and validate stored packages independently of later live-review edits. Updated README, IMPLEMENTATION, DESIGN, schemas, help, and tests.
+- **Reason:** Preserve source/review provenance and earlier versions while extending the heat adaptation action dataset under one recorded workflow. Plan-specific inputs and observations may differ; matching recorded values does not verify undisclosed hosted revisions.
+- **Observed result:** All 228 related tests passed, including 59 new assembly cases covering E/E+V/C, completed reviews, mismatched settings/code, duplicate plans/PDFs, a ten-plan build, local action IDs, prior-version preservation, interrupted publication, changed inputs/copies/code, strict loading, and CLI/path behavior. Related review, saved-evidence, CLI, and two-plan reporting regressions passed. All 25 historical run objects, the registry, and 9,697 research files remained unchanged. Checks passed for installed help, 111 local links/anchors, 23 README commands, both new schemas, and three metadata tables. All 39 earlier entries were preserved. No live inference or real dataset builds were performed.
+- **Remaining questions:** Real-plan assembly is **Not yet tested**. Pilot the full dataset-building/review/assembly workflow after study configuration selection. Instruction export and fine-tuning remain deferred.
+
+### 2026-11-25 — Harden C validation and clarify completed-output checks
+
+- **Category:** Code / Process
+- **Problem:** C compared UTC timestamps as text and could crash on malformed saved input. Review/assembly/CLI logic was dense or duplicated, and completed-output checks lacked direct CLI commands.
+- **Decision/change:** Compare parsed UTC times and reconstruct/type-check preserved C input. Share JSON/hash/path/version helpers, expose completed-review snapshots, separate validation/dispatch phases, and add focused comments/type hints. Added read-only `validate_reviewed_plan` and `validate_heat_action_dataset`, exposing checks already used during finalization/assembly. Updated guides for the current lifecycle and grouped related same-day history while preserving decisions/results.
+- **Reason:** Make file consistency and completion checks easier to understand and rerun without editing data or creating versions.
+- **Observed result:** The code pass completed with all 2,994 tests passing, including 28 new regression cases, and 11 OCR dependency warnings. All 25 historical runs loaded unchanged; all 9,697 research files and the registry were preserved. No live model requests were made. Documentation checks passed for 119 local links/anchors, 24 README commands, and three field tables; all 40 earlier events are retained in 32 grouped entries.
+- **Remaining questions:** Current live settings, real-plan review/assembly, and final study outcomes are **Not yet tested**. Instruction export/fine-tuning remain deferred.
 
 </details>

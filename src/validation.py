@@ -22,6 +22,7 @@ from referencing.jsonschema import DRAFT202012
 
 from repair import COMPLETION_STATUSES, CompletionStatus, repair_agent_response
 from expert_templates import placeholder_locations
+from legacy_records import canonical_data_path, comparison_membership, effective_run_purpose, is_archived_external_run, validation_view
 
 
 # Resolve the schema relative to this module, independently of the terminal's path.
@@ -92,8 +93,38 @@ def validate_registry_structure(data: object) -> list[ValidationProblem]:
     paths resolve, records are unique, or a fingerprint matches an original PDF.
     """
     return _validate_structure(
-        data, _REGISTRY_SCHEMA_PATH, "registry", required_formats=("date",)
+        validation_view(data, "registry"), _REGISTRY_SCHEMA_PATH, "registry", required_formats=("date",)
     )
+
+
+def is_study_sample(study_set: str) -> bool:
+    """Recognize the comparison sample, including archived membership labels."""
+    return comparison_membership(study_set) == "comparison"
+
+
+RUN_PURPOSES = ("comparison", "dataset_building")
+
+
+def require_run_purpose(purpose: str) -> None:
+    """Require an explicit current purpose; archived labels are read-only."""
+    if purpose not in RUN_PURPOSES:
+        raise ValueError("Run purpose must be comparison or dataset_building.")
+
+
+def validate_run_purpose(purpose: str, study_set: str) -> list[ValidationProblem]:
+    """Keep plan membership separate from why a run was executed."""
+    if is_archived_external_run(purpose, study_set):
+        return []
+    purpose = effective_run_purpose(purpose)
+    if purpose not in RUN_PURPOSES:
+        return [ValidationProblem("other", "$.purpose", "Run purpose must be comparison or dataset_building.")]
+    if purpose == "dataset_building":
+        if comparison_membership(study_set) not in {"comparison", "expansion"}:
+            return [ValidationProblem("reference", "$.purpose", "Dataset building requires a registered comparison or expansion plan.")]
+    elif not is_study_sample(study_set):
+        return [ValidationProblem("reference", "$.purpose",
+                                  "Comparison runs require a plan in the study sample.")]
+    return []
 
 
 def validate_preparation_structure(data: object) -> list[ValidationProblem]:
@@ -183,7 +214,7 @@ def validate_run_record_structure(data: object) -> list[ValidationProblem]:
     definitions, including their required fields, without copying those rules.
     """
     problems = _validate_structure(
-        data, _RUN_SCHEMA_PATH, "run record", required_formats=("date", "date-time"),
+        validation_view(data, "run"), _RUN_SCHEMA_PATH, "run record", required_formats=("date", "date-time"),
         schema_references=(
             (_PLAN_DATA_SCHEMA_URI, _PLAN_DATA_SCHEMA_PATH),
             (_AGENT_RESPONSE_SCHEMA_URI, _AGENT_RESPONSE_SCHEMA_PATH),
@@ -278,7 +309,7 @@ def validate_run_links(
 
     Storage loads the exact same-plan target paths. Different model profiles are
     expected for verification, while the preparation and shared tools must match.
-    An exploratory verifier repeat may still use a comparison extractor output.
+    Archived classification labels do not determine current study selections.
     """
     problems = []
     # The caller has loaded these target dictionaries from explicitly selected
@@ -293,8 +324,10 @@ def validate_run_links(
                 or input_run["stage"] != "extractor" or input_run["status"] != "succeeded"
             ):
                 problems.append(ValidationProblem("reference", "$.input_run_id", "Verification requires the selected successful extractor run for the same plan."))
-            if input_run["source_path"] != record["source_path"]:
+            if canonical_data_path(input_run["source_path"]) != canonical_data_path(record["source_path"]):
                 problems.append(ValidationProblem("reference", "$.source_path", "Verification must use its extractor's exact saved preparation."))
+            if effective_run_purpose(input_run["purpose"]) != effective_run_purpose(record["purpose"]):
+                problems.append(ValidationProblem("reference", "$.input_run_id", "Extractor and verifier purposes must match."))
             if input_run["settings"]["document_tools"] != record["settings"]["document_tools"]:
                 problems.append(ValidationProblem("reference", "$.settings.document_tools", "Verification and extraction must use the same shared document-tool settings."))
             ceiling = record["settings"].get("max_elapsed_seconds")
@@ -306,10 +339,6 @@ def validate_run_links(
                 if (reserve is not None and input_run["elapsed_seconds"] is not None
                         and input_run["elapsed_seconds"] > ceiling - reserve):
                     problems.append(ValidationProblem("reference", "$.input_run_id", "The selected E must leave the protected final window for V."))
-            if record["purpose"] == "comparison" and input_run["purpose"] != "comparison":
-                # Preserve deliberate exploratory repeats without allowing one
-                # to replace the main comparison extraction through this link.
-                problems.append(ValidationProblem("reference", "$.input_run_id", "A comparison verifier requires a comparison extractor run."))
             if (
                 record["plan_issues"] is not None
                 and input_run["plan_issues"] is not None
@@ -327,9 +356,10 @@ def validate_run_links(
             retry_run["run_id"] != record["retry_of_run_id"]
             or retry_run["plan_id"] != record["plan_id"]
             or retry_run["stage"] != record["stage"] or retry_run["status"] != "failed"
+            or effective_run_purpose(retry_run["purpose"]) != effective_run_purpose(record["purpose"])
             or (record["stage"] == "verifier" and retry_run["input_run_id"] != record["input_run_id"])
         ):
-            problems.append(ValidationProblem("reference", "$.retry_of_run_id", "Retry the failed same-plan, same-stage attempt; verifier retries must retain its exact extractor input."))
+            problems.append(ValidationProblem("reference", "$.retry_of_run_id", "Retry the failed same-plan, same-stage, same-purpose attempt; verifier retries must retain its exact extractor input."))
     return problems
 
 
@@ -563,6 +593,15 @@ def _validate_plan_issues_references(
     return problems
 
 
+def parse_utc_timestamp(value: str) -> datetime:
+    """Parse a timestamp after its UTC/calendar schema checks have passed.
+
+    Equivalent Z/+00:00 forms and optional fractional seconds cannot be ordered
+    reliably as text. Callers compare these datetime values instead.
+    """
+    return datetime.fromisoformat(value.upper().replace("Z", "+00:00"))
+
+
 def validate_run_record(
     data: object, *, page_count: int | None = None
 ) -> list[ValidationProblem]:
@@ -615,8 +654,8 @@ def validate_run_record(
     if data["ended_at"] is not None:
         # UTC/calendar syntax has already passed the schema. Parse only to check
         # ordering; never fill elapsed_seconds from wall-clock timestamps.
-        start = datetime.fromisoformat(data["started_at"].upper().replace("Z", "+00:00"))
-        end = datetime.fromisoformat(data["ended_at"].upper().replace("Z", "+00:00"))
+        start = parse_utc_timestamp(data["started_at"])
+        end = parse_utc_timestamp(data["ended_at"])
         if end < start:
             problems.append(ValidationProblem("reference", "$.ended_at", "A run cannot end before it starts."))
 
@@ -1049,15 +1088,15 @@ def _validate_run_record_paths(record: dict) -> list[ValidationProblem]:
     problems.extend(source_problems)
     if not source_problems:
         match = re.fullmatch(
-            rf"data/processed/{re.escape(record['plan_id'])}/preparation_([0-9]+)/preparation\.json",
-            record["source_path"],
+            rf"data/prepared_plans/{re.escape(record['plan_id'])}/preparation_([0-9]+)/preparation\.json",
+            canonical_data_path(record["source_path"]),
         )
         # fullmatch requires the entire expected layout. strip("0") distinguishes
         # a positive preparation number from all-zero spellings without converting
         # an arbitrarily long digit string into an integer.
         if match is None or not match.group(1).strip("0"):
             problems.append(ValidationProblem(
-                "reference", "$.source_path", "Source must identify this plan's preparation_<positive number>/preparation.json under data/processed/."
+                "reference", "$.source_path", "Source must identify this plan's preparation_<positive number>/preparation.json under data/prepared_plans/."
             ))
 
     for index, path in enumerate(record["settings"]["prompt_paths"]):

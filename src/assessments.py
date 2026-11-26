@@ -1,4 +1,4 @@
-"""Create development assessment inputs from exact saved runs and a frozen reference.
+"""Create assessment inputs from exact saved runs and a frozen reference.
 
 Creation copies context and leaves every expert judgment blank. It never calls a
 model, matches activities by ID, calculates scores, or changes research inputs.
@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import expert_files
 import storage
 import validation
+from legacy_records import canonical_data_path, effective_run_purpose
 
 
 PREFIXES = {"extractor": "run_extract", "verifier": "run_verify", "collaboration": "run_collaboration"}
@@ -31,15 +32,15 @@ RESOLUTION_COLUMNS = (
     "claimed_resolution", "confirmed", "reason",
 )
 INSTRUCTIONS = [
-    "This is a development assessment. Formal comparison controls and metric calculation are separate work.",
+    "All study work uses comparison. Check final versions and first-successful-run selections against the manual study log; this form does not certify which runs belong in the final analysis.",
     "All judgment cells start blank (pending). A blank score is not zero, and blank judgments are not false.",
     "action_scores.csv: match by meaning. Enter matched_output_action_ids as a JSON list, for example [\"action_0001\", \"action_0003\"]. Use [] for a confirmed omission. Score 0, 0.5, or 1 and give a reason.",
     "output_review.csv starts with one candidate activity per output record. Confirm activity grouping before scoring: combine repeated/split records or split bundled activities. Each group needs a unique output_activity_id within its configuration and a JSON list of output_action_ids.",
     "activity_description can label a regrouped activity. Evidence is reading context copied from linked output records; keep its original quotations/pages and judge the saved outputs and PDF. IDs are local to each dataset. Supported activity does not imply every detail is correct.",
     "For activity_supported, evidence_adequate, and confirmed, use yes, no, or undetermined and explain the judgment. Leave unreviewed cells blank.",
     "verifier_resolutions.csv contains initially open E issues that V marks resolved by verifier. Confirm only when every grouped concern is addressed. C issues and reference issues are separate.",
-    "Metadata fixes the selected inputs; newer runs do not replace them. Keep original outputs and the frozen reference intact. Corrections belong in separate curated answers after assessment.",
-    "included_attempts is null until a failure-reporting scope is agreed; this does not mean zero failures.",
+    "Metadata fixes the selected inputs; newer runs do not replace them. Keep original outputs and the frozen reference intact. Later corrections belong in review drafts from fresh dataset_building runs.",
+    "Metrics cover the selected successful outputs. Failed and superseded attempts remain execution history and are excluded from study outcomes.",
 ]
 
 
@@ -63,8 +64,8 @@ def _run_snapshot(root, plan_id, stage, run_id):
     if path.read_bytes() != raw:
         raise ValueError(f"Saved run changed while selecting it: {run_id}")
     if (record["plan_id"] != plan_id or record["stage"] != stage
-            or record["status"] != "succeeded" or record["purpose"] != "development"):
-        raise ValueError(f"Select a validated, successful development {stage} run for this plan: {run_id}")
+            or record["status"] != "succeeded" or effective_run_purpose(record["purpose"]) != "comparison"):
+        raise ValueError(f"Select a validated, successful comparison {stage} run for this plan: {run_id}")
     return {"record": record, "record_path": relative, "record_sha256": _fingerprint(raw)}
 
 
@@ -73,7 +74,7 @@ def _select_run(root, plan_id, stage, *, run_id=None, source_path=None, input_ru
     def checked(identifier):
         snapshot = _run_snapshot(root, plan_id, stage, identifier)
         record = snapshot["record"]
-        if source_path is not None and record["source_path"] != source_path:
+        if source_path is not None and canonical_data_path(record["source_path"]) != canonical_data_path(source_path):
             raise ValueError(f"Run {identifier} uses another preparation; select a compatible set of runs.")
         if input_run_id is not None and record["input_run_id"] != input_run_id:
             raise ValueError(f"Verifier {identifier} is not linked to selected E {input_run_id}.")
@@ -98,7 +99,7 @@ def _select_run(root, plan_id, stage, *, run_id=None, source_path=None, input_ru
         result["selected_via"] = "latest_successful"
         return result
     context = f" linked to E {input_run_id}" if input_run_id else ""
-    raise ValueError(f"No validated, successful development {stage} run{context} uses the selected source. "
+    raise ValueError(f"No validated, successful {stage} run{context} uses the selected source. "
                      "Select earlier compatible run IDs explicitly or complete the missing run.")
 
 
@@ -116,8 +117,8 @@ def select_assessment_runs(
     storage._require_run_identifier(plan_id)
     registry = storage.load_registry(root)
     plan = next((entry for entry in registry["plans"] if entry["plan_id"] == plan_id), None)
-    if plan is None or plan["study_set"] != "development":
-        raise ValueError("Assessment creation currently accepts registered development plans only.")
+    if plan is None or not validation.is_study_sample(plan["study_set"]):
+        raise ValueError("Assessment creation requires a registered plan in the study sample.")
     explicit_v = None
     if verifier_run_id is not None and extractor_run_id is None:
         explicit_v = _select_run(root, plan_id, "verifier", run_id=verifier_run_id)
@@ -138,8 +139,8 @@ def _reference_snapshot(root, plan_id):
     freeze = storage.load_expert_reference_freeze(root, plan_id)
     if freeze is None:
         raise ValueError("Complete, review, and freeze the expert reference before creating an assessment.")
-    reference_path = f"data/expert_references/{plan_id}/expert_reference.json"
-    freeze_path = f"data/expert_references/{plan_id}/reference_freeze.json"
+    reference_path = f"data/comparison/expert_references/{plan_id}/expert_reference.json"
+    freeze_path = f"data/comparison/expert_references/{plan_id}/reference_freeze.json"
     raw = storage.read_expert_reference_bytes(root, plan_id)
     # A changed form cannot be paired with the earlier validated data, even if
     # someone also rewrites the freeze file between reads.
@@ -204,7 +205,7 @@ def _verifier_resolution_rows(snapshots):
 
 
 def _assessment_directory(root, plan_id):
-    parent = storage.resolve_project_path(root, f"data/assessments/{plan_id}")
+    parent = storage.resolve_project_path(root, f"data/comparison/assessments/{plan_id}")
     if parent.resolve() != parent:
         raise ValueError("Assessment paths must not use symbolic links.")
     numbers = []
@@ -236,20 +237,18 @@ def _recheck_inputs(root, plan_id, metadata):
 
 
 def create_assessment(
-    project_root: Path | str, plan_id: str, *, reviewers: list[str],
+    project_root: Path | str, plan_id: str, *,
     extractor_run_id: str | None = None, verifier_run_id: str | None = None,
     collaboration_run_id: str | None = None, notes: str | None = None,
 ) -> str:
     """Create metadata and three prefilled CSVs, preserving every earlier assessment.
 
-    Only development assessments are enabled. Judgments remain pending and a
-    completed frozen reference is required. No calculations or model calls run.
+    Judgments remain pending and a completed frozen reference is required.
+    Explicit IDs pin manual selections; defaults select latest eligible runs.
+    No model calls run.
     Like run storage, an interrupted publication can retain partial files. The
     metadata file is published last; a folder without it is not a complete form.
     """
-    if (not isinstance(reviewers, list) or not reviewers
-            or any(not isinstance(name, str) or not name.strip() for name in reviewers)):
-        raise ValueError("Supply at least one nonblank reviewer name or study ID.")
     if notes is not None and (not isinstance(notes, str) or not notes.strip()):
         raise ValueError("Assessment notes must be nonblank text when supplied.")
     root = Path(project_root).resolve()
@@ -263,9 +262,9 @@ def create_assessment(
         raise ValueError("The selected preparation and frozen reference must identify the same original PDF.")
     identifier, destination = _assessment_directory(root, plan_id)
     metadata = {
-        "schema_version": 1, "assessment_id": identifier, "plan_id": plan_id,
-        "purpose": "development", "created_at": datetime.now(timezone.utc).isoformat(),
-        "reviewers": reviewers, "notes": notes, "reference": reference_identity,
+        "schema_version": 2, "assessment_id": identifier, "plan_id": plan_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "notes": notes, "reference": reference_identity,
         "source": {
             "preparation_path": source_path, "fingerprint": storage.preparation_text_fingerprint(preparation, pages),
             "document_sha256": preparation["document_sha256"].lower(), "page_count": preparation["page_count"],
@@ -274,7 +273,7 @@ def create_assessment(
             "run_id": snapshot["record"]["run_id"], "record_path": snapshot["record_path"],
             "record_sha256": snapshot["record_sha256"], "selected_via": snapshot["selected_via"],
         } for configuration, snapshot in snapshots.items()},
-        "included_attempts": None, "instructions": list(INSTRUCTIONS),
+        "instructions": list(INSTRUCTIONS),
     }
     problems = validation.validate_assessment_metadata(metadata)
     if problems:

@@ -46,7 +46,7 @@ def test_coordinator_cannot_enter_existing_input_builders(coordinator_project, s
         else:
             agents.build_verifier_input(
                 coordinator_project, "plan_0001", profile_name="fictional_coordinator",
-                purpose="development",
+                purpose="comparison",
             )
     assert snapshot(coordinator_project) == before
 

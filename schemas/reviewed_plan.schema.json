@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:reviewed-plan",
+  "title": "Reviewed plan data",
+  "description": "Plan metadata and actions only. Review resolutions and provenance live in the accompanying review record.",
+  "$ref": "urn:heat-adaptation:plan-data"
+}

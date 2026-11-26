@@ -208,8 +208,8 @@ def test_confirmed_activity_groups_supply_denominator_instead_of_raw_records(rep
     assert measure(result, "E", "adequate_evidence_percentage")["denominator"] == 12
 
 
-def test_failure_scope_is_unavailable_and_invalid_reports_are_rejected(report):
-    assert metrics.summarize_assessment(report)["failure_reporting"]["counts"] == {"E": None, "V": None, "C": None}
+def test_results_exclude_failure_counts_and_invalid_reviews_are_rejected(report):
+    assert "failure_reporting" not in metrics.summarize_assessment(report)
     with pytest.raises(ValueError, match="valid assessment"):
         metrics.summarize_assessment(review.AssessmentValidation(None, [], [], {}))
 
@@ -237,7 +237,7 @@ def test_export_validates_and_preserves_inputs_code_and_summary(saved_assessment
     assert exported == path + "/metrics_0001"
     result = result_at(root, exported)
     assert validation.validate_metrics_results(result) == []
-    assert result["review"]["complete"] and result["purpose"] == "development"
+    assert result["review"]["complete"] and result["purpose"] == "comparison"
     for name, expected in result["assessment"]["files"].items():
         raw = (root / exported / "assessment_inputs" / name).read_bytes()
         assert raw == before[f"{path}/{name}"]
@@ -249,10 +249,11 @@ def test_export_validates_and_preserves_inputs_code_and_summary(saved_assessment
     assert hashlib.sha256(summary.read_bytes()).hexdigest() == result["summary"]["sha256"]
     with summary.open(newline="") as stream:
         rows = list(csv.DictReader(stream))
-    assert len(rows) == 47 and set(rows[0]) == set(metrics.SUMMARY_COLUMNS)
+    assert len(rows) == 44 and set(rows[0]) == set(metrics.SUMMARY_COLUMNS)
     assert any(row["scope"] == "paired_change" and row["unit"] == "percentage_points" for row in rows)
-    failure_rows = [row for row in rows if row["metric"] == "failed_executions"]
-    assert len(failure_rows) == 3 and all(row["value"] == "" and row["status"] == "unavailable" for row in failure_rows)
+    assert all(row["metric"] != "failed_executions" and row["scope"] != "failure_reporting" for row in rows)
+    assert "failure_reporting" not in result
+    assert "included_attempts" not in result["assessment"]["metadata"]
     after = snapshot(root)
     assert all(after[name] == raw for name, raw in before.items())
     assert all(name.startswith(exported + "/") for name in set(after) - set(before))
@@ -352,12 +353,16 @@ def test_changed_code_is_detected_before_publication(saved_assessment, monkeypat
     assert not (root / path / "metrics_0001").exists()
 
 
-@pytest.mark.parametrize("damage", ["missing_field", "pending_zero", "unknown_status", "bad_hash"])
+@pytest.mark.parametrize("damage", [
+    "missing_field", "pending_zero", "unknown_status", "bad_hash", "failure_reporting", "included_attempts",
+])
 def test_result_schema_rejects_malformed_output(saved_assessment, damage):
     root, path = saved_assessment
     result = result_at(root, calculate(root, path))
     if damage == "missing_field": del result["paired_changes"]
     elif damage == "bad_hash": result["summary"]["sha256"] = "invalid"
+    elif damage == "failure_reporting": result["failure_reporting"] = {"status": "unavailable"}
+    elif damage == "included_attempts": result["assessment"]["metadata"]["included_attempts"] = None
     else:
         current = measure(result, "E", "action_score_percentage")
         current["status"] = "pending" if damage == "pending_zero" else "unknown"
@@ -371,7 +376,9 @@ def test_cli_statuses_and_required_assessment_id(study, capsys):
     assert cli.main([*command, "--require-complete"]) == 1
     assert "require-complete" in capsys.readouterr().err
     assert cli.main(command) == 0
-    assert "Manual review: pending" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Manual review: pending" in output
+    assert "Failure counts" not in output and "reporting scope" not in output
     finish(study, path)
     assert cli.main([*command, "--require-complete"]) == 0
     assert "Manual review: complete" in capsys.readouterr().out

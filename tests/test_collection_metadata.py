@@ -5,7 +5,7 @@ and distinguish a preparation's recorded status from whether its files validate.
 """
 # These cases use real registry/preparation files in temporary projects. They
 # separate corrections for future collection work from earlier saved snapshots,
-# and protect development exposure from being hidden by a study-set edit.
+# and protect comparison exposure from being hidden by a study-set edit.
 
 import json
 from pathlib import Path
@@ -26,7 +26,7 @@ def project(tmp_path: Path) -> Path:
     return root
 
 
-def register_plan(project: Path, tmp_path: Path, *, kind="blank", study_set="development") -> dict:
+def register_plan(project: Path, tmp_path: Path, *, kind="blank", study_set="comparison") -> dict:
     """Use a blank, drawn, or malformed PDF to obtain known preparation outcomes."""
     source = tmp_path / "incoming.pdf"
     if kind == "malformed":
@@ -205,17 +205,20 @@ def test_unknown_plan_and_empty_update_do_not_write_files(project, tmp_path):
     assert file_snapshot(project) == before
 
 
-@pytest.mark.parametrize("target", ["comparison", "expansion"])
-def test_development_assignment_cannot_be_relabelled(project, tmp_path, target):
+def test_comparison_membership_update_preserves_saved_work(project, tmp_path):
     entry = register_plan(project, tmp_path)
+    run = project / "runs/plan_0001/run_extract_0001/output.json"
+    run.parent.mkdir(parents=True)
+    run.write_text('{"purpose": "comparison", "fixture": "retained historical work"}\n')
     before = file_snapshot(project)
-    with pytest.raises(ValueError, match="Development plans must remain"):
-        documents.update_document_metadata(project, entry["plan_id"], study_set=target)
-    assert file_snapshot(project) == before
+    updated, changed = documents.update_document_metadata(project, entry["plan_id"], study_set="comparison")
+    assert not changed and updated["study_set"] == "comparison"
+    after = file_snapshot(project)
+    assert all(after[name] == raw for name, raw in before.items() if name != "data/registry/plans.json")
 
 
 @pytest.mark.parametrize(("initial", "target"), [
-    ("expansion", "comparison"), ("comparison", "expansion"), ("expansion", "development"),
+    ("expansion", "comparison"), ("comparison", "expansion"),
 ])
 def test_study_set_can_be_corrected_before_model_work(project, tmp_path, initial, target):
     entry = register_plan(project, tmp_path, study_set=initial)

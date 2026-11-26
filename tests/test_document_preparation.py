@@ -79,7 +79,7 @@ def _register(project: Path, source: Path) -> dict:
         plan_title="Example Heat Plan",
         source_url="https://example.org/heat-plan.pdf",
         date_accessed="2026-11-02",
-        study_set="development",
+        study_set="comparison",
     )
     return entry
 
@@ -103,7 +103,7 @@ def test_prepares_native_text_and_blank_page_and_links_registry(
 
     saved_preparation, pages = storage.load_preparation(project, record_path)
     assert preparation == saved_preparation
-    assert record_path == "data/processed/plan_0001/preparation_01/preparation.json"
+    assert record_path == "data/prepared_plans/plan_0001/preparation_01/preparation.json"
     assert preparation["status"] == "ready"
     assert preparation["schema_version"] == 3
     assert preparation["settings"] == {
@@ -397,7 +397,7 @@ def test_unknown_plan_id_does_not_create_preparation_files(
         documents.prepare_document(project, "plan_9999")
 
     assert (project / "data/registry/plans.json").read_bytes() == before
-    assert not (project / "data/processed").exists()
+    assert not (project / "data/prepared_plans").exists()
 
 
 def test_preparation_requires_an_existing_project_and_registry(tmp_path: Path) -> None:
@@ -424,7 +424,7 @@ def test_damaged_registered_original_blocks_preparation(
         documents.prepare_document(project, entry["plan_id"], ocr_enabled=False)
 
     assert (project / "data/registry/plans.json").read_bytes() == registry_before
-    assert not (project / "data/processed").exists()
+    assert not (project / "data/prepared_plans").exists()
 
 
 def test_original_change_during_preparation_blocks_publication(
@@ -448,7 +448,7 @@ def test_original_change_during_preparation_blocks_publication(
         documents.prepare_document(project, entry["plan_id"], ocr_enabled=False)
 
     assert (project / "data/registry/plans.json").read_bytes() == registry_before
-    assert not (project / "data/processed").exists()
+    assert not (project / "data/prepared_plans").exists()
 
 
 def test_unexpected_programming_error_is_not_hidden_as_a_pdf_gap(
@@ -468,7 +468,7 @@ def test_unexpected_programming_error_is_not_hidden_as_a_pdf_gap(
         documents.prepare_document(project, entry["plan_id"], ocr_enabled=False)
 
     assert (project / "data/registry/plans.json").read_bytes() == registry_before
-    assert not (project / "data/processed").exists()
+    assert not (project / "data/prepared_plans").exists()
     assert logger.handlers == handlers_before
     assert logger.level == level_before
 
@@ -518,7 +518,7 @@ def test_previous_saved_input_must_be_restored_before_moving_its_registry_link(
         documents.prepare_document(project, entry["plan_id"], ocr_enabled=False)
 
     assert (project / "data/registry/plans.json").read_bytes() == registry_before
-    assert not (project / "data/processed/plan_0001/preparation_02").exists()
+    assert not (project / "data/prepared_plans/plan_0001/preparation_02").exists()
 
 
 def test_new_preparation_uses_corrected_metadata_without_editing_previous_record(
@@ -561,7 +561,7 @@ def test_registry_link_failure_retains_completed_preparation_and_reports_its_pat
     with pytest.raises(OSError, match="registry-link failure") as error:
         documents.prepare_document(project, entry["plan_id"], ocr_enabled=False)
 
-    record_path = "data/processed/plan_0001/preparation_01/preparation.json"
+    record_path = "data/prepared_plans/plan_0001/preparation_01/preparation.json"
     assert storage.load_preparation(project, record_path)[0]["status"] == "ready"
     assert record_path in error.value.__notes__[0]
     saved_link = storage.load_registry(project)["plans"][0]["prepared_source_path"]
@@ -583,7 +583,7 @@ def test_preparation_save_failure_does_not_update_registry(
         documents.prepare_document(project, entry["plan_id"], ocr_enabled=False)
 
     assert (project / "data/registry/plans.json").read_bytes() == registry_before
-    assert not (project / "data/processed").exists()
+    assert not (project / "data/prepared_plans").exists()
 
 
 def test_preparation_updates_only_the_selected_registry_entry(

@@ -133,7 +133,7 @@ def test_verifier_debits_the_exact_archived_e_requests_without_rewriting_them(pr
 
 
 def test_insufficient_linked_token_capacity_stops_before_allocating_v(project, baseline, scripted):
-    packet = agents.build_verifier_input(project, loop.PLAN_ID, profile_name=verifier.PROFILE, purpose="development")
+    packet = agents.build_verifier_input(project, loop.PLAN_ID, profile_name=verifier.PROFILE, purpose="comparison")
     configure(project, verifier.PROFILE, max_estimated_tokens=packet.settings["context_limit"])
     before = loop.snapshot(project)
     with pytest.raises(ValueError, match="cannot reserve"):

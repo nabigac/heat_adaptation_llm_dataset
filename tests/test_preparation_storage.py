@@ -25,12 +25,12 @@ def preparation() -> dict:
     return {
         "schema_version": 2,
         "plan_id": "plan_0001",
-        "pdf_path": "data/raw/plan_0001.pdf",
+        "pdf_path": "data/source_pdfs/plan_0001.pdf",
         "document_sha256": "a" * 64,
         "source_url": "https://example.org/heat-plan.pdf",
         "date_accessed": "2026-11-02",
         "prepared_at": "2026-11-02T10:30:00Z",
-        "pages_path": "data/processed/plan_0001/preparation_01/pages.json",
+        "pages_path": "data/prepared_plans/plan_0001/preparation_01/pages.json",
         "page_count": 3,
         "settings": {
             "ocr_enabled": False,
@@ -77,12 +77,12 @@ def pages() -> list[dict]:
 def test_first_preparation_suggestion_does_not_create_files(tmp_path: Path) -> None:
     directory = storage.next_preparation_directory(tmp_path, "plan_0001")
 
-    assert directory == "data/processed/plan_0001/preparation_01"
+    assert directory == "data/prepared_plans/plan_0001/preparation_01"
     assert list(tmp_path.iterdir()) == []
 
 
 def test_suggestion_skips_existing_numbers_and_incomplete_attempts(tmp_path: Path) -> None:
-    parent = tmp_path / "data/processed/plan_0001"
+    parent = tmp_path / "data/prepared_plans/plan_0001"
     (parent / "preparation_01").mkdir(parents=True)
     (parent / "preparation_03").mkdir()
     # An unexpected file also occupies a numbered name. Do not reuse it.
@@ -91,25 +91,25 @@ def test_suggestion_skips_existing_numbers_and_incomplete_attempts(tmp_path: Pat
     (parent / "notes").mkdir()
 
     assert storage.next_preparation_directory(tmp_path, "plan_0001") == (
-        "data/processed/plan_0001/preparation_06"
+        "data/prepared_plans/plan_0001/preparation_06"
     )
     assert occupied_file.read_text(encoding="utf-8") == "retain this file"
 
 
 def test_preparation_numbering_is_separate_for_each_plan(tmp_path: Path) -> None:
-    (tmp_path / "data/processed/plan_0001/preparation_07").mkdir(parents=True)
+    (tmp_path / "data/prepared_plans/plan_0001/preparation_07").mkdir(parents=True)
 
     assert storage.next_preparation_directory(tmp_path, "plan_0002") == (
-        "data/processed/plan_0002/preparation_01"
+        "data/prepared_plans/plan_0002/preparation_01"
     )
-    assert not (tmp_path / "data/processed/plan_0002").exists()
+    assert not (tmp_path / "data/prepared_plans/plan_0002").exists()
 
 
 def test_preparation_numbering_can_grow_beyond_two_digits(tmp_path: Path) -> None:
-    (tmp_path / "data/processed/plan_0001/preparation_99").mkdir(parents=True)
+    (tmp_path / "data/prepared_plans/plan_0001/preparation_99").mkdir(parents=True)
 
     assert storage.next_preparation_directory(tmp_path, "plan_0001") == (
-        "data/processed/plan_0001/preparation_100"
+        "data/prepared_plans/plan_0001/preparation_100"
     )
 
 
@@ -132,7 +132,7 @@ def test_saves_and_loads_pair_without_changing_supplied_values(
     record_path = storage.save_preparation(tmp_path, preparation, pages)
     loaded = storage.load_preparation(tmp_path, record_path)
 
-    assert record_path == "data/processed/plan_0001/preparation_01/preparation.json"
+    assert record_path == "data/prepared_plans/plan_0001/preparation_01/preparation.json"
     assert loaded == before
     assert (preparation, pages) == before
     # UTF-8 storage keeps Unicode readable while preserving quotes and newlines
@@ -142,7 +142,7 @@ def test_saves_and_loads_pair_without_changing_supplied_values(
     assert json.loads(saved_pages)[1]["text"] == ""
     assert json.loads(saved_pages)[2]["text"] is None
     assert not (tmp_path / "data/registry").exists()
-    assert not (tmp_path / "data/raw").exists()
+    assert not (tmp_path / "data/source_pdfs").exists()
 
 
 @pytest.mark.parametrize("known_count", [False, True], ids=["unknown-count", "known-count"])
@@ -183,7 +183,7 @@ def test_new_attempt_keeps_previous_files_and_registry_unchanged(
 
     second_path = storage.save_preparation(tmp_path, second_preparation, second_pages)
 
-    assert second_path == "data/processed/plan_0001/preparation_02/preparation.json"
+    assert second_path == "data/prepared_plans/plan_0001/preparation_02/preparation.json"
     assert storage.load_preparation(tmp_path, second_path) == (second_preparation, second_pages)
     # Explicitly choosing the first path must still return the first attempt.
     assert storage.load_preparation(tmp_path, first_path) == (preparation, pages)
@@ -196,7 +196,7 @@ def test_new_attempt_keeps_previous_files_and_registry_unchanged(
 def test_save_refuses_any_occupied_attempt_name(
     tmp_path: Path, preparation: dict, pages: list[dict], existing_kind: str
 ) -> None:
-    directory = tmp_path / "data/processed/plan_0001/preparation_01"
+    directory = tmp_path / "data/prepared_plans/plan_0001/preparation_01"
     if existing_kind == "complete":
         storage.save_preparation(tmp_path, preparation, pages)
     elif existing_kind == "file":
@@ -249,14 +249,14 @@ def test_invalid_data_is_rejected_before_creating_files(
 @pytest.mark.parametrize(
     "pages_path",
     [
-        pytest.param("data/processed/plan_0002/preparation_01/pages.json", id="other-plan"),
+        pytest.param("data/prepared_plans/plan_0002/preparation_01/pages.json", id="other-plan"),
         pytest.param("pages.json", id="wrong-directory"),
         pytest.param("../pages.json", id="parent-traversal"),
         pytest.param("/tmp/pages.json", id="absolute-path"),
         pytest.param("data\\processed\\plan_0001\\pages.json", id="backslashes"),
-        pytest.param("data/processed/plan_0001/preparation_00/pages.json", id="zero-attempt"),
-        pytest.param("data/processed/plan_0001/preparation_01/other.json", id="wrong-filename"),
-        pytest.param("data/processed/plan_0001/preparation_01/extra/pages.json", id="nested-pages"),
+        pytest.param("data/prepared_plans/plan_0001/preparation_00/pages.json", id="zero-attempt"),
+        pytest.param("data/prepared_plans/plan_0001/preparation_01/other.json", id="wrong-filename"),
+        pytest.param("data/prepared_plans/plan_0001/preparation_01/extra/pages.json", id="nested-pages"),
     ],
 )
 def test_save_requires_pages_in_the_selected_plans_preparation_folder(
@@ -288,9 +288,9 @@ def test_utf8_encoding_failure_happens_before_creating_files(
 def test_missing_record_is_not_created_or_replaced_with_a_newer_attempt(
     tmp_path: Path, preparation: dict, pages: list[dict]
 ) -> None:
-    preparation["pages_path"] = "data/processed/plan_0001/preparation_02/pages.json"
+    preparation["pages_path"] = "data/prepared_plans/plan_0001/preparation_02/pages.json"
     second_path = storage.save_preparation(tmp_path, preparation, pages)
-    missing_path = "data/processed/plan_0001/preparation_01/preparation.json"
+    missing_path = "data/prepared_plans/plan_0001/preparation_01/preparation.json"
 
     with pytest.raises(FileNotFoundError):
         storage.load_preparation(tmp_path, missing_path)
@@ -366,7 +366,7 @@ def test_loading_rejects_a_link_to_another_attempts_pages(
 ) -> None:
     first_path = storage.save_preparation(tmp_path, preparation, pages)
     second_preparation = dict(
-        preparation, pages_path="data/processed/plan_0001/preparation_02/pages.json"
+        preparation, pages_path="data/prepared_plans/plan_0001/preparation_02/pages.json"
     )
     second_path = storage.save_preparation(tmp_path, second_preparation, pages)
     # Simulate an accidental edit that makes the first record use the second
@@ -399,9 +399,9 @@ def test_interrupted_save_retains_the_attempt_and_preserves_older_files(
     first_directory = (tmp_path / first_path).parent
     original_bytes = {path.name: path.read_bytes() for path in first_directory.iterdir()}
     second_preparation = dict(
-        preparation, pages_path="data/processed/plan_0001/preparation_02/pages.json"
+        preparation, pages_path="data/prepared_plans/plan_0001/preparation_02/pages.json"
     )
-    second_directory = tmp_path / "data/processed/plan_0001/preparation_02"
+    second_directory = tmp_path / "data/prepared_plans/plan_0001/preparation_02"
 
     if operation == "sync":
         real_sync = storage.os.fsync
@@ -440,7 +440,7 @@ def test_interrupted_save_retains_the_attempt_and_preserves_older_files(
     assert storage.next_preparation_directory(tmp_path, "plan_0001").endswith("preparation_03")
     with pytest.raises(FileNotFoundError):
         storage.load_preparation(
-            tmp_path, "data/processed/plan_0001/preparation_02/preparation.json"
+            tmp_path, "data/prepared_plans/plan_0001/preparation_02/preparation.json"
         )
 
 
@@ -464,7 +464,7 @@ def test_error_after_record_publication_does_not_delete_completed_pair(
 
     # An error does not prove nothing was saved. Preserve the completed pair so a
     # caller can inspect it explicitly instead of deleting possibly committed data.
-    record_path = "data/processed/plan_0001/preparation_01/preparation.json"
+    record_path = "data/prepared_plans/plan_0001/preparation_01/preparation.json"
     assert storage.load_preparation(tmp_path, record_path) == (preparation, pages)
     assert storage.next_preparation_directory(tmp_path, "plan_0001").endswith("preparation_02")
 
@@ -486,7 +486,7 @@ def test_preparation_storage_cannot_follow_data_directory_outside_the_project(
             storage.save_preparation(project, preparation, pages)
         else:
             storage.load_preparation(
-                project, "data/processed/plan_0001/preparation_01/preparation.json"
+                project, "data/prepared_plans/plan_0001/preparation_01/preparation.json"
             )
 
     assert list(outside.iterdir()) == []

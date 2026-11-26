@@ -17,7 +17,7 @@ from validation import parse_expert_reference_json, validate_expert_reference
 
 
 def _reference_path(root: Path) -> Path:
-    return root / "data/expert_references/plan_0001/expert_reference.json"
+    return root / "data/comparison/expert_references/plan_0001/expert_reference.json"
 
 
 def _read_reference(root: Path) -> dict:
@@ -52,7 +52,7 @@ def project(tmp_path: Path) -> Path:
         root, pdf, plan_title="Fictional plan", source_url="https://example.org/plan.pdf",
         date_accessed="2026-11-21", study_set="comparison",
     )
-    expert_files.create_expert_reference(root, "plan_0001", prepared_by=["reviewer_01"])
+    expert_files.create_expert_reference(root, "plan_0001")
     reference = _read_reference(root)
     reference["plan_data"]["actions"] = [{
         "action_id": "action_0001",
@@ -180,7 +180,7 @@ def test_page_bounds_count_physical_spreads_not_printed_sides(project: Path) -> 
 
 
 @pytest.mark.parametrize("problem", [
-    "missing_field", "invalid_status", "blank_reviewer", "invalid_date", "unknown_field", "repeated_page",
+    "missing_field", "invalid_status", "removed_prepared_by_field", "invalid_date", "unknown_field", "repeated_page",
 ])
 def test_shared_schema_rules_are_retained(project: Path, problem: str) -> None:
     reference = _read_reference(project)
@@ -188,7 +188,7 @@ def test_shared_schema_rules_are_retained(project: Path, problem: str) -> None:
         del reference["plan_data"]["actions"][0]["action_benefit"]
     elif problem == "invalid_status":
         reference["plan_data"]["actions"][0]["action_status"] = "probably completed"
-    elif problem == "blank_reviewer":
+    elif problem == "removed_prepared_by_field":
         reference["prepared_by"] = [" "]
     elif problem == "invalid_date":
         reference["plan_data"]["metadata"]["date_accessed"] = "2026-02-29"
@@ -244,7 +244,7 @@ def test_validation_does_not_repair_or_replace_malformed_json(project: Path) -> 
 
 @pytest.mark.parametrize("missing", ["reference", "original"])
 def test_missing_required_files_are_not_recreated(project: Path, missing: str) -> None:
-    path = _reference_path(project) if missing == "reference" else project / "data/raw/plan_0001.pdf"
+    path = _reference_path(project) if missing == "reference" else project / "data/source_pdfs/plan_0001.pdf"
     path.unlink()
     before = _snapshot(project)
 
@@ -263,7 +263,7 @@ def test_unknown_plan_cannot_validate_another_plans_form(project: Path) -> None:
 
 
 def test_changed_registered_original_is_rejected(project: Path) -> None:
-    (project / "data/raw/plan_0001.pdf").write_bytes(b"changed original")
+    (project / "data/source_pdfs/plan_0001.pdf").write_bytes(b"changed original")
     before = _snapshot(project)
     with pytest.raises(ValueError, match="checksum"):
         expert_files.validate_expert_reference(project, "plan_0001")
@@ -300,9 +300,9 @@ def test_uncountable_original_cannot_pass_reference_checks(tmp_path: Path, kind:
             writer.write(pdf)
     documents.register_document(
         root, pdf, plan_title="Fictional plan", source_url="https://example.org/plan.pdf",
-        date_accessed="2026-11-21", study_set="development",
+        date_accessed="2026-11-21", study_set="comparison",
     )
-    expert_files.create_expert_reference(root, "plan_0001", prepared_by=["reviewer"])
+    expert_files.create_expert_reference(root, "plan_0001")
     before = _snapshot(root)
 
     with pytest.raises(ValueError, match="Could not count physical pages"):

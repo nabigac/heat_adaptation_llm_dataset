@@ -220,7 +220,7 @@ def test_live_clients_parallel_workers_and_preserved_saved_output(ready):
     assert len(controller["tasks"]) == len(controller["drafts"]) == 2
     assert len(list((folder / "artifacts/events").glob('*.json'))) == len(controller["events"])
     assert not list((ready.root / "expert_references").glob('**/*'))
-    assert not list((ready.root / "data/expert_references").glob('**/*'))
+    assert not list((ready.root / "data/comparison/expert_references").glob('**/*'))
     for path in folder.rglob('*'):
         if path.is_file():
             assert b"hf-fictional-c-run-token" not in path.read_bytes()
@@ -282,9 +282,16 @@ def test_changed_source_or_application_prevents_success(ready, monkeypatch, dama
     assert 'changed' in saved.record['error']
 
 
-def test_no_overwrite_and_explicit_retry_link(ready):
+@pytest.mark.parametrize('old_source_path', [False, True])
+def test_no_overwrite_and_explicit_retry_link(ready, old_source_path):
     ready.http.failure = 'http'
     first = run(ready)
+    if old_source_path:
+        file = ready.root / first.record_path
+        data = json.loads(file.read_text())
+        data['source_path'] = data['source_path'].replace('data/prepared_plans/', 'data/processed/')
+        file.write_text(json.dumps(data))
+        storage.load_run_record(ready.root, first.record_path)
     before = {p: p.read_bytes() for p in (ready.root / first.record_path).parent.rglob('*') if p.is_file()}
     ready.http = ModelHTTP(ready.http.answer)
     second = run(ready, retry_of_run_id=first.record['run_id'])
@@ -343,13 +350,13 @@ def test_strict_load_rejects_missing_or_changed_saved_evidence(ready, target):
         storage.load_run_record(ready.root, saved.record_path)
 
 
-def test_missing_token_and_non_development_plans_start_no_run(ready, monkeypatch):
+def test_missing_token_and_invalid_purpose_start_no_run(ready, monkeypatch):
     monkeypatch.delenv('HF_TOKEN')
     with pytest.raises(ValueError, match='HF_TOKEN'):
         run(ready)
     assert not (ready.root / 'runs').exists()
-    with pytest.raises(ValueError, match='development'):
-        run(ready, purpose='comparison')
+    with pytest.raises(ValueError, match='purpose'):
+        run(ready, purpose='outside_study')
 
 
 def test_cli_dispatch_and_published_status(ready, monkeypatch, capsys):
@@ -358,7 +365,7 @@ def test_cli_dispatch_and_published_status(ready, monkeypatch, capsys):
     async def offline(*args, **kwargs):
         return await original(*args, **kwargs, _transport=transport)
     monkeypatch.setattr(runner, 'run_collaboration', offline)
-    result = cli.main(['run_collaboration_mode', PLAN_ID, '--source-path', SOURCE, '--purpose', 'development',
+    result = cli.main(['run_collaboration_mode', PLAN_ID, '--source-path', SOURCE, '--purpose', 'comparison',
                        '--project-root', str(ready.root)])
     assert result == 0
     printed = capsys.readouterr().out
@@ -437,7 +444,7 @@ def test_final_saving_failure_keeps_published_running_status_and_cli_fails(ready
     async def returned(*args, **kwargs):
         return saved
     monkeypatch.setattr(runner, 'run_collaboration', returned)
-    result = cli.main(['run_collaboration_mode', PLAN_ID, '--source-path', SOURCE, '--purpose', 'development',
+    result = cli.main(['run_collaboration_mode', PLAN_ID, '--source-path', SOURCE, '--purpose', 'comparison',
                        '--project-root', str(ready.root)])
     assert result == 1 and 'Status: running' in capsys.readouterr().out
 

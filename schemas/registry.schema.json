@@ -63,8 +63,8 @@
           },
           "study_set": {
             "type": "string",
-            "enum": ["development", "comparison", "expansion"],
-            "description": "Study set assigned to the document; development plans stay outside comparison."
+            "enum": ["comparison", "expansion"],
+            "description": "Comparison identifies the single research sample, including plans used first to refine the workflow. Expansion is outside the current study."
           },
           "prepared_source_path": {
             "type": ["string", "null"],

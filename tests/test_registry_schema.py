@@ -47,11 +47,11 @@ def valid_registry() -> dict:
             {
                 "plan_id": "plan_0001",
                 "plan_title": "Example Heat Adaptation Plan",
-                "pdf_path": "data/raw/plan_0001.pdf",
+                "pdf_path": "data/source_pdfs/plan_0001.pdf",
                 "document_sha256": "a" * 64,  # A fictional 64-character fingerprint.
                 "source_url": "https://example.org/heat-plan.pdf",
                 "date_accessed": "2026-11-01",
-                "study_set": "development",
+                "study_set": "comparison",
                 "prepared_source_path": None,  # Python's None represents JSON null.
             }
         ],
@@ -68,11 +68,11 @@ def test_accepts_empty_registry(registry_validator: Draft202012Validator) -> Non
 @pytest.mark.parametrize(
     "plan_changes",
     [
-        pytest.param({}, id="unprepared-development-plan"),
+        pytest.param({}, id="unprepared-comparison-plan"),
         pytest.param(
             {
                 "prepared_source_path": (
-                    "data/processed/plan_0001/preparation_01/preparation.json"
+                    "data/prepared_plans/plan_0001/preparation_01/preparation.json"
                 )
             },
             id="prepared-plan",

@@ -19,6 +19,7 @@ from pypdf import PdfWriter
 import storage
 import validation
 import agents
+from legacy_records import LEGACY_PURPOSE
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def project(tmp_path: Path, run_record: dict) -> Path:
     # checks here concern saved identities and relationships, not content fidelity.
     root = tmp_path / "project"
     root.mkdir()
-    pdf_path = root / "data/raw/plan_0099.pdf"
+    pdf_path = root / "data/source_pdfs/plan_0099.pdf"
     pdf_path.parent.mkdir(parents=True)
     with PdfWriter() as writer:
         for _ in range(5):
@@ -36,9 +37,9 @@ def project(tmp_path: Path, run_record: dict) -> Path:
         writer.write(pdf_path)
     checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
     preparation = {
-        "schema_version": 3, "plan_id": "plan_0099", "pdf_path": "data/raw/plan_0099.pdf",
+        "schema_version": 3, "plan_id": "plan_0099", "pdf_path": "data/source_pdfs/plan_0099.pdf",
         "document_sha256": checksum, "source_url": "https://example.org/plan.pdf", "date_accessed": "2026-11-03",
-        "prepared_at": "2026-11-03T11:00:00Z", "pages_path": "data/processed/plan_0099/preparation_02/pages.json",
+        "prepared_at": "2026-11-03T11:00:00Z", "pages_path": "data/prepared_plans/plan_0099/preparation_02/pages.json",
         "page_count": 5, "settings": {
             "ocr_enabled": False, "ocr_engine": None, "ocr_version": None, "ocr_language": None,
             "image_render_dpi": 150, "candidate_image_min_area": 0.10,
@@ -50,9 +51,9 @@ def project(tmp_path: Path, run_record: dict) -> Path:
     } for number in range(1, 6)]
     source_path = storage.save_preparation(root, preparation, pages)
     storage.save_registry(root, {"schema_version": 1, "plans": [{
-        "plan_id": "plan_0099", "plan_title": "Fictional test plan", "pdf_path": "data/raw/plan_0099.pdf",
+        "plan_id": "plan_0099", "plan_title": "Fictional test plan", "pdf_path": "data/source_pdfs/plan_0099.pdf",
         "document_sha256": checksum, "source_url": preparation["source_url"], "date_accessed": preparation["date_accessed"],
-        "study_set": "development", "prepared_source_path": source_path,
+        "study_set": "comparison", "prepared_source_path": source_path,
     }]})
     return root
 
@@ -72,6 +73,7 @@ def running(record: dict, run_id: str = "run_extract_0001", *, stage: str = "ext
 def active_run(project: Path, run_record: dict) -> str:
     path = storage.create_run_record(project, running(run_record))
     preserve_source_input(project, path, run_record)
+    preserve_code_snapshot(project, path)
     return path
 
 
@@ -100,6 +102,16 @@ def snapshot(root: Path) -> dict:
     return {str(path.relative_to(root)): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
 
+def preserve_code_snapshot(project: Path, path: str) -> None:
+    """Represent the code archive published before a real saved run executes."""
+    if (project / Path(path).parent / "artifacts/code_fingerprints.json").exists():
+        return
+    raw = b"# fictional archived implementation\n"
+    storage.save_run_file(project, path, "artifacts/code/src/fixture.py", raw)
+    manifest = {"sha256": {"src/fixture.py": hashlib.sha256(raw).hexdigest()}}
+    storage.save_run_file(project, path, "artifacts/code_fingerprints.json", json.dumps(manifest).encode())
+
+
 def passing_report(raw_path: str) -> dict:
     return {"raw_response_path": raw_path, "repaired_response_path": None, "initial_errors": [],
         "remaining_errors": [], "repairs": [], "valid": True}
@@ -110,6 +122,7 @@ def publish_response(project: Path, path: str, record: dict) -> None:
     # those bytes, then let the test finalize its record. No model or repair code
     # runs here; the report is explicitly constructed fixture data.
     preserve_source_input(project, path, record)
+    preserve_code_snapshot(project, path)
     raw_path = storage.save_run_file(project, path, "responses/response_01.json", json.dumps({
         "plan_data": record["plan_data"], "plan_issues": record["plan_issues"],
     }, ensure_ascii=False).encode("utf-8"))
@@ -307,7 +320,7 @@ def test_active_measurements_can_become_known_without_replacing_previous_observa
 @pytest.mark.parametrize("field", ["purpose", "source_path", "started_at"])
 def test_run_inputs_cannot_change_during_an_attempt(project: Path, active_run: str, field: str) -> None:
     record = storage.load_run_record(project, active_run)
-    record[field] = {"purpose": "exploratory", "source_path": "data/processed/plan_0099/preparation_03/preparation.json",
+    record[field] = {"purpose": LEGACY_PURPOSE, "source_path": "data/prepared_plans/plan_0099/preparation_03/preparation.json",
         "started_at": "2026-11-03T11:59:59Z"}[field]
     before = (project / active_run).read_bytes()
     with pytest.raises(storage.RunValidationError, match="cannot change"):
@@ -506,10 +519,10 @@ def test_invalid_reports_are_rejected_before_publication(project: Path, active_r
 @pytest.mark.parametrize("damage", ["missing-pdf", "changed-pdf", "missing-preparation", "damaged-pages", "missing-registry"])
 def test_damaged_source_files_stop_loading_without_repair_or_status_changes(project: Path, active_run: str, damage: str) -> None:
     paths = {
-        "missing-pdf": project / "data/raw/plan_0099.pdf",
-        "changed-pdf": project / "data/raw/plan_0099.pdf",
-        "missing-preparation": project / "data/processed/plan_0099/preparation_02/preparation.json",
-        "damaged-pages": project / "data/processed/plan_0099/preparation_02/pages.json",
+        "missing-pdf": project / "data/source_pdfs/plan_0099.pdf",
+        "changed-pdf": project / "data/source_pdfs/plan_0099.pdf",
+        "missing-preparation": project / "data/prepared_plans/plan_0099/preparation_02/preparation.json",
+        "damaged-pages": project / "data/prepared_plans/plan_0099/preparation_02/pages.json",
         "missing-registry": project / "data/registry/plans.json",
     }
     file = paths[damage]
@@ -523,7 +536,7 @@ def test_damaged_source_files_stop_loading_without_repair_or_status_changes(proj
     assert snapshot(project) == before
 
 
-@pytest.mark.parametrize("missing_input", ["data/raw/plan_0099.pdf", "data/processed/plan_0099/preparation_02/preparation.json"])
+@pytest.mark.parametrize("missing_input", ["data/source_pdfs/plan_0099.pdf", "data/prepared_plans/plan_0099/preparation_02/preparation.json"])
 def test_failure_evidence_can_be_preserved_after_an_input_disappears(
     project: Path, active_run: str, missing_input: str
 ) -> None:
@@ -556,7 +569,7 @@ def test_new_preparation_and_collection_corrections_do_not_rewrite_earlier_input
     entry = registry["plans"][0]
     preparation, pages = storage.load_preparation(project, entry["prepared_source_path"])
     preparation.update(source_url="https://example.org/corrected.pdf", date_accessed="2026-11-04",
-        pages_path="data/processed/plan_0099/preparation_03/pages.json")
+        pages_path="data/prepared_plans/plan_0099/preparation_03/pages.json")
     entry.update(source_url=preparation["source_url"], date_accessed=preparation["date_accessed"], plan_title="Corrected collection title")
     entry["prepared_source_path"] = storage.save_preparation(project, preparation, pages)
     storage.save_registry(project, registry)
@@ -645,7 +658,7 @@ def test_invalid_verifier_links_cannot_start_a_run(project: Path, active_run: st
         verifier.update(run_id="run_verify_0002", input_run_id="run_verify_0001")
     elif problem == "different-preparation":
         prep, pages = storage.load_preparation(project, run_record["source_path"])
-        prep["pages_path"] = "data/processed/plan_0099/preparation_03/pages.json"
+        prep["pages_path"] = "data/prepared_plans/plan_0099/preparation_03/pages.json"
         verifier["source_path"] = storage.save_preparation(project, prep, pages)
     elif problem == "different-tools":
         verifier["settings"]["document_tools"]["image_render_dpi"] = 300
@@ -713,9 +726,8 @@ def test_retry_cannot_change_model_stage(project: Path, active_run: str, run_rec
         storage.create_run_record(project, retry)
 
 
-@pytest.mark.parametrize("purpose", ["comparison", "exploratory"])
-def test_comparison_extraction_can_support_main_or_exploratory_verification(
-    project: Path, run_record: dict, purpose: str
+def test_comparison_extraction_supports_verification(
+    project: Path, run_record: dict,
 ) -> None:
     registry = storage.load_registry(project)
     registry["plans"][0]["study_set"] = "comparison"
@@ -725,29 +737,29 @@ def test_comparison_extraction_can_support_main_or_exploratory_verification(
     path = storage.create_run_record(project, running(extractor))
     complete(project, path, extractor)
     verifier = running(extractor, "run_verify_0001", stage="verifier", input_run_id="run_extract_0001")
-    verifier["purpose"] = purpose
+    verifier["purpose"] = "comparison"
     assert storage.load_run_record(project, storage.create_run_record(project, verifier)) == verifier
 
 
-def test_exploratory_extraction_cannot_be_selected_as_the_main_comparison_input(project: Path, run_record: dict) -> None:
+def test_verification_must_link_its_exact_extractor(project: Path, run_record: dict) -> None:
     registry = storage.load_registry(project)
     registry["plans"][0]["study_set"] = "comparison"
     storage.save_registry(project, registry)
     extractor = copy.deepcopy(run_record)
-    extractor["purpose"] = "exploratory"
+    extractor["purpose"] = "comparison"
     path = storage.create_run_record(project, running(extractor))
     complete(project, path, extractor)
-    verifier = running(extractor, "run_verify_0001", stage="verifier", input_run_id="run_extract_0001")
+    verifier = running(extractor, "run_verify_0001", stage="verifier", input_run_id="run_extract_9999")
     verifier["purpose"] = "comparison"
-    with pytest.raises(storage.RunValidationError, match="comparison extractor"):
+    with pytest.raises(FileNotFoundError):
         storage.create_run_record(project, verifier)
 
 
-def test_development_plan_cannot_be_used_for_comparison(project: Path, run_record: dict) -> None:
+def test_comparison_plan_accepts_comparison_runs(project: Path, run_record: dict) -> None:
     record = running(run_record)
     record["purpose"] = "comparison"
-    with pytest.raises(storage.RunValidationError, match="study-set"):
-        storage.create_run_record(project, record)
+    path = storage.create_run_record(project, record)
+    assert storage.load_run_record(project, path)["purpose"] == "comparison"
 
 
 def test_tool_log_append_failure_preserves_previous_entries(project: Path, active_run: str, monkeypatch: pytest.MonkeyPatch) -> None:

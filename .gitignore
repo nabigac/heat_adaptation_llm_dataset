@@ -30,6 +30,10 @@ dist/
 /data/expert_references/
 /data/assessments/
 /data/reports/
+/data/source_pdfs/
+/data/prepared_plans/
+/data/comparison/
+/data/dataset_building/
 /expert_references/
 /models/
 /runs/

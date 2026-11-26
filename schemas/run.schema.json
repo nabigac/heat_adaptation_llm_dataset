@@ -16,7 +16,7 @@
     "plan_id": {"$ref": "#/$defs/text"},
     "run_id": {"$ref": "#/$defs/text"},
     "stage": {"type": "string", "enum": ["extractor", "verifier"]},
-    "purpose": {"type": "string", "enum": ["development", "comparison", "exploratory"]},
+    "purpose": {"type": "string", "enum": ["comparison", "dataset_building"]},
     "input_run_id": {"$ref": "#/$defs/nullable_text"},
     "retry_of_run_id": {"$ref": "#/$defs/nullable_text"},
     "source_path": {"$ref": "#/$defs/text"},

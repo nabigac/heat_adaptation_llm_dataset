@@ -39,7 +39,7 @@ def test_lists_selectable_modes_and_nested_models_without_writes(configured_prof
     assert headings == [
         "E: inkling2_small_hf_extractor (run_extract_mode)",
         "V: deepseek_v4_1_flash_1017_hf_verifier (run_verify_mode)",
-        "C: glm5_3_flash_hf_collaboration (run_collaboration_mode; development only)",
+        "C: glm5_3_flash_hf_collaboration (run_collaboration_mode; comparison or dataset_building)",
     ]
     assert "coordinator: zai-org/GLM-5.3-Flash" in output.out
     assert "worker_1: thinkingmachines/Inkling-2-Small" in output.out
@@ -114,13 +114,9 @@ def test_default_project_is_current_directory(configured_profiles, monkeypatch, 
     assert "C: glm5_3_flash_hf_collaboration" in capsys.readouterr().out
 
 
-def test_collaboration_cli_defaults_to_renamed_binding_and_remains_development_only():
+def test_collaboration_cli_defaults_to_binding_and_comparison():
     arguments = cli._build_parser().parse_args([
-        "run_collaboration_mode", "plan_0001", "--source-path", "preparation.json", "--purpose", "development",
+        "run_collaboration_mode", "plan_0001", "--source-path", "preparation.json",
     ])
     assert arguments.profile == DEFAULT_COLLABORATION_PROFILE == "glm5_3_flash_hf_collaboration"
-    with pytest.raises(SystemExit) as error:
-        cli._build_parser().parse_args([
-            "run_collaboration_mode", "plan_0001", "--source-path", "preparation.json", "--purpose", "comparison",
-        ])
-    assert error.value.code == 2
+    assert arguments.purpose == "comparison"

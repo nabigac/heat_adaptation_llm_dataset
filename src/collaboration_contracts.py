@@ -13,6 +13,7 @@ from huggingface_api import _huggingface_profile
 from models import _json_object, prepare_collaboration_schema
 from storage import load_plan_preparation, preparation_text_fingerprint, resolve_project_path
 from validation import (
+    require_run_purpose, validate_run_purpose,
     _nonfinite_json_numbers, _validate_page_count, _validate_structure, _validate_response_references,
 )
 
@@ -124,21 +125,24 @@ def _require_page_count(page_count: int) -> None:
 
 def build_collaboration_input(
     project_root: Path | str, plan_id: str, *, source_path: str,
+    purpose: str = "comparison",
     profile_name: str = DEFAULT_COLLABORATION_PROFILE,
     config_path: str = "configs/collaboration.json",
     model_config_path: str = "configs/profiles.json",
 ) -> CollaborationInput:
-    """Read one explicit development preparation, never baseline/expert outputs.
+    """Read one explicit study preparation, never baseline/expert outputs.
 
-    Formal comparison remains disabled. The saved runner wraps this source-only
-    builder; original PDF/preparation integrity checks are shared with E/V.
+    The saved runner wraps this source-only builder; original PDF/preparation
+    integrity checks are shared with E/V.
     """
+    require_run_purpose(purpose)
     config, profiles = load_collaboration_configuration(
         project_root, profile_name, config_path=config_path, model_config_path=model_config_path,
     )
     entry, preparation, pages = load_plan_preparation(project_root, plan_id, source_path)
-    if entry["study_set"] != "development":
-        raise CollaborationContractError("C pilots accept development plans only.")
+    problems = validate_run_purpose(purpose, entry["study_set"])
+    if problems:
+        raise CollaborationContractError("; ".join(problem.message for problem in problems))
     return CollaborationInput(
         plan_id, source_path, preparation_text_fingerprint(preparation, pages),
         preparation["page_count"], {"role": "user", "content": _format_plan_source(preparation, pages)},

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:review-record",
+  "title": "Completed plan review record",
+  "description": "Separate review history and provenance. Publication completes finalization; the data product contains no issues.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "review_id",
+    "configuration",
+    "review_scope",
+    "finalized_at",
+    "draft_path",
+    "draft_sha256",
+    "source",
+    "reviewed_plan_sha256",
+    "expert_addressed_issue_ids",
+    "model_resolved_issue_ids",
+    "issues"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "review_id": {
+      "type": "string",
+      "pattern": "^review_[0-9]+$"
+    },
+    "configuration": {
+      "enum": [
+        "E",
+        "E+V",
+        "C"
+      ]
+    },
+    "review_scope": {
+      "const": "open_issues_only"
+    },
+    "finalized_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(?:[Zz]|\\+00:00)$"
+    },
+    "draft_path": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "draft_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source": {
+      "$ref": "urn:heat-adaptation:review-draft#/properties/source"
+    },
+    "reviewed_plan_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "expert_addressed_issue_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      }
+    },
+    "model_resolved_issue_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:heat-adaptation:review-draft#/$defs/issue"
+      }
+    }
+  }
+}

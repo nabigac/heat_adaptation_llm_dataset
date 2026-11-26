@@ -31,7 +31,7 @@ COMMAND = Path(__file__).resolve().parents[1] / ".venv/bin/heat-adaptation-llm-d
 
 
 def arguments(root, **changes):
-    values = {"profile": verifier.PROFILE, "purpose": "development", **changes}
+    values = {"profile": verifier.PROFILE, "purpose": "comparison", **changes}
     return ["run_verify_mode", loop.PLAN_ID, "--project-root", str(root),
             *(value for key, item in values.items() for value in ("--" + key, str(item)))]
 
@@ -65,7 +65,7 @@ def test_cli_verifies_latest_e_without_a_source_flag_and_reports_the_actual_inpu
     assert "run_verify_0001/output.json" in output.out and "Validation report:" in output.out
     assert "Model requests: 2" in output.out and output.err == ""
     assert connected_cli[0][1] == {"input_run_id": None, "profile_name": verifier.PROFILE,
-        "purpose": "development", "retry_of_run_id": None, "config_path": "configs/profiles.json"}
+        "purpose": "comparison", "retry_of_run_id": None, "config_path": "configs/profiles.json"}
     assert (project / baseline.record_path).read_bytes() == before
 
 
@@ -199,7 +199,7 @@ def test_failed_completion_save_cannot_be_reported_as_success(
     assert "Status: succeeded" not in output.out
 
 
-@pytest.mark.parametrize("missing", ["--profile", "--purpose"])
+@pytest.mark.parametrize("missing", ["--profile"])
 def test_required_flags_are_checked_before_any_work(project, connected_cli, missing):
     args = arguments(project)
     index = args.index(missing)
@@ -219,7 +219,7 @@ def test_unknown_flags_do_not_start_verification(project, connected_cli, flags):
 
 
 @pytest.mark.parametrize("selection", [{"profile": "missing"}, {"profile": loop.PROFILE},
-                                       {"input-run-id": "run_extract_9999"}, {"purpose": "comparison"}])
+                                       {"input-run-id": "run_extract_9999"}])
 def test_bad_selections_do_not_allocate_an_attempt_or_request_a_model(
     project, baseline, scripted, connected_cli, selection,
 ):
@@ -234,7 +234,7 @@ def make_comparison(project):
     storage.save_registry(project, registry)
 
 
-def test_comparison_setup_errors_and_client_logs_remain_hidden(project, monkeypatch, capsys):
+def test_comparison_setup_errors_are_available_for_debugging(project, monkeypatch, capsys):
     make_comparison(project)
     hidden = "UNSEEN_COMPARISON_TEXT"
     async def fail(*args, **options):
@@ -243,13 +243,12 @@ def test_comparison_setup_errors_and_client_logs_remain_hidden(project, monkeypa
         error.add_note(hidden)
         raise error
     monkeypatch.setattr(agents, "run_verifier", fail)
-    assert cli.main(arguments(project, purpose="exploratory")) == 1
+    assert cli.main(arguments(project, purpose="comparison")) == 1
     output = capsys.readouterr()
-    assert hidden not in output.out + output.err
-    assert "Verification setup failed" in output.err and "Error categories:" in output.err
+    assert hidden in output.err and "withheld" not in output.out + output.err
 
 
-def test_comparison_result_hides_repairs_errors_and_model_details(project, run_record, monkeypatch, capsys):
+def test_comparison_result_reports_repairs_errors_and_diagnostics(project, run_record, monkeypatch, capsys):
     make_comparison(project)
     hidden = "UNSEEN_COMPARISON_MODEL_CLAIM"
     record = copy.deepcopy(run_record)
@@ -267,18 +266,18 @@ def test_comparison_result_hides_repairs_errors_and_model_details(project, run_r
     fake_reference = project / f"runs/{loop.PLAN_ID}/reference_initial.json"
     fake_reference.parent.mkdir(parents=True)
     fake_reference.write_text('{"not_a_validated_reference":true}')
-    assert cli.main(arguments(project, purpose="exploratory")) == 1
+    assert cli.main(arguments(project, purpose="comparison")) == 1
     output = capsys.readouterr()
-    assert hidden not in output.out + output.err
+    assert hidden in output.out + output.err
     assert "Status: failed" in output.out and "Extractor input: run_extract_0001" in output.out
-    assert "Model requests:" not in output.out and "Repair [" not in output.out
-    assert "Quotation/page flags:" not in output.out
-    assert "Quotation/page corrections:" not in output.out
-    assert all(str(count) not in output.out for count in (123, 456, 789, 321))
-    assert "withheld" in output.out
+    assert "Model requests:" in output.out and "Repair [" in output.out
+    assert "Quotation/page flags:" in output.out
+    assert "Quotation/page corrections:" in output.out
+    assert all(str(count) in output.out for count in (123, 456, 789, 321))
+    assert "withheld" not in output.out
 
 
-def test_development_programming_errors_remain_visible(project, monkeypatch):
+def test_comparison_programming_errors_remain_visible(project, monkeypatch):
     async def fail(*args, **options):
         raise RuntimeError("Fictional programming error.")
     monkeypatch.setattr(agents, "run_verifier", fail)

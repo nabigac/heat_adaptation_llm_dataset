@@ -22,11 +22,11 @@ def registry() -> dict:
             {
                 "plan_id": "plan_0001",
                 "plan_title": "Example City's Heat Plan — 2026",
-                "pdf_path": "data/raw/plan_0001.pdf",
+                "pdf_path": "data/source_pdfs/plan_0001.pdf",
                 "document_sha256": "a" * 64,
                 "source_url": "https://example.org/heat-plan.pdf",
                 "date_accessed": "2026-11-01",
-                "study_set": "development",
+                "study_set": "comparison",
                 "prepared_source_path": None,
             }
         ],
@@ -187,10 +187,10 @@ def test_plan_id_uses_highest_existing_number_without_filling_gaps(
 ) -> None:
     second_plan = copy.deepcopy(registry["plans"][0])
     second_plan["plan_id"] = "plan_0002"
-    second_plan["pdf_path"] = "data/raw/plan_0002.pdf"
+    second_plan["pdf_path"] = "data/source_pdfs/plan_0002.pdf"
     second_plan["document_sha256"] = "b" * 64
     registry["plans"][0]["plan_id"] = "plan_0008"
-    registry["plans"][0]["pdf_path"] = "data/raw/plan_0008.pdf"
+    registry["plans"][0]["pdf_path"] = "data/source_pdfs/plan_0008.pdf"
     registry["plans"].append(second_plan)
     before = copy.deepcopy(registry)
 
@@ -199,7 +199,7 @@ def test_plan_id_uses_highest_existing_number_without_filling_gaps(
 
 
 def test_plan_id_skips_a_pdf_missing_from_registry(tmp_path: Path) -> None:
-    raw_directory = tmp_path / "data/raw"
+    raw_directory = tmp_path / "data/source_pdfs"
     raw_directory.mkdir(parents=True)
     # Only the filename matters here. These bytes are not a usable research PDF.
     saved_pdf = raw_directory / "plan_0042.PDF"
@@ -213,7 +213,7 @@ def test_plan_id_skips_a_pdf_missing_from_registry(tmp_path: Path) -> None:
 
 def test_plan_id_can_grow_beyond_four_digits(tmp_path: Path, registry: dict) -> None:
     registry["plans"][0]["plan_id"] = "plan_9999"
-    registry["plans"][0]["pdf_path"] = "data/raw/plan_9999.pdf"
+    registry["plans"][0]["pdf_path"] = "data/source_pdfs/plan_9999.pdf"
 
     assert storage.next_plan_id(tmp_path, registry) == "plan_10000"
 

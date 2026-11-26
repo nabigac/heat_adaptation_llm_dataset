@@ -836,7 +836,7 @@ def main(argv: list[str] | None = None) -> int:
     """Start a selected document's MCP subprocess using stdin/stdout, with no port.
 
     Run with: python -m document_tools --project-root ROOT --plan-id PLAN_ID
-    --source-path data/processed/PLAN_ID/preparation_N/preparation.json
+    --source-path data/prepared_plans/PLAN_ID/preparation_N/preparation.json
     The client launches this command, writes protocol requests to stdin and reads
     results from stdout. Ordinary messages/errors must use stderr so they cannot
     corrupt the protocol pipe. The SDK manages that pipe and process shutdown.

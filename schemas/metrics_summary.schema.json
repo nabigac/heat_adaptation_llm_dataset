@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Selected per-plan metric summary",
-  "description": "Descriptive development summary with exact result selections and explicit contributing/excluded plans. No scientific judgments are inferred.",
+  "description": "Descriptive study summary with exact result selections and explicit contributing/excluded plans. No scientific judgments are inferred.",
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "summary_id", "purpose", "method_version", "created_at", "selections", "aggregates", "code_files", "summary"],
   "properties": {
     "schema_version": {"type": "integer", "const": 1},
     "summary_id": {"type": "string", "pattern": "^summary_[0-9]+$"},
-    "purpose": {"const": "development"},
+    "purpose": {"const": "comparison"},
     "method_version": {"type": "integer", "const": 1},
     "created_at": {"type": "string", "format": "date-time", "pattern": "(?:[Zz]|\\+00:00)$"},
     "selections": {
@@ -46,12 +46,12 @@
       "type": "object", "additionalProperties": false,
       "required": ["scope", "configuration", "metric", "aggregation", "value", "unit", "status", "reason", "numerator", "denominator", "contributing_plan_count", "contributing_plans", "excluded_plans"],
       "properties": {
-        "scope": {"enum": ["configuration", "paired_change", "verifier_resolution", "failure_reporting"]},
-        "configuration": {"enum": ["E", "V", "E+V", "C", "E+V_minus_E", "C_minus_E+V"]},
-        "metric": {"enum": ["action_score_percentage", "unsupported_action_count", "adequate_evidence_percentage", "open_issue_count", "runtime_seconds", "input_tokens", "output_tokens", "total_tokens", "total_output_activities", "expert_confirmed_verifier_resolutions", "failed_executions"]},
+        "scope": {"enum": ["configuration", "paired_change", "verifier_resolution"]},
+        "configuration": {"enum": ["E", "E+V", "C", "E+V_minus_E", "C_minus_E+V"]},
+        "metric": {"enum": ["action_score_percentage", "unsupported_action_count", "adequate_evidence_percentage", "open_issue_count", "runtime_seconds", "input_tokens", "output_tokens", "total_tokens", "total_output_activities", "expert_confirmed_verifier_resolutions"]},
         "aggregation": {"enum": ["mean", "sum", "confirmed_over_claimed"]},
         "value": {"type": ["number", "null"]},
-        "unit": {"enum": ["percent", "percentage_points", "activities", "issues", "resolutions", "seconds", "tokens", "executions"]},
+        "unit": {"enum": ["percent", "percentage_points", "activities", "issues", "resolutions", "seconds", "tokens"]},
         "status": {"enum": ["available", "pending", "unavailable", "not_applicable"]},
         "reason": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/text"}]},
         "numerator": {"type": ["number", "null"], "minimum": 0},

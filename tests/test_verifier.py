@@ -68,7 +68,7 @@ def baseline(project, scripted, facts, run_record):
 
 def execute(project, scripted, **options):
     return asyncio.run(agents.run_verifier(project, loop.PLAN_ID, profile_name=PROFILE,
-        purpose="development", _transport=scripted.transport, **options))
+        purpose="comparison", _transport=scripted.transport, **options))
 
 
 def prepare_replies(scripted, response):
@@ -156,7 +156,7 @@ def test_retained_extractor_ocr_remains_available_to_the_verifier_diagnostic(
 
 def test_input_contains_complete_source_and_only_the_selected_answer(project, baseline):
     before = saved_bytes(project)
-    packet = agents.build_verifier_input(project, loop.PLAN_ID, profile_name=PROFILE, purpose="development")
+    packet = agents.build_verifier_input(project, loop.PLAN_ID, profile_name=PROFILE, purpose="comparison")
     assert saved_bytes(project) == before
     assert packet.input_run_id == baseline.record["run_id"]
     assert packet.input_run == baseline.record
@@ -348,11 +348,11 @@ def test_setup_failures_create_no_verifier_attempt(project, baseline, scripted, 
     assert saved_bytes(project) == before and not scripted.requests
 
 
-def test_formal_comparison_remains_disabled(project, baseline, scripted):
+def test_comparison_verifier_rejects_a_missing_extractor(project, baseline, scripted):
     before = saved_bytes(project)
-    with pytest.raises(ValueError, match="not yet enabled"):
+    with pytest.raises(ValueError, match="Cannot load"):
         asyncio.run(agents.run_verifier(project, loop.PLAN_ID, profile_name=PROFILE,
-            purpose="comparison", _transport=scripted.transport))
+            input_run_id="run_extract_9999", _transport=scripted.transport))
     assert saved_bytes(project) == before and not scripted.requests
 
 

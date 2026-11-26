@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:review-draft",
+  "title": "Editable plan review draft",
+  "description": "A saved dataset-building answer with remaining open issues for expert review. Python checks source continuity and completion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "review_id",
+    "created_at",
+    "configuration",
+    "review_scope",
+    "source",
+    "plan_data",
+    "plan_issues",
+    "instructions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "review_id": {
+      "type": "string",
+      "pattern": "^review_[0-9]+$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(?:[Zz]|\\+00:00)$"
+    },
+    "configuration": {
+      "enum": [
+        "E",
+        "E+V",
+        "C"
+      ]
+    },
+    "review_scope": {
+      "const": "open_issues_only"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "record_path",
+        "record_sha256",
+        "selected_via",
+        "preparation_path",
+        "fingerprint",
+        "document_sha256",
+        "page_count"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "pattern": "^run_(extract|verify|collaboration)_[0-9]+$"
+        },
+        "record_path": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "record_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "selected_via": {
+          "enum": [
+            "explicit",
+            "latest_successful"
+          ]
+        },
+        "preparation_path": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "document_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "page_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "plan_data": {
+      "$ref": "urn:heat-adaptation:plan-data"
+    },
+    "plan_issues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issues"
+      ],
+      "properties": {
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/issue"
+          }
+        }
+      }
+    },
+    "instructions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      }
+    }
+  },
+  "$defs": {
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue_id",
+        "related_action_id",
+        "issue_description",
+        "issue_status",
+        "resolution",
+        "issue_origin",
+        "resolved_by"
+      ],
+      "properties": {
+        "issue_id": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/issue_id"
+        },
+        "related_action_id": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/related_action_id"
+        },
+        "issue_description": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/issue_description"
+        },
+        "issue_type": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/issue_type"
+        },
+        "issue_status": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/issue_status"
+        },
+        "resolution": {
+          "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/properties/resolution"
+        },
+        "issue_origin": {
+          "type": "string",
+          "enum": [
+            "extractor",
+            "verifier",
+            "worker_1",
+            "worker_2",
+            "coordinator",
+            "expert"
+          ]
+        },
+        "resolved_by": {
+          "enum": [
+            "extractor",
+            "verifier",
+            "worker_1",
+            "worker_2",
+            "coordinator",
+            "expert",
+            null
+          ]
+        }
+      },
+      "if": {
+        "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/if"
+      },
+      "then": {
+        "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/then"
+      },
+      "else": {
+        "$ref": "urn:heat-adaptation:agent-response#/$defs/issue/else"
+      }
+    }
+  }
+}

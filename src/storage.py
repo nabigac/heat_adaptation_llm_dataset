@@ -16,8 +16,11 @@ from io import BytesIO
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import NoReturn
 
+from legacy_records import DATA_DIRECTORY_MOVES, canonical_data_path
+
 from validation import (
     ValidationProblem,
+    _decode_json,
     parse_expert_reference_json,
     parse_expert_reference_freeze_json,
     parse_pages_json,
@@ -33,6 +36,8 @@ from validation import (
     validate_run_links,
     validate_run_record,
     validate_run_record_structure,
+    validate_run_purpose,
+    require_run_purpose,
     validate_tool_log,
 )
 
@@ -122,6 +127,7 @@ def create_run_record(project_root: Path | str, record: dict) -> str:
     starts models nor invents timestamps, measurements, or environment values.
     """
     _require_run_structure(record)
+    require_run_purpose(record["purpose"])
     if record["status"] != "running":
         _run_problem("$.status", "A new run record must start with status 'running'.")
     record_path = _run_record_path(record)
@@ -384,8 +390,9 @@ def _check_run_source(project_root: Path | str, record: dict) -> tuple[dict, dic
             input_path,
             f"A successful run requires its preserved {record['stage']} input."
         )
-    if record["purpose"] in {"development", "comparison"} and entry["study_set"] != record["purpose"]:
-        _run_problem("$.purpose", "Development/comparison work must match the plan's study-set assignment.")
+    problems = validate_run_purpose(record["purpose"], entry["study_set"])
+    if problems:
+        raise RunValidationError(problems)
     if record["plan_data"] is not None:
         # Collection corrections affect future preparations. Earlier content
         # must match the collection values saved with its own preparation.
@@ -439,7 +446,7 @@ def load_plan_preparation(
         raise PreparationValidationError([ValidationProblem("reference", location, message)])
 
     if not isinstance(source_path, str) or re.fullmatch(
-        rf"data/processed/{re.escape(plan_id)}/preparation_[0-9]+/preparation\.json", source_path
+        rf"data/prepared_plans/{re.escape(plan_id)}/preparation_[0-9]+/preparation\.json", canonical_data_path(source_path)
     ) is None:
         # Restrict the kind of selected file before opening it. Expert references
         # or other project JSON must never become model input through this API.
@@ -451,7 +458,8 @@ def load_plan_preparation(
     entry = matches[0]
     preparation, pages = load_preparation(project_root, source_path)
     if (
-        preparation["plan_id"] != plan_id or preparation["pdf_path"] != entry["pdf_path"]
+        preparation["plan_id"] != plan_id
+        or canonical_data_path(preparation["pdf_path"]) != canonical_data_path(entry["pdf_path"])
         or preparation["document_sha256"].lower() != entry["document_sha256"].lower()
     ):
         problem("$.source_path", "The saved preparation does not match the registered PDF identity.")
@@ -468,8 +476,8 @@ def load_plan_preparation(
 
 
 def _check_run_files(project_root: Path | str, record: dict, record_path: str) -> None:
-    # These checks establish that known supporting files exist and reports/logs
-    # have valid structure. Raw answer correctness remains an expert judgment.
+    # Check preserved evidence and its agreement with successful output. These
+    # are integrity checks; source support still requires expert judgment.
     for index, call in enumerate(record["model_calls"]):
         if call["response_path"] is not None:
             _require_response_file(project_root, record_path, call["response_path"])
@@ -499,8 +507,55 @@ def _check_run_files(project_root: Path | str, record: dict, record_path: str) -
         _check_report_files(project_root, record_path, report)
         if record["status"] == "succeeded" and not report["valid"]:
             _run_problem(report_path, "A successful run requires a passing final-response validation report.")
+        if record["status"] == "succeeded":
+            _check_accepted_candidate(project_root, record_path, record, report)
+            _check_archived_code(project_root, record_path)
     elif record["status"] == "succeeded" or record["plan_data"] is not None or record["plan_issues"] is not None:
         raise FileNotFoundError(f"Final-response validation report is missing: {report_file}")
+
+
+def _read_run_evidence_object(project_root: Path | str, record_path: str, path: str) -> dict:
+    """Read strict saved JSON within this run, without repairing evidence."""
+    file = _bound_run_file(project_root, record_path, path)
+    try:
+        data = _decode_json(file.read_text(encoding="utf-8"))
+    except (ValueError, RecursionError) as error:
+        _run_problem(path, f"Cannot read preserved run evidence as strict JSON: {error}")
+    if not isinstance(data, dict):
+        _run_problem(path, "Preserved run evidence must be a JSON object.")
+    return data
+
+
+def _check_accepted_candidate(project_root: Path | str, record_path: str, record: dict, report: dict) -> None:
+    """Tie E/V/C accepted output to the final candidate selected by its report."""
+    # Permitted format/page repairs have their own candidate. Comparing with the
+    # raw answer instead would incorrectly reject those legitimate corrections.
+    candidate_path = report["repaired_response_path"] or report["raw_response_path"]
+    _require_response_file(project_root, record_path, candidate_path)
+    candidate = _read_run_evidence_object(project_root, record_path, candidate_path)
+    if candidate != {name: record[name] for name in ("plan_data", "plan_issues")}:
+        _run_problem(candidate_path, "Accepted answer differs from the preserved final candidate.")
+
+
+def _check_archived_code(project_root: Path | str, record_path: str) -> None:
+    """Verify E/V/C archived bytes against their saved startup checksums."""
+    folder = PurePosixPath(record_path).parent
+    manifest_path = f"{folder}/artifacts/code_fingerprints.json"
+    manifest = _read_run_evidence_object(project_root, record_path, manifest_path)
+    fingerprints = manifest.get("sha256")
+    if not isinstance(fingerprints, dict) or not fingerprints:
+        _run_problem(manifest_path, "Archived code requires a nonempty sha256 fingerprint map.")
+    for name, digest in fingerprints.items():
+        relative = PurePosixPath(name)
+        if (not name or relative.is_absolute() or ".." in relative.parts or "\\" in name
+                or PureWindowsPath(name).drive or relative.as_posix() != name):
+            _run_problem(manifest_path, "Code fingerprint paths must name files within the archived code folder.")
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            _run_problem(manifest_path, "Archived code fingerprints must be SHA-256 checksum strings.")
+        path = f"{folder}/artifacts/code/{name}"
+        raw = _bound_run_file(project_root, record_path, path).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != digest:
+            _run_problem(path, "Preserved code differs from its startup fingerprint.")
 
 
 def _check_report_files(project_root: Path | str, record_path: str, report: dict) -> None:
@@ -695,13 +750,15 @@ def save_new_expert_reference(project_root: Path | str, reference: dict) -> str:
     if not root.is_dir():
         raise NotADirectoryError(f"Project root is not an existing directory: {root}")
     _require_run_identifier(reference["plan_id"])
-    relative_path = f"data/expert_references/{reference['plan_id']}/expert_reference.json"
+    relative_path = f"data/comparison/expert_references/{reference['plan_id']}/expert_reference.json"
     destination = resolve_project_path(root, relative_path)
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(f"Expert reference already exists; it was not changed: {relative_path}")
-    legacy = resolve_project_path(root, f"expert_references/{reference['plan_id']}")
-    if legacy.exists() or legacy.is_symlink():
-        raise ValueError("An expert reference folder exists at the old location; migrate it before creating a form.")
+    for old, new in DATA_DIRECTORY_MOVES:
+        if new == "data/comparison/expert_references":
+            legacy = _literal_project_path(root, f"{old}/{reference['plan_id']}")
+            if legacy.exists() or legacy.is_symlink():
+                raise ValueError("An expert reference folder exists at the old location; migrate it before creating a form.")
     require_unfrozen_expert_reference(root, reference["plan_id"])
     # A reference belongs at this exact plan path, never through a redirect to
     # another plan's folder, even when the linked target stays inside the project.
@@ -739,7 +796,7 @@ def load_expert_reference(
 def _expert_reference_file(project_root: Path | str, plan_id: str) -> Path:
     """Keep both reads and edits bound to the selected plan's canonical form."""
     _require_run_identifier(plan_id)
-    relative_path = f"data/expert_references/{plan_id}/expert_reference.json"
+    relative_path = f"data/comparison/expert_references/{plan_id}/expert_reference.json"
     path = resolve_project_path(project_root, relative_path)
     if path.resolve() != path:
         raise ValueError(f"Expert reference path must not use symbolic links: {relative_path}")
@@ -786,9 +843,8 @@ def load_expert_reference_freeze(project_root: Path | str, plan_id: str) -> dict
     assert freeze is not None
     # Preserve historical freeze bytes when the reference folder is moved. The
     # old recorded path remains provenance; file/hash checks use today's path.
-    permitted_paths = {f"data/expert_references/{plan_id}/expert_reference.json",
-                       f"expert_references/{plan_id}/expert_reference.json"}
-    if freeze["plan_id"] != plan_id or freeze["reference_path"] not in permitted_paths:
+    expected_path = f"data/comparison/expert_references/{plan_id}/expert_reference.json"
+    if freeze["plan_id"] != plan_id or canonical_data_path(freeze["reference_path"]) != expected_path:
         raise ValueError("Expert reference freeze must identify this plan's canonical reference.")
     return freeze
 
@@ -805,7 +861,7 @@ def save_new_expert_reference_freeze(
     if problems:
         raise ExpertReferenceValidationError(problems)
     if (freeze["plan_id"] != plan_id
-            or freeze["reference_path"] != f"data/expert_references/{plan_id}/expert_reference.json"):
+            or freeze["reference_path"] != f"data/comparison/expert_references/{plan_id}/expert_reference.json"):
         raise ValueError("Expert reference freeze must identify this plan's canonical reference.")
     require_unfrozen_expert_reference(project_root, plan_id)
     current = read_expert_reference_bytes(project_root, plan_id)
@@ -813,7 +869,7 @@ def save_new_expert_reference_freeze(
         raise ValueError("The expert reference changed while freezing; review it again before freezing.")
     destination = _expert_reference_freeze_file(project_root, plan_id)
     _publish_new_bytes(destination, _serialize_run_json(freeze).encode("utf-8"))
-    return f"data/expert_references/{plan_id}/reference_freeze.json"
+    return f"data/comparison/expert_references/{plan_id}/reference_freeze.json"
 
 
 def save_expert_reference_edit(
@@ -836,7 +892,7 @@ def save_expert_reference_edit(
     if destination.read_bytes() != expected_bytes:
         raise ValueError("The expert reference changed while editing; reload it and repeat the edit.")
     _replace_run_json(destination, text)
-    return f"data/expert_references/{plan_id}/expert_reference.json"
+    return f"data/comparison/expert_references/{plan_id}/expert_reference.json"
 
 
 def migrate_expert_references(project_root: Path | str) -> list[str]:
@@ -846,8 +902,8 @@ def migrate_expert_references(project_root: Path | str) -> list[str]:
     or losing expert work. As elsewhere, migration requires one writer at a time.
     Historical freeze paths stay readable through load_expert_reference_freeze.
     """
-    source = resolve_project_path(project_root, "expert_references")
-    destination = resolve_project_path(project_root, "data/expert_references")
+    source = _literal_project_path(project_root, "expert_references")
+    destination = _literal_project_path(project_root, "data/comparison/expert_references")
     if source.is_symlink() or source.resolve() != source:
         raise ValueError("The old expert reference folder must not use symbolic links.")
     if not source.exists():
@@ -861,7 +917,118 @@ def migrate_expert_references(project_root: Path | str) -> list[str]:
     files = sorted(path.relative_to(source).as_posix() for path in source.rglob("*") if path.is_file())
     destination.parent.mkdir(parents=True, exist_ok=True)
     source.rename(destination)
-    return [f"data/expert_references/{name}" for name in files]
+    return [f"data/comparison/expert_references/{name}" for name in files]
+
+
+def migrate_data_layout(project_root: Path | str, *, dry_run: bool = False) -> dict:
+    """Move research directories, retaining archived JSON and source fingerprints.
+
+    Preflight every move before changing anything. Directory renames are separate
+    operations, not a multi-folder transaction. An interruption retains completed
+    moves; readers understand either location and a later invocation resumes.
+    Use one writer, as with model execution and expert-reference editing.
+    """
+    root = Path(project_root).resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(root)
+    directories = ("data/source_pdfs", "data/prepared_plans", "data/comparison/expert_references",
+                   "data/comparison/assessments", "data/comparison/reports",
+                   "data/dataset_building/review_drafts", "data/dataset_building/reviewed_plans",
+                   "data/dataset_building/heat_action_datasets")
+    for directory in directories:
+        path = _literal_project_path(root, directory)
+        if path.resolve() != path or path.is_symlink():
+            raise ValueError(f"Data directories must not use symbolic links: {directory}")
+        if path.exists() and not path.is_dir():
+            raise FileExistsError(f"Data directory is occupied by a file: {directory}")
+    registry_path = _literal_project_path(root, "data/registry/plans.json")
+    registry_bytes = registry_path.read_bytes() if registry_path.exists() else None
+    registry = load_registry(root) if registry_bytes is not None else None
+    updated_registry = None if registry is None else {**registry, "plans": [
+        {**entry, "pdf_path": canonical_data_path(entry["pdf_path"]),
+         "prepared_source_path": canonical_data_path(entry["prepared_source_path"])}
+        for entry in registry["plans"]
+    ]}
+    moves, destinations = [], set()
+    empty_comparison_moves = (("data/assessments", "data/comparison/assessments"),
+                              ("data/reports", "data/comparison/reports"))
+    for old, new in (*DATA_DIRECTORY_MOVES, *empty_comparison_moves):
+        source, destination = _literal_project_path(root, old), _literal_project_path(root, new)
+        if source.is_symlink() or source.resolve() != source:
+            raise ValueError(f"Data migration must not follow symbolic links: {old}")
+        if not source.exists():
+            continue
+        if not source.is_dir():
+            raise ValueError(f"The old data location is not a directory: {old}")
+        if destination.exists() or destination.is_symlink() or new in destinations:
+            raise FileExistsError(f"Migration destination is occupied: {new}; folders will not be merged.")
+        if destination.resolve() != destination:
+            raise ValueError(f"Data migration must not follow symbolic links: {new}")
+        entries = list(source.rglob("*"))
+        if any(path.is_symlink() for path in entries):
+            raise ValueError(f"Data migration must not follow symbolic links inside {old}.")
+        if (old, new) in empty_comparison_moves and entries:
+            raise ValueError("This migration precedes first assessment/report creation; occupied old artifacts need explicit recovery.")
+        fingerprints = {path.relative_to(source).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                        for path in entries if path.is_file()}
+        moves.append({"source": old, "destination": new, "files": fingerprints})
+        destinations.add(new)
+    # Validate only existing run records; incomplete folders remain preserved.
+    runs = {}
+    for file in sorted((root / "runs").glob("*/*/output.json")):
+        relative = file.relative_to(root).as_posix()
+        raw = file.read_bytes()
+        record = load_run_record(root, relative)
+        if file.read_bytes() != raw:
+            raise ValueError(f"Run changed during migration preflight: {relative}")
+        runs[relative] = (raw, record)
+    report = {"moves": [{"source": move["source"], "destination": move["destination"],
+                         "file_count": len(move["files"])} for move in moves],
+              "registry_updated": updated_registry != registry, "validated_runs": len(runs), "dry_run": dry_run}
+    if dry_run:
+        return report
+    try:
+        for move in moves:
+            source = _literal_project_path(root, move["source"])
+            if any(p.is_symlink() for p in source.rglob("*")):
+                raise ValueError(f"Data changed after migration preflight: {move['source']}")
+            observed = {p.relative_to(source).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                        for p in source.rglob("*") if p.is_file()}
+            if observed != move["files"]:
+                raise ValueError(f"Data changed after migration preflight: {move['source']}")
+            destination = _literal_project_path(root, move["destination"])
+            if destination.exists() or destination.is_symlink():
+                raise FileExistsError(f"Migration destination became occupied: {move['destination']}")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            source.rename(destination)
+            copied = {p.relative_to(destination).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                      for p in destination.rglob("*") if p.is_file()}
+            if copied != move["files"]:
+                raise ValueError(f"Moved data differ from preflight fingerprints: {move['destination']}")
+        if report["registry_updated"]:
+            if registry_path.read_bytes() != registry_bytes:
+                raise ValueError("Registry changed during migration; its new contents were not overwritten.")
+            save_registry(root, updated_registry)
+        for relative, (raw, record) in runs.items():
+            if (root / relative).read_bytes() != raw or load_run_record(root, relative) != record:
+                raise ValueError(f"Historical run changed during migration: {relative}")
+        for directory in directories:
+            path = _literal_project_path(root, directory)
+            if path.resolve() != path:
+                raise ValueError(f"Data directories must not use symbolic links: {directory}")
+            path.mkdir(parents=True, exist_ok=True)
+    except Exception as error:
+        error.add_note("Completed directory moves and all evidence were retained. Inspect the layout, then rerun migrate_data_layout to resume.")
+        raise
+    return report
+
+
+def _require_migrated_sources(project_root: Path | str) -> None:
+    """Avoid starting a parallel source tree beside an unmigrated collection."""
+    for old, _ in DATA_DIRECTORY_MOVES[:2]:
+        path = _literal_project_path(project_root, old)
+        if path.exists() or path.is_symlink():
+            raise ValueError("Move saved source directories with migrate_data_layout before creating new PDFs/preparations.")
 
 
 def save_registry(project_root: Path | str, registry: dict) -> None:
@@ -919,7 +1086,7 @@ def next_plan_id(project_root: Path | str, registry: dict) -> str:
     _require_valid_structure(registry)
     used_ids = {plan["plan_id"] for plan in registry["plans"]}
 
-    raw_directory = resolve_project_path(project_root, "data/raw")
+    raw_directory = resolve_project_path(project_root, "data/source_pdfs")
     if raw_directory.exists():
         # A previous interrupted import may have saved its PDF before the registry.
         # Consider filenames even if the corresponding registry entry is missing.
@@ -950,9 +1117,10 @@ def preserve_original_pdf(
     A checksum mismatch or filename collision fails before publication. This
     preserves bytes, but does not check PDF readability or study eligibility.
     """
+    _require_migrated_sources(project_root)
     if re.fullmatch(r"plan_[0-9]+", plan_id) is None:
         raise ValueError("A stored PDF needs a generated plan_<number> ID.")
-    relative_path = f"data/raw/{plan_id}.pdf"
+    relative_path = f"data/source_pdfs/{plan_id}.pdf"
     destination = resolve_project_path(project_root, relative_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -992,9 +1160,10 @@ def next_preparation_directory(project_root: Path | str, plan_id: str) -> str:
     Count existing numbered entries, including incomplete attempts. This does not
     reserve a name; save_preparation must still refuse an occupied destination.
     """
+    _require_migrated_sources(project_root)
     if re.fullmatch(r"plan_[0-9]+", plan_id) is None:
         raise ValueError("A preparation needs a generated plan_<number> ID.")
-    relative_parent = f"data/processed/{plan_id}"
+    relative_parent = f"data/prepared_plans/{plan_id}"
     parent = resolve_project_path(project_root, relative_parent)
 
     largest_number = 0
@@ -1020,10 +1189,13 @@ def save_preparation(
     never reused, even if empty or damaged. This function does not edit the
     registry, check the original PDF, or establish that an OCR route works.
     """
+    _require_migrated_sources(project_root)
     problems = validate_preparation_pages(preparation, pages)
     if problems:
         raise PreparationValidationError(problems)
     record_path = _preparation_record_path(preparation)
+    if record_path != canonical_data_path(record_path) or preparation["pdf_path"] != canonical_data_path(preparation["pdf_path"]):
+        raise ValueError("New preparations must use current source_pdfs/prepared_plans paths.")
     relative_directory = str(PurePosixPath(record_path).parent)
     directory = resolve_project_path(project_root, relative_directory)
     artifacts = {} if artifacts is None else artifacts
@@ -1081,7 +1253,7 @@ def load_preparation(
     assert preparation is not None  # The parser's success contract.
 
     expected_record_path = _preparation_record_path(preparation)
-    if preparation_path != expected_record_path:
+    if canonical_data_path(preparation_path) != canonical_data_path(expected_record_path):
         raise PreparationValidationError(
             [
                 ValidationProblem(
@@ -1174,8 +1346,8 @@ def _preparation_record_path(preparation: dict) -> str:
     # The two captured groups are the plan ID and preparation number. Checking
     # the whole path prevents accidental cross-plan links and unexpected layouts.
     match = re.fullmatch(
-        r"data/processed/(plan_[0-9]+)/preparation_([0-9]+)/pages\.json",
-        preparation["pages_path"],
+        r"data/prepared_plans/(plan_[0-9]+)/preparation_([0-9]+)/pages\.json",
+        canonical_data_path(preparation["pages_path"]),
     )
     if (
         match is None
@@ -1188,7 +1360,7 @@ def _preparation_record_path(preparation: dict) -> str:
                     category="reference",
                     location="preparation.json:$.pages_path",
                     message=(
-                        "Pages must be stored at data/processed/<plan_id>/"
+                        "Pages must be stored at data/prepared_plans/<plan_id>/"
                         "preparation_<positive number>/pages.json for this plan."
                     ),
                 )
@@ -1248,8 +1420,8 @@ def _require_valid_structure(registry: dict) -> None:
         raise RegistryValidationError(problems)
 
 
-def resolve_project_path(project_root: Path | str, relative_path: str) -> Path:
-    """Resolve a project-relative path while keeping file operations inside the root."""
+def _literal_project_path(project_root: Path | str, relative_path: str) -> Path:
+    """Check the supplied path before any historical directory alias is applied."""
     # Stored paths use forward slashes. Check Windows drives even on macOS so
     # a path does not change meaning if the project is moved to another platform.
     relative = Path(relative_path)
@@ -1269,3 +1441,19 @@ def resolve_project_path(project_root: Path | str, relative_path: str) -> Path:
     if not path.resolve().is_relative_to(root):
         raise ValueError(f"Project path resolves outside the project root: {path}")
     return path
+
+
+def resolve_project_path(project_root: Path | str, relative_path: str) -> Path:
+    """Locate current or migrated evidence without rewriting archived path fields."""
+    original = _literal_project_path(project_root, relative_path)
+    for old, new in DATA_DIRECTORY_MOVES:
+        if relative_path == old or relative_path.startswith(old + "/"):
+            old_directory = _literal_project_path(project_root, old)
+            new_directory = _literal_project_path(project_root, new)
+            if new_directory.exists() or new_directory.is_symlink():
+                if old_directory.exists() or old_directory.is_symlink():
+                    raise ValueError(f"Both old and new data locations are occupied: {old}, {new}.")
+                if new_directory.resolve() != new_directory:
+                    raise ValueError("Migrated data directories must not use symbolic links.")
+                return _literal_project_path(project_root, canonical_data_path(relative_path))
+    return original

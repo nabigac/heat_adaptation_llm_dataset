@@ -25,7 +25,7 @@ import storage
 
 
 PLAN_ID = "plan_0099"
-SOURCE_PATH = f"data/processed/{PLAN_ID}/preparation_02/preparation.json"
+SOURCE_PATH = f"data/prepared_plans/{PLAN_ID}/preparation_02/preparation.json"
 PROFILE = "fictional_extractor"
 
 
@@ -38,7 +38,7 @@ def png(size):
 @pytest.fixture
 def project(tmp_path, run_record):
     root = tmp_path / "project"
-    pdf = root / f"data/raw/{PLAN_ID}.pdf"
+    pdf = root / f"data/source_pdfs/{PLAN_ID}.pdf"
     pdf.parent.mkdir(parents=True)
     with PdfWriter() as writer:
         for _ in range(5):
@@ -46,7 +46,7 @@ def project(tmp_path, run_record):
         writer.write(pdf)
     checksum = hashlib.sha256(pdf.read_bytes()).hexdigest()
     prep = {
-        "schema_version": 3, "plan_id": PLAN_ID, "pdf_path": f"data/raw/{PLAN_ID}.pdf",
+        "schema_version": 3, "plan_id": PLAN_ID, "pdf_path": f"data/source_pdfs/{PLAN_ID}.pdf",
         "document_sha256": checksum, "source_url": "https://example.org/saved-source.pdf",
         "date_accessed": "2026-11-03", "prepared_at": "2026-11-03T11:00:00Z",
         "pages_path": SOURCE_PATH.replace("preparation.json", "pages.json"), "page_count": 5,
@@ -59,7 +59,7 @@ def project(tmp_path, run_record):
              "Native text unchanged.\n[Regional OCR supplement]\nBudget £500,000.", None]
     pages, artifacts = [], {}
     for n, text in enumerate(texts, start=1):
-        image_path = f"data/processed/{PLAN_ID}/preparation_02/images/page_{n:04d}.png" if n >= 3 else None
+        image_path = f"data/prepared_plans/{PLAN_ID}/preparation_02/images/page_{n:04d}.png" if n >= 3 else None
         if image_path:
             artifacts[image_path] = png((20, 20))
         page = {"page_number": n, "text": text, "text_source":
@@ -77,7 +77,7 @@ def project(tmp_path, run_record):
     storage.save_registry(root, {"schema_version": 1, "plans": [{
         "plan_id": PLAN_ID, "plan_title": "Mutable collection title, not source evidence.", "pdf_path": prep["pdf_path"],
         "document_sha256": checksum, "source_url": "https://example.org/current-correction.pdf",
-        "date_accessed": "2026-11-04", "study_set": "development", "prepared_source_path": SOURCE_PATH,
+        "date_accessed": "2026-11-04", "study_set": "comparison", "prepared_source_path": SOURCE_PATH,
     }]})
     profile = copy.deepcopy(run_record["settings"])
     tools = profile.pop("document_tools")
@@ -308,9 +308,9 @@ def test_non_huggingface_profile_is_rejected_before_assembly(project):
 
 
 @pytest.mark.parametrize("path", [
-    "runs/expert/reference_initial.json", "data/processed/plan_0001/preparation_02/preparation.json",
-    "data/processed/plan_0099/preparation_02/pages.json", "../preparation.json",
-    "/tmp/preparation.json", "data/processed/plan_0099/preparation_00/preparation.json", None,
+    "runs/expert/reference_initial.json", "data/prepared_plans/plan_0001/preparation_02/preparation.json",
+    "data/prepared_plans/plan_0099/preparation_02/pages.json", "../preparation.json",
+    "/tmp/preparation.json", "data/prepared_plans/plan_0099/preparation_00/preparation.json", None,
 ])
 def test_wrong_source_kind_or_location_is_refused(project, path):
     before = snapshot(project)
@@ -322,7 +322,7 @@ def test_wrong_source_kind_or_location_is_refused(project, path):
 @pytest.mark.parametrize("plan_id", ["plan_9999", "../plan_0099", "", None])
 def test_unregistered_or_invalid_plan_id_is_refused(project, plan_id):
     with pytest.raises(agents.ExtractorInputError):
-        build(project, plan_id=plan_id, source_path=f"data/processed/{plan_id}/preparation_02/preparation.json")
+        build(project, plan_id=plan_id, source_path=f"data/prepared_plans/{plan_id}/preparation_02/preparation.json")
 
 
 @pytest.mark.parametrize("damage", [
@@ -358,7 +358,7 @@ def test_damaged_selected_sources_never_return_a_partial_input(project, damage):
         prep_file.write_text(json.dumps(prep))
     elif damage == "registry_pdf_path":
         registry = storage.load_registry(project)
-        registry["plans"][0]["pdf_path"] = "data/raw/other.pdf"
+        registry["plans"][0]["pdf_path"] = "data/source_pdfs/other.pdf"
         storage.save_registry(project, registry)
     elif damage == "original_pdf_changed":
         with (project / prep["pdf_path"]).open("ab") as file:

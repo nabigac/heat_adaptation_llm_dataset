@@ -66,8 +66,8 @@ def study(ready, run_record, template_directory, tmp_path):
             issue("issue_0004", origin="verifier"),
         ])
         publish(ready.root, verifier, "verifier", 1, input_run_id="run_extract_0001")
-        expert_files.create_expert_reference(ready.root, PLAN_ID, prepared_by=["fictional_expert"])
-        path = ready.root / f"data/expert_references/{PLAN_ID}/expert_reference.json"
+        expert_files.create_expert_reference(ready.root, PLAN_ID)
+        path = ready.root / f"data/comparison/expert_references/{PLAN_ID}/expert_reference.json"
         reference = json.loads(path.read_text())
         reference["plan_data"] = deepcopy(extractor["plan_data"])
         another = deepcopy(reference["plan_data"]["actions"][0])
@@ -75,7 +75,7 @@ def study(ready, run_record, template_directory, tmp_path):
         reference["plan_data"]["actions"].append(another)
         reference["plan_issues"]["issues"] = []
         path.write_text(json.dumps(reference, ensure_ascii=False))
-        expert_files.freeze_expert_reference(ready.root, PLAN_ID, frozen_by=["fictional_expert"])
+        expert_files.freeze_expert_reference(ready.root, PLAN_ID)
         shutil.copytree(ready.root, template_directory)
     root = tmp_path / "assessment study"
     shutil.copytree(template_directory, root)
@@ -87,7 +87,7 @@ def snapshot(root):
 
 
 def create(root, **options):
-    return assessments.create_assessment(root, PLAN_ID, reviewers=["reviewer_01"], **options)
+    return assessments.create_assessment(root, PLAN_ID, **options)
 
 
 def metadata(root, path):
@@ -114,11 +114,13 @@ def test_creation_prefills_context_and_preserves_every_input_without_paid_calls(
     monkeypatch.delenv("HF_TOKEN", raising=False)
     before = snapshot(study)
     path = create(study, notes="Fictional assessment pilot.")
-    assert path == f"data/assessments/{PLAN_ID}/assessment_0001"
+    assert path == f"data/comparison/assessments/{PLAN_ID}/assessment_0001"
     data = metadata(study, path)
     assert validation.validate_assessment_metadata(data) == []
-    assert data["reviewers"] == ["reviewer_01"] and data["notes"] == "Fictional assessment pilot."
-    assert data["included_attempts"] is None
+    assert "reviewers" not in data and data["notes"] == "Fictional assessment pilot."
+    assert "included_attempts" not in data
+    assert not any("failure-reporting scope" in instruction for instruction in data["instructions"])
+    assert any("review drafts from fresh dataset_building runs" in instruction for instruction in data["instructions"])
     assert data["source"]["preparation_path"] == SOURCE
     for run in data["runs"].values():
         assert run["record_sha256"] == hashlib.sha256((study / run["record_path"]).read_bytes()).hexdigest()
@@ -177,7 +179,7 @@ def test_latest_e_without_a_linked_v_is_an_error_not_a_silent_older_pair(study):
     publish(study, e, "extractor", 2)
     with pytest.raises(ValueError, match="linked to E run_extract_0002"):
         create(study)
-    assert not (study / "data/assessments").exists()
+    assert not (study / "data/comparison/assessments").exists()
 
 
 def test_explicit_mismatched_pair_is_rejected(study):
@@ -224,7 +226,7 @@ def test_failed_and_running_newer_runs_do_not_replace_successful_defaults(study)
 def test_latest_c_must_use_the_selected_preparation_even_when_pdf_and_text_match(study):
     _, preparation, pages = storage.load_plan_preparation(study, PLAN_ID, SOURCE)
     alternate = deepcopy(preparation)
-    alternate["pages_path"] = f"data/processed/{PLAN_ID}/preparation_03/pages.json"
+    alternate["pages_path"] = f"data/prepared_plans/{PLAN_ID}/preparation_03/pages.json"
     alternate_path = storage.save_preparation(study, alternate, pages)
     c = clone_c(study, 2)
     c.update(source_path=alternate_path, source_fingerprint=storage.preparation_text_fingerprint(alternate, pages))
@@ -256,20 +258,20 @@ def test_only_initially_open_e_issues_resolved_by_v_become_claim_rows(study):
     assert header.startswith("issue_id,related_action_id,")
 
 
-def test_comparison_plan_cannot_create_or_disclose_development_assessments(study):
+def test_study_plan_supports_comparison_assessment_without_relabeling_runs(study):
     registry = storage.load_registry(study)
     registry["plans"][0]["study_set"] = "comparison"
     (study / "data/registry/plans.json").write_text(json.dumps(registry))
-    before = snapshot(study)
-    with pytest.raises(ValueError, match="development plans only"):
-        create(study)
-    assert snapshot(study) == before
+    path = create(study)
+    data = metadata(study, path)
+    assert data["schema_version"] == 2 and "purpose" not in data
 
 
 def test_modified_metadata_or_missing_required_fields_fail_structure_checks(study):
     path = create(study)
     data = metadata(study, path)
-    for field, value in (("reviewers", []), ("purpose", "comparison"), ("included_attempts", [])):
+    for field, value in (("reviewers", []), ("purpose", "comparison"), ("purpose", "outside_study"),
+                         ("included_attempts", None), ("included_attempts", []), ("schema_version", 1)):
         changed = deepcopy(data)
         changed[field] = value
         assert validation.validate_assessment_metadata(changed)
@@ -288,7 +290,7 @@ def test_explicit_bad_ids_never_fall_back_or_create_files(study, flag, identifie
 
 @pytest.mark.parametrize("damage", ["unfrozen", "changed_reference", "missing_source", "missing_c"])
 def test_unready_inputs_never_create_an_assessment(study, damage):
-    reference = study / f"data/expert_references/{PLAN_ID}/expert_reference.json"
+    reference = study / f"data/comparison/expert_references/{PLAN_ID}/expert_reference.json"
     if damage == "unfrozen":
         reference.with_name("reference_freeze.json").unlink()
     elif damage == "changed_reference":
@@ -300,18 +302,18 @@ def test_unready_inputs_never_create_an_assessment(study, damage):
     before = snapshot(study)
     with pytest.raises((ValueError, OSError)):
         create(study)
-    assert snapshot(study) == before and not (study / "data/assessments").exists()
+    assert snapshot(study) == before and not (study / "data/comparison/assessments").exists()
 
 
-@pytest.mark.parametrize("reviewers", [[], [""], [None], None, "name"])
-def test_missing_reviewer_identity_is_rejected_without_writing(study, reviewers):
-    with pytest.raises(ValueError, match="reviewer"):
-        assessments.create_assessment(study, PLAN_ID, reviewers=reviewers)
-    assert not (study / "data/assessments").exists()
+def test_removed_reviewer_argument_is_rejected_without_writing(study):
+    before = snapshot(study)
+    with pytest.raises(TypeError, match="reviewers"):
+        assessments.create_assessment(study, PLAN_ID, reviewers=["obsolete"])
+    assert snapshot(study) == before
 
 
 def test_occupied_and_interrupted_assessment_numbers_are_preserved(study):
-    parent = study / f"data/assessments/{PLAN_ID}"
+    parent = study / f"data/comparison/assessments/{PLAN_ID}"
     parent.mkdir(parents=True)
     (parent / "assessment_0004").mkdir()
     (parent / "assessment_0005").write_bytes(b"interrupted setup")
@@ -323,7 +325,7 @@ def test_occupied_and_interrupted_assessment_numbers_are_preserved(study):
 def test_assessment_paths_cannot_redirect_even_inside_the_project(study):
     target = study / "elsewhere"
     target.mkdir()
-    (study / "data/assessments").symlink_to(target, target_is_directory=True)
+    (study / "data/comparison/assessments").symlink_to(target, target_is_directory=True)
     with pytest.raises(ValueError, match="symbolic"):
         create(study)
     assert list(target.iterdir()) == []
@@ -338,7 +340,7 @@ def test_input_changes_before_publication_are_detected(study, monkeypatch):
     monkeypatch.setattr(assessments, "_review_files", changed)
     with pytest.raises(ValueError, match="input changed"):
         create(study)
-    assert not (study / "data/assessments").exists()
+    assert not (study / "data/comparison/assessments").exists()
 
 
 def test_supporting_run_evidence_is_rechecked_before_publication(study, monkeypatch):
@@ -350,7 +352,7 @@ def test_supporting_run_evidence_is_rechecked_before_publication(study, monkeypa
     monkeypatch.setattr(assessments, "_review_files", removed)
     with pytest.raises((ValueError, OSError)):
         create(study)
-    assert not (study / "data/assessments").exists()
+    assert not (study / "data/comparison/assessments").exists()
 
 
 def test_failed_bundle_publication_retains_partial_evidence_without_completion_metadata(study, monkeypatch):
@@ -362,28 +364,28 @@ def test_failed_bundle_publication_retains_partial_evidence_without_completion_m
     monkeypatch.setattr(storage, "_publish_new_bytes", failed)
     with pytest.raises(OSError, match="publication failure"):
         create(study)
-    folder = study / f"data/assessments/{PLAN_ID}/assessment_0001"
+    folder = study / f"data/comparison/assessments/{PLAN_ID}/assessment_0001"
     assert (folder / "action_scores.csv").is_file()
     assert not (folder / "metadata.json").exists()
 
 
 def test_cli_creates_new_assessment_with_default_and_explicit_selection(study, capsys):
-    result = cli.main(["create_assessment", PLAN_ID, "--reviewer", "Reviewer One", "--reviewer", "reviewer_02",
-                       "--notes", "Development pilot", "--project-root", str(study)])
+    result = cli.main(["create_assessment", PLAN_ID, "--notes", "Comparison pilot", "--project-root", str(study)])
     assert result == 0
     output = capsys.readouterr()
-    assert f"data/assessments/{PLAN_ID}/assessment_0001" in output.out and output.err == ""
-    data = metadata(study, f"data/assessments/{PLAN_ID}/assessment_0001")
-    assert data["reviewers"] == ["Reviewer One", "reviewer_02"]
-    result = cli.main(["create_assessment", PLAN_ID, "--reviewer", "Reviewer One", "--extractor-run-id", "run_extract_0001",
+    assert f"data/comparison/assessments/{PLAN_ID}/assessment_0001" in output.out and output.err == ""
+    data = metadata(study, f"data/comparison/assessments/{PLAN_ID}/assessment_0001")
+    assert "reviewers" not in data
+    assert data["schema_version"] == 2 and "purpose" not in data
+    result = cli.main(["create_assessment", PLAN_ID, "--extractor-run-id", "run_extract_0001",
                        "--verifier-run-id", "run_verify_0001", "--collaboration-run-id", "run_collaboration_0001",
                        "--project-root", str(study)])
     assert result == 0
     assert "assessment_0002" in capsys.readouterr().out
 
 
-def test_cli_requires_plan_and_reviewer():
-    for arguments in ([], [PLAN_ID], ["--reviewer", "name"]):
+def test_cli_requires_plan_and_rejects_removed_identity_and_purpose():
+    for arguments in ([], [PLAN_ID, "--reviewer", "obsolete"], [PLAN_ID, "--purpose", "comparison"]):
         with pytest.raises(SystemExit) as error:
             cli.main(["create_assessment", *arguments])
         assert error.value.code == 2

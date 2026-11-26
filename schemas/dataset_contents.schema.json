@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:heat-adaptation:dataset-contents",
+  "title": "Combined dataset contents and provenance",
+  "description": "Completion record listing exact review versions, a common recorded extraction workflow, clean-data counts, and fingerprints.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "created_at",
+    "configuration",
+    "review_scope",
+    "workflow",
+    "workflow_sha256",
+    "plans",
+    "dataset",
+    "assembly_code_files"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "dataset_id": {
+      "type": "string",
+      "pattern": "^dataset_[0-9]+$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(?:[Zz]|\\+00:00)$"
+    },
+    "configuration": {
+      "enum": [
+        "E",
+        "E+V",
+        "C"
+      ]
+    },
+    "review_scope": {
+      "const": "open_issues_only"
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "definition_version",
+        "configuration",
+        "stages"
+      ],
+      "properties": {
+        "definition_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "configuration": {
+          "enum": [
+            "E",
+            "E+V",
+            "C"
+          ]
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stage",
+              "settings",
+              "environment",
+              "code_files"
+            ],
+            "properties": {
+              "stage": {
+                "enum": [
+                  "extractor",
+                  "verifier",
+                  "collaboration"
+                ]
+              },
+              "settings": {
+                "type": "object",
+                "minProperties": 1
+              },
+              "environment": {
+                "type": "object"
+              },
+              "code_files": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "workflow_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "plans": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan_id",
+          "review_id",
+          "review_path",
+          "run_id",
+          "files"
+        ],
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "review_id": {
+            "type": "string",
+            "pattern": "^review_[0-9]+$"
+          },
+          "review_path": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reviewed_plan.json",
+              "review_record.json",
+              "review_draft.json",
+              "source_run.json"
+            ],
+            "properties": {
+              "reviewed_plan.json": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "review_record.json": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "review_draft.json": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "source_run.json": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "plan_count",
+        "action_count"
+      ],
+      "properties": {
+        "path": {
+          "const": "heat_action_dataset.json"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "plan_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "action_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "assembly_code_files": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  }
+}

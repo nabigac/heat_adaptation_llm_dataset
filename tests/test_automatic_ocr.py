@@ -166,7 +166,7 @@ def _register(project: Path, source: Path) -> dict:
     return documents.register_document(
         project, source, plan_title="Controlled OCR fixture",
         source_url="https://example.org/plan.pdf", date_accessed="2026-11-02",
-        study_set="development",
+        study_set="comparison",
     )[0]
 
 

@@ -62,7 +62,7 @@ def packet(run_record):
     config = {"name": "fictional_pilot", "agents": {key: key for key in MODELS},
               "limits": {"max_model_requests": 21, "max_document_tool_calls": 6,
                          "max_elapsed_seconds": 10, "max_estimated_tokens": 21 * 65536}}
-    return CollaborationInput("plan_0099", "data/processed/plan_0099/preparation_01/preparation.json",
+    return CollaborationInput("plan_0099", "data/prepared_plans/plan_0099/preparation_01/preparation.json",
         "fictional-source-fingerprint", 3, {"role": "user", "content": "Whole fictional plan. Plant 20 trees."},
         {key: metadata[key] for key in ("source_url", "date_accessed")}, config, profiles)
 

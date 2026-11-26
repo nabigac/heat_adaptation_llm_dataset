@@ -23,12 +23,12 @@ def valid_preparation() -> dict:
     return {
         "schema_version": 2,
         "plan_id": "plan_0001",
-        "pdf_path": "data/raw/plan_0001.pdf",
+        "pdf_path": "data/source_pdfs/plan_0001.pdf",
         "document_sha256": "a" * 64,
         "source_url": "https://example.org/heat-plan.pdf",
         "date_accessed": "2026-11-02",
         "prepared_at": "2026-11-02T10:30:00Z",
-        "pages_path": "data/processed/plan_0001/preparation_01/pages.json",
+        "pages_path": "data/prepared_plans/plan_0001/preparation_01/pages.json",
         "page_count": 3,
         "settings": {
             "ocr_enabled": False,

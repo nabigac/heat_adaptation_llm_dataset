@@ -166,8 +166,8 @@ def test_failed_reading_preserves_diagnostics_without_inventing_empty_text(proje
 
 def test_ocr_uses_saved_settings_and_frozen_original_pdf(project, active_run, recognition, monkeypatch):
     document = toolset(project, active_run)
-    original = (project / f"data/raw/{loop.PLAN_ID}.pdf").read_bytes()
-    (project / f"data/raw/{loop.PLAN_ID}.pdf").write_bytes(b"changed after startup")
+    original = (project / f"data/source_pdfs/{loop.PLAN_ID}.pdf").read_bytes()
+    (project / f"data/source_pdfs/{loop.PLAN_ID}.pdf").write_bytes(b"changed after startup")
     enable_ocr(project, enabled=False)  # Editing profiles cannot alter an active run.
     render = document_tools.render_page_image
     def frozen(pdf, number, **options):
@@ -176,7 +176,7 @@ def test_ocr_uses_saved_settings_and_frozen_original_pdf(project, active_run, re
     monkeypatch.setattr(document_tools, "render_page_image", frozen)
     result = document.run_ocr(1)
     assert result["settings"]["ocr_enabled"] is True
-    assert (project / f"data/raw/{loop.PLAN_ID}.pdf").read_bytes() == b"changed after startup"
+    assert (project / f"data/source_pdfs/{loop.PLAN_ID}.pdf").read_bytes() == b"changed after startup"
 
 
 def test_other_source_record_cannot_bind_ocr(project, active_run):
@@ -406,7 +406,7 @@ def test_real_mcp_subprocess_recognizes_image_only_page_and_saved_loop_forwards_
         ImageDraw.Draw(image).text((35, 100), expected, font=ImageFont.load_default(size=48), fill="black")
         _write_image_only_pdf(source_pdf, image)
     entry, _ = documents.register_document(project, source_pdf, plan_title="Fictional scanned plan",
-        source_url="https://example.org/scanned.pdf", date_accessed="2026-11-06", study_set="development")
+        source_url="https://example.org/scanned.pdf", date_accessed="2026-11-06", study_set="comparison")
     prep, source_path = documents.prepare_document(project, entry["plan_id"], ocr_enabled=False)
     before = sources(project)
     enable_ocr(project)
@@ -426,7 +426,7 @@ def test_real_mcp_subprocess_recognizes_image_only_page_and_saved_loop_forwards_
     scripted.hooks = [lambda body: None, check_reading]
     scripted.replies = [loop.message(calls=[call]), loop.message(agents.FINAL_READY_SIGNAL), loop.message(json.dumps(final))]
     result = asyncio.run(agents.run_extractor(project, entry["plan_id"], source_path=source_path,
-        profile_name=loop.PROFILE, purpose="development", _transport=scripted.transport))
+        profile_name=loop.PROFILE, purpose="comparison", _transport=scripted.transport))
     assert result.record["status"] == "succeeded", result.record["error"]
     assert result.persistence_error is None and len(scripted.requests) == 3
     assert storage.load_run_record(project, result.record_path) == result.record

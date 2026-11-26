@@ -1,17 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Development assessment inputs",
+  "title": "Study assessment inputs",
   "description": "Exact selected runs and frozen reference for manual CSV review. Creation records no expert judgments and calculates no metrics.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "assessment_id", "plan_id", "purpose", "created_at", "reviewers", "notes", "reference", "source", "runs", "included_attempts", "instructions"],
+  "required": ["schema_version", "assessment_id", "plan_id", "created_at", "notes", "reference", "source", "runs", "instructions"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": {"type": "integer", "const": 2},
     "assessment_id": {"type": "string", "pattern": "^assessment_[0-9]+$"},
     "plan_id": {"$ref": "#/$defs/text"},
-    "purpose": {"const": "development"},
     "created_at": {"type": "string", "format": "date-time", "pattern": "(?:[Zz]|\\+00:00)$"},
-    "reviewers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
     "notes": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/text"}]},
     "reference": {
       "type": "object", "additionalProperties": false,
@@ -34,7 +32,6 @@
       "type": "object", "additionalProperties": false, "required": ["E", "E+V", "C"],
       "properties": {"E": {"$ref": "#/$defs/run"}, "E+V": {"$ref": "#/$defs/run"}, "C": {"$ref": "#/$defs/run"}}
     },
-    "included_attempts": {"type": "null", "description": "Failure-reporting scope is pending, not a finding of zero failures."},
     "instructions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}}
   },
   "$defs": {
